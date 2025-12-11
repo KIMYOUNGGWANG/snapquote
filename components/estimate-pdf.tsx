@@ -1,16 +1,11 @@
-import { Document, Page, Text, View, StyleSheet, Font, Image } from '@react-pdf/renderer';
-
-Font.register({
-    family: 'Inter',
-    src: 'https://fonts.gstatic.com/s/inter/v12/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuLyfAZ9hjp-Ek-_EeA.ttf'
-});
+import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer';
 
 const styles = StyleSheet.create({
     page: {
         flexDirection: 'column',
         backgroundColor: '#FFFFFF',
         padding: 30,
-        fontFamily: 'Inter',
+        fontFamily: 'Helvetica',
     },
     header: {
         flexDirection: 'row',
@@ -76,7 +71,6 @@ const styles = StyleSheet.create({
     summaryText: {
         fontSize: 10,
         color: '#1E40AF',
-        fontStyle: 'italic',
     },
     table: {
         display: "flex",
@@ -197,6 +191,7 @@ interface EstimatePDFProps {
     taxRate?: number;
     business?: BusinessInfo;
     client?: ClientInfo;
+    paymentLink?: string;
 }
 
 export const EstimatePDF = ({
@@ -205,7 +200,8 @@ export const EstimatePDF = ({
     summary,
     taxRate = 13,
     business,
-    client
+    client,
+    paymentLink
 }: EstimatePDFProps) => {
     const subtotal = items.reduce((sum, item) => sum + item.total, 0);
     const taxAmount = subtotal * (taxRate / 100);
@@ -308,6 +304,15 @@ export const EstimatePDF = ({
                         <Text style={styles.grandTotalValue}>${grandTotal.toFixed(2)}</Text>
                     </View>
                 </View>
+
+                {/* Payment Link Section */}
+                {paymentLink && (
+                    <View style={{ marginTop: 20, alignItems: 'center' }}>
+                        <Text style={{ fontSize: 10, color: '#2563EB', marginBottom: 5 }}>Pay Online:</Text>
+                        {/* QR Code would go here if we had an image */}
+                        <Text style={{ fontSize: 9, textDecoration: 'underline' }}>{paymentLink}</Text>
+                    </View>
+                )}
 
                 {/* Footer with Legal Disclaimer */}
                 <View style={styles.footer}>

@@ -1,7 +1,4 @@
-/**
- * Local Storage Service for Estimates
- * Manages estimates in browser localStorage without requiring authentication
- */
+import { saveEstimateToDB, getEstimatesFromDB, initDB } from "./db"
 
 export interface EstimateItem {
     description: string
@@ -21,163 +18,88 @@ export interface LocalEstimate {
     taxAmount: number
     totalAmount: number
     createdAt: string
+    synced?: boolean
 }
 
-const STORAGE_KEYS = {
-    ESTIMATES: 'snapquote_estimates',
-    COUNTER: 'snapquote_estimate_counter',
-    PROFILE: 'snapquote_profile'
-}
-
-/**
- * Generate next estimate number in format EST-YYYY-NNN
- */
-export function generateEstimateNumber(): string {
-    const year = new Date().getFullYear()
-    const count = getEstimateCounter()
-    const newCount = count + 1
-
-    // Save incremented counter
-    localStorage.setItem(STORAGE_KEYS.COUNTER, JSON.stringify(newCount))
-
-    return `EST-${year}-${String(newCount).padStart(3, '0')}`
-}
-
-/**
- * Get current estimate counter
- */
-function getEstimateCounter(): number {
-    try {
-        const counter = localStorage.getItem(STORAGE_KEYS.COUNTER)
-        return counter ? JSON.parse(counter) : 0
-    } catch {
-        return 0
-    }
-}
-
-/**
- * Save estimate to localStorage
- */
-export function saveEstimate(estimate: LocalEstimate): void {
-    try {
-        const estimates = getEstimates()
-
-        // Check if estimate already exists (update case)
-        const existingIndex = estimates.findIndex(e => e.id === estimate.id)
-
-        if (existingIndex >= 0) {
-            estimates[existingIndex] = estimate
-        } else {
-            estimates.push(estimate)
-        }
-
-        localStorage.setItem(STORAGE_KEYS.ESTIMATES, JSON.stringify(estimates))
-    } catch (error) {
-        console.error('Failed to save estimate:', error)
-        throw new Error('Storage quota exceeded. Please delete old estimates.')
-    }
-}
-
-/**
- * Get all estimates from localStorage
- */
-export function getEstimates(): LocalEstimate[] {
-    try {
-        const data = localStorage.getItem(STORAGE_KEYS.ESTIMATES)
-        return data ? JSON.parse(data) : []
-    } catch (error) {
-        console.error('Failed to load estimates:', error)
-        return []
-    }
-}
-
-/**
- * Get single estimate by ID
- */
-export function getEstimate(id: string): LocalEstimate | null {
-    const estimates = getEstimates()
-    return estimates.find(e => e.id === id) || null
-}
-
-/**
- * Delete estimate by ID
- */
-export function deleteEstimate(id: string): void {
-    try {
-        const estimates = getEstimates()
-        const filtered = estimates.filter(e => e.id !== id)
-        localStorage.setItem(STORAGE_KEYS.ESTIMATES, JSON.stringify(filtered))
-    } catch (error) {
-        console.error('Failed to delete estimate:', error)
-    }
-}
-
-/**
- * Clear all estimates (use with caution!)
- */
-export function clearAllEstimates(): void {
-    localStorage.removeItem(STORAGE_KEYS.ESTIMATES)
-    localStorage.removeItem(STORAGE_KEYS.COUNTER)
-}
-
-/**
- * Get storage usage stats
- */
-export function getStorageStats(): { estimateCount: number; storageUsed: string } {
-    const estimates = getEstimates()
-    const dataString = localStorage.getItem(STORAGE_KEYS.ESTIMATES) || ''
-    const bytes = new Blob([dataString]).size
-    const kb = (bytes / 1024).toFixed(2)
-
-    return {
-        estimateCount: estimates.length,
-        storageUsed: `${kb} KB`
-    }
-}
-
-/**
- * Check if localStorage is available
- */
-export function isLocalStorageAvailable(): boolean {
-    try {
-        const test = '__storage_test__'
-        localStorage.setItem(test, test)
-        localStorage.removeItem(test)
-        return true
-    } catch {
-        return false
-    }
-}
-
-/**
- * Save business profile to localStorage
- */
 export interface BusinessInfo {
-    business_name?: string
-    phone?: string
-    email?: string
-    address?: string
-    license_number?: string
-    tax_rate?: number
+    business_name: string
+    phone: string
+    email: string
+    address: string
+    license_number: string
     logo_url?: string
+    tax_rate?: number
 }
 
-export function saveProfile(profile: BusinessInfo): void {
+// Estimates (IndexedDB)
+export async function saveEstimate(estimate: LocalEstimate) {
+    return saveEstimateToDB(estimate)
+}
+
+export async function getEstimates(): Promise<LocalEstimate[]> {
+    const estimates = await getEstimatesFromDB()
+    // Sort by date desc
+    return estimates.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+}
+
+export async function deleteEstimate(id: string) {
+    const db = await initDB()
+    return db.delete('estimates', id)
+}
+
+export function generateEstimateNumber(): string {
+    const prefix = "EST"
+    const date = new Date()
+    const year = date.getFullYear().toString().slice(-2)
+    const month = (date.getMonth() + 1).toString().padStart(2, "0")
+    const random = Math.floor(Math.random() * 1000).toString().padStart(3, "0")
+    return `${prefix}-${year}${month}-${random}`
+}
+
+// Business Profile (LocalStorage - simpler for settings)
+export function saveProfile(profile: BusinessInfo) {
+    if (typeof window === 'undefined') return
+    localStorage.setItem("snapquote_business_profile", JSON.stringify(profile))
+}
+
+export function getProfile(): BusinessInfo | undefined {
+    if (typeof window === 'undefined') return undefined
+    const stored = localStorage.getItem("snapquote_business_profile")
+    if (!stored) return undefined
     try {
-        localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile))
-    } catch (error) {
-        console.error('Failed to save profile:', error)
+        return JSON.parse(stored)
+    } catch (e) {
+        return undefined
     }
 }
 
-/**
- * Get business profile from localStorage
- */
-export function getProfile(): BusinessInfo | null {
+// Storage stats (synchronous for profile page)
+export function getStorageStats() {
+    if (typeof window === 'undefined') return { estimateCount: 0, storageUsed: "0 KB" }
+
+    // Get estimates from localStorage fallback (for stats display)
+    const estimatesRaw = localStorage.getItem("snapquote_estimates") || "[]"
+    const profileRaw = localStorage.getItem("snapquote_business_profile") || "{}"
+
+    let estimateCount = 0
     try {
-        const data = localStorage.getItem(STORAGE_KEYS.PROFILE)
-        return data ? JSON.parse(data) : null
-    } catch {
-        return null
-    }
+        estimateCount = JSON.parse(estimatesRaw).length
+    } catch (e) { }
+
+    const totalBytes = estimatesRaw.length + profileRaw.length
+    const storageUsed = totalBytes > 1024
+        ? `${(totalBytes / 1024).toFixed(1)} KB`
+        : `${totalBytes} B`
+
+    return { estimateCount, storageUsed }
+}
+
+// Clear all data
+export function clearAllEstimates() {
+    if (typeof window === 'undefined') return
+    localStorage.removeItem("snapquote_estimates")
+    localStorage.removeItem("snapquote_business_profile")
+    localStorage.removeItem("snapquote_terms_accepted")
+    // Also clear IndexedDB
+    indexedDB.deleteDatabase('snapquote-db')
 }

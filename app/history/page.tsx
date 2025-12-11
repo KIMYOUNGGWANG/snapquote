@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation"
 import { getEstimates, deleteEstimate, type LocalEstimate, type EstimateItem } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
 import { ConfirmDialog } from "@/components/confirm-dialog"
+import { PDFPreviewModal } from "@/components/pdf-preview-modal"
 
 const PDFDownloadLink = dynamic(
     () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
@@ -26,12 +27,16 @@ export default function HistoryPage() {
     const [expandedId, setExpandedId] = useState<string | null>(null)
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
     const [estimateToDelete, setEstimateToDelete] = useState<string | null>(null)
+    const [previewEstimate, setPreviewEstimate] = useState<LocalEstimate | null>(null)
 
     useEffect(() => {
-        // Load estimates from localStorage
-        const localEstimates = getEstimates()
-        setEstimates(localEstimates)
-        setLoading(false)
+        // Load estimates from IndexedDB
+        const loadEstimates = async () => {
+            const localEstimates = await getEstimates()
+            setEstimates(localEstimates)
+            setLoading(false)
+        }
+        loadEstimates()
     }, [])
 
     const toggleExpand = (estimateId: string) => {
@@ -64,10 +69,10 @@ export default function HistoryPage() {
         setDeleteDialogOpen(true)
     }
 
-    const handleConfirmDelete = () => {
+    const handleConfirmDelete = async () => {
         if (estimateToDelete) {
-            deleteEstimate(estimateToDelete)
-            const updatedEstimates = getEstimates()
+            await deleteEstimate(estimateToDelete)
+            const updatedEstimates = await getEstimates()
             setEstimates(updatedEstimates)
             toast(`✅ Estimate deleted (${updatedEstimates.length} remaining)`, "success")
             setEstimateToDelete(null)
@@ -145,12 +150,11 @@ export default function HistoryPage() {
                                     </div>
                                 )}
 
-                                <div className="flex gap-2">
+                                <div className="flex flex-wrap gap-2">
                                     <Button
                                         variant="outline"
                                         size="sm"
                                         onClick={() => toggleExpand(estimate.id)}
-                                        className="flex-1"
                                     >
                                         <FileText className="h-3 w-3 mr-1" />
                                         {isExpanded ? "Hide Details" : "View Details"}
@@ -172,28 +176,37 @@ export default function HistoryPage() {
                                         Delete
                                     </Button>
                                     {items.length > 0 && (
-                                        <PDFDownloadLink
-                                            document={
-                                                <EstimatePDF
-                                                    items={items}
-                                                    total={estimate.totalAmount}
-                                                    summary={estimate.summary_note}
-                                                    taxRate={estimate.taxRate || 0}
-                                                    client={{
-                                                        name: estimate.clientName,
-                                                        address: estimate.clientAddress
-                                                    }}
-                                                />
-                                            }
-                                            fileName={`${estimate.estimateNumber || 'estimate'}.pdf`}
-                                        >
-                                            {({ loading }) => (
-                                                <Button variant="secondary" size="sm" disabled={loading}>
-                                                    <Download className="h-3 w-3 mr-1" />
-                                                    PDF
-                                                </Button>
-                                            )}
-                                        </PDFDownloadLink>
+                                        <>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => setPreviewEstimate(estimate)}
+                                            >
+                                                👁️
+                                            </Button>
+                                            <PDFDownloadLink
+                                                document={
+                                                    <EstimatePDF
+                                                        items={items}
+                                                        total={estimate.totalAmount}
+                                                        summary={estimate.summary_note}
+                                                        taxRate={estimate.taxRate || 0}
+                                                        client={{
+                                                            name: estimate.clientName,
+                                                            address: estimate.clientAddress
+                                                        }}
+                                                    />
+                                                }
+                                                fileName={`${estimate.estimateNumber || 'estimate'}.pdf`}
+                                            >
+                                                {({ loading }) => (
+                                                    <Button variant="secondary" size="sm" disabled={loading}>
+                                                        <Download className="h-3 w-3 mr-1" />
+                                                        PDF
+                                                    </Button>
+                                                )}
+                                            </PDFDownloadLink>
+                                        </>
                                     )}
                                 </div>
                             </CardContent>
@@ -209,6 +222,25 @@ export default function HistoryPage() {
                 title="Delete Estimate"
                 description="Are you sure you want to delete this estimate? This action cannot be undone."
             />
+
+            {previewEstimate && (
+                <PDFPreviewModal
+                    open={!!previewEstimate}
+                    onClose={() => setPreviewEstimate(null)}
+                    document={
+                        <EstimatePDF
+                            items={previewEstimate.items}
+                            total={previewEstimate.totalAmount}
+                            summary={previewEstimate.summary_note}
+                            taxRate={previewEstimate.taxRate || 0}
+                            client={{
+                                name: previewEstimate.clientName,
+                                address: previewEstimate.clientAddress
+                            }}
+                        />
+                    }
+                />
+            )}
         </div>
     )
 }

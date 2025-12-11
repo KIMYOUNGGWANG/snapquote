@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Camera, Upload, X, Loader2, Save, Share2, Download, Plus, Trash2 } from "lucide-react"
+import { Camera, Upload, X, Loader2, Save, Share2, Download, Plus, Trash2, ArrowRight, Edit2, CheckCircle2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
@@ -13,6 +13,8 @@ import { useRouter } from "next/navigation"
 import { saveEstimate, generateEstimateNumber, getProfile, saveProfile } from "@/lib/estimates-storage"
 import type { BusinessInfo } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
+import { AudioRecorder } from "@/components/audio-recorder"
+import { PDFPreviewModal } from "@/components/pdf-preview-modal"
 
 const PDFDownloadLink = dynamic(
     () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
@@ -27,61 +29,48 @@ interface EstimateItem {
     quantity: number
     unit_price: number
     total: number
+    is_value_add?: boolean
+    notes?: string
 }
-
-import { AudioRecorder } from "@/components/audio-recorder"
 
 interface Estimate {
     items: EstimateItem[]
     summary_note: string
+    warnings?: string[]
+    payment_terms?: string
+    closing_note?: string
 }
+
+type Step = "input" | "transcribing" | "verifying" | "generating" | "result"
 
 export default function NewEstimatePage() {
     const router = useRouter()
+    const [step, setStep] = useState<Step>("input")
+
+    // Data States
     const [images, setImages] = useState<File[]>([])
     const [previewUrls, setPreviewUrls] = useState<string[]>([])
-    const [notes, setNotes] = useState("")
+    const [transcribedText, setTranscribedText] = useState("")
     const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
-    const [isAnalyzing, setIsAnalyzing] = useState(false)
     const [estimate, setEstimate] = useState<Estimate | null>(null)
+
+    // UI States
     const [isSaving, setIsSaving] = useState(false)
     const [isSharing, setIsSharing] = useState(false)
-    const [taxRate, setTaxRate] = useState(13) // Default 13% HST
+    const [taxRate, setTaxRate] = useState(13)
     const [clientName, setClientName] = useState("")
     const [clientAddress, setClientAddress] = useState("")
     const [businessProfile, setBusinessProfile] = useState<BusinessInfo | undefined>(undefined)
+    const [isPreviewOpen, setIsPreviewOpen] = useState(false)
+
     const fileInputRef = useRef<HTMLInputElement>(null)
 
-    // Load duplicated estimate from localStorage if available
-    useEffect(() => {
-        const duplicateData = localStorage.getItem('duplicate_estimate')
-        if (duplicateData) {
-            try {
-                const data = JSON.parse(duplicateData)
-                setEstimate({
-                    items: data.items,
-                    summary_note: data.summary_note
-                })
-                setClientName(data.clientName || "")
-                setClientAddress(data.clientAddress || "")
-                setTaxRate(data.taxRate || 13)
-                // Clear the stored data
-                localStorage.removeItem('duplicate_estimate')
-            } catch (error) {
-                console.error("Failed to load duplicate data:", error)
-            }
-        }
-    }, [])
-
-    // Load business profile from localStorage
+    // Load business profile
     useEffect(() => {
         const profile = getProfile()
         if (profile) {
             setBusinessProfile(profile)
-            // Set default tax rate from profile
-            if (profile.tax_rate) {
-                setTaxRate(profile.tax_rate)
-            }
+            if (profile.tax_rate) setTaxRate(profile.tax_rate)
         }
     }, [])
 
@@ -91,7 +80,6 @@ export default function NewEstimatePage() {
             setImages(prev => [...prev, ...files])
             const newUrls = files.map(file => URL.createObjectURL(file))
             setPreviewUrls(prev => [...prev, ...newUrls])
-            setEstimate(null) // Reset estimate on new image
         }
     }
 
@@ -99,67 +87,90 @@ export default function NewEstimatePage() {
         setImages(prev => prev.filter((_, i) => i !== index))
         setPreviewUrls(prev => {
             const newUrls = prev.filter((_, i) => i !== index)
-            URL.revokeObjectURL(prev[index]) // Cleanup
+            URL.revokeObjectURL(prev[index])
             return newUrls
         })
-        setEstimate(null)
-        if (fileInputRef.current) {
-            fileInputRef.current.value = ""
+        if (fileInputRef.current) fileInputRef.current.value = ""
+    }
+
+    const handleAudioCaptured = async (blob: Blob) => {
+        setAudioBlob(blob)
+        setStep("transcribing")
+
+        try {
+            const formData = new FormData()
+            formData.append("file", blob, "recording.webm")
+
+            const response = await fetch("/api/transcribe", {
+                method: "POST",
+                body: formData,
+            })
+
+            if (!response.ok) throw new Error("Transcription failed")
+
+            const data = await response.json()
+            setTranscribedText(data.text)
+            setStep("verifying")
+        } catch (error) {
+            console.error(error)
+            toast("Transcription failed. Please try again or type manually.", "error")
+            setStep("verifying") // Go to verify anyway so user can type
         }
     }
 
-    const convertToBase64 = (file: File): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader()
-            reader.readAsDataURL(file)
-            reader.onload = () => resolve(reader.result as string)
-            reader.onerror = (error) => reject(error)
-        })
-    }
-
-    const handleGenerate = async () => {
-        if (images.length === 0) return
-        setIsAnalyzing(true)
+    const handleGenerateEstimate = async () => {
+        setStep("generating")
         try {
-            const base64Images = await Promise.all(images.map(img => convertToBase64(img)))
-            let base64Audio = null
-
-            if (audioBlob) {
-                base64Audio = await convertToBase64(audioBlob as File) // Blob fits File interface for FileReader
+            const convertToBase64 = (file: File): Promise<string> => {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader()
+                    reader.readAsDataURL(file)
+                    reader.onload = () => resolve(reader.result as string)
+                    reader.onerror = (error) => reject(error)
+                })
             }
+
+            const base64Images = await Promise.all(images.map(img => convertToBase64(img)))
 
             const response = await fetch("/api/generate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ images: base64Images, audio: base64Audio, notes }),
+                body: JSON.stringify({
+                    images: base64Images,
+                    notes: transcribedText,
+                    userProfile: businessProfile ? {
+                        city: businessProfile.address?.split(',')[0] || "Toronto",
+                        country: "Canada",
+                        taxRate: businessProfile.tax_rate || 13,
+                        businessName: businessProfile.business_name || "Our Company"
+                    } : undefined
+                }),
             })
 
             if (!response.ok) throw new Error("Failed to generate")
 
             const data = await response.json()
             setEstimate(data)
+            setStep("result")
         } catch (error) {
             console.error(error)
             alert("Failed to generate estimate. Please try again.")
-        } finally {
-            setIsAnalyzing(false)
+            setStep("verifying")
         }
     }
 
-    const handleItemChange = (index: number, field: keyof EstimateItem, value: string | number) => {
+    const handleItemChange = (index: number, field: keyof EstimateItem, value: string | number | boolean) => {
         if (!estimate) return
-
         const newItems = [...estimate.items]
         const item = { ...newItems[index] }
-
-        if (field === "description") {
-            item.description = value as string
+        if (field === "description" || field === "notes") {
+            (item as any)[field] = value as string
+        } else if (field === "is_value_add") {
+            item.is_value_add = value as boolean
         } else {
-            item[field] = Number(value)
-            // Recalculate total for this item
+            (item as any)[field] = Number(value)
             item.total = item.quantity * item.unit_price
         }
-
         newItems[index] = item
         setEstimate({ ...estimate, items: newItems })
     }
@@ -171,12 +182,7 @@ export default function NewEstimatePage() {
 
     const handleAddItem = () => {
         if (!estimate) return
-        const newItem: EstimateItem = {
-            description: "",
-            quantity: 1,
-            unit_price: 0,
-            total: 0
-        }
+        const newItem: EstimateItem = { description: "", quantity: 1, unit_price: 0, total: 0 }
         setEstimate({ ...estimate, items: [...estimate.items, newItem] })
     }
 
@@ -186,20 +192,14 @@ export default function NewEstimatePage() {
         setEstimate({ ...estimate, items: newItems })
     }
 
-    const handleSave = () => {
+    const handleSave = async () => {
         if (!estimate) return
         setIsSaving(true)
-
         try {
-            // Calculate totals
             const subtotal = estimate.items.reduce((sum, item) => sum + item.total, 0)
             const taxAmount = subtotal * (taxRate / 100)
             const totalAmount = subtotal + taxAmount
-
-            // Generate estimate number
             const estimateNumber = generateEstimateNumber()
-
-            // Save to localStorage
             const localEstimate = {
                 id: crypto.randomUUID(),
                 estimateNumber,
@@ -212,15 +212,9 @@ export default function NewEstimatePage() {
                 totalAmount,
                 createdAt: new Date().toISOString()
             }
-
-            saveEstimate(localEstimate)
+            await saveEstimate(localEstimate)
             toast("✅ Estimate saved successfully!", "success")
-
-            // Navigate after brief delay
-            setTimeout(() => {
-                router.push("/history")
-            }, 500)
-
+            setTimeout(() => router.push("/history"), 500)
         } catch (error) {
             console.error(error)
             toast("Failed to save. Storage might be full.", "error")
@@ -232,12 +226,8 @@ export default function NewEstimatePage() {
     const handleShare = async () => {
         if (!estimate) return
         setIsSharing(true)
-
         try {
-            // Dynamically import pdf function from react-pdf/renderer
             const { pdf } = await import("@react-pdf/renderer")
-
-            // Generate PDF blob
             const pdfDoc = (
                 <EstimatePDF
                     items={estimate.items}
@@ -250,8 +240,6 @@ export default function NewEstimatePage() {
             )
             const blob = await pdf(pdfDoc).toBlob()
             const file = new File([blob], "estimate.pdf", { type: "application/pdf" })
-
-            // Check if Web Share API is available and supports file sharing
             if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
                 await navigator.share({
                     title: "Estimate",
@@ -259,7 +247,6 @@ export default function NewEstimatePage() {
                     files: [file],
                 })
             } else {
-                // Fallback: Download the file instead
                 const url = URL.createObjectURL(blob)
                 const a = document.createElement("a")
                 a.href = url
@@ -270,7 +257,6 @@ export default function NewEstimatePage() {
             }
         } catch (error) {
             console.error("Share failed:", error)
-            // User cancelled share or error occurred
         } finally {
             setIsSharing(false)
         }
@@ -278,109 +264,187 @@ export default function NewEstimatePage() {
 
     return (
         <div className="max-w-md mx-auto space-y-6 pb-20">
-            <CardHeader className="px-0">
-                <CardTitle className="text-2xl font-bold">New Estimate</CardTitle>
+            <CardHeader className="px-0 pb-2">
+                <CardTitle className="text-2xl font-bold">
+                    {step === "input" && "New Estimate"}
+                    {step === "transcribing" && "Processing Audio..."}
+                    {step === "verifying" && "Verify Details"}
+                    {step === "generating" && "Creating Estimate..."}
+                    {step === "result" && "Estimate Ready"}
+                </CardTitle>
             </CardHeader>
 
-            <div className="space-y-4">
-                {/* Image Upload Area */}
-                {/* Image Upload Area */}
-                <div className="space-y-4">
-                    <div
-                        className="border-2 border-dashed border-muted-foreground/25 rounded-xl p-6 flex flex-col items-center justify-center min-h-[150px] bg-muted/50 cursor-pointer hover:bg-muted/70 transition-colors"
-                        onClick={() => fileInputRef.current?.click()}
-                    >
-                        <Camera className="h-8 w-8 text-muted-foreground mb-2" />
-                        <p className="text-muted-foreground text-center font-medium">
-                            Tap to add photos
+            {/* STEP 1: INPUT */}
+            {step === "input" && (
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                    {/* Voice Input (Primary) */}
+                    <div className="flex flex-col items-center justify-center space-y-4 py-4">
+                        <AudioRecorder
+                            onAudioCaptured={handleAudioCaptured}
+                            onAudioRemoved={() => setAudioBlob(null)}
+                        />
+                        <p className="text-sm text-muted-foreground text-center">
+                            Tap to record job details.<br />
+                            "Replace kitchen faucet, $80 labor"
                         </p>
-                        <input
-                            type="file"
-                            accept="image/*"
-                            multiple
-                            className="hidden"
-                            ref={fileInputRef}
-                            onChange={handleImageSelect}
-                            capture="environment"
+                    </div>
+
+                    <div className="relative">
+                        <div className="absolute inset-0 flex items-center">
+                            <span className="w-full border-t" />
+                        </div>
+                        <div className="relative flex justify-center text-xs uppercase">
+                            <span className="bg-background px-2 text-muted-foreground">Or add photos</span>
+                        </div>
+                    </div>
+
+                    {/* Photo Input (Secondary) */}
+                    <div className="space-y-4">
+                        <div
+                            className="border-2 border-dashed border-muted-foreground/25 rounded-xl p-4 flex flex-col items-center justify-center bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors"
+                            onClick={() => fileInputRef.current?.click()}
+                        >
+                            <Camera className="h-6 w-6 text-muted-foreground mb-2" />
+                            <p className="text-sm text-muted-foreground font-medium">Add Photos</p>
+                            <input
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                className="hidden"
+                                ref={fileInputRef}
+                                onChange={handleImageSelect}
+                            />
+                        </div>
+
+                        {previewUrls.length > 0 && (
+                            <div className="grid grid-cols-3 gap-2">
+                                {previewUrls.map((url, index) => (
+                                    <div key={index} className="relative aspect-square">
+                                        <Image
+                                            src={url}
+                                            alt={`Site photo ${index + 1}`}
+                                            fill
+                                            className="object-cover rounded-lg"
+                                        />
+                                        <Button
+                                            variant="destructive"
+                                            size="icon"
+                                            className="absolute top-1 right-1 h-5 w-5 rounded-full"
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                handleRemoveImage(index)
+                                            }}
+                                        >
+                                            <X className="h-3 w-3" />
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Manual Entry Button */}
+                    <Button
+                        variant="ghost"
+                        className="w-full text-muted-foreground"
+                        onClick={() => setStep("verifying")}
+                    >
+                        Skip to manual entry
+                    </Button>
+                </div>
+            )}
+
+            {/* STEP 2: TRANSCRIBING */}
+            {step === "transcribing" && (
+                <div className="flex flex-col items-center justify-center py-12 space-y-4 animate-in fade-in">
+                    <Loader2 className="h-12 w-12 animate-spin text-primary" />
+                    <p className="text-lg font-medium">Transcribing your voice...</p>
+                </div>
+            )}
+
+            {/* STEP 3: VERIFYING */}
+            {step === "verifying" && (
+                <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+                    <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                            <label className="text-sm font-medium">Job Description</label>
+                            <span className="text-xs text-muted-foreground">Edit if needed</span>
+                        </div>
+                        <Textarea
+                            value={transcribedText}
+                            onChange={(e) => setTranscribedText(e.target.value)}
+                            className="min-h-[150px] text-lg p-4 leading-relaxed"
+                            placeholder="Describe the job here..."
                         />
                     </div>
 
-                    {/* Image Previews */}
                     {previewUrls.length > 0 && (
-                        <div className="grid grid-cols-2 gap-2">
-                            {previewUrls.map((url, index) => (
-                                <div key={index} className="relative aspect-square">
-                                    <Image
-                                        src={url}
-                                        alt={`Site photo ${index + 1}`}
-                                        fill
-                                        className="object-cover rounded-lg"
-                                    />
-                                    <Button
-                                        variant="destructive"
-                                        size="icon"
-                                        className="absolute top-1 right-1 h-6 w-6 rounded-full"
-                                        onClick={(e) => {
-                                            e.stopPropagation()
-                                            handleRemoveImage(index)
-                                        }}
-                                    >
-                                        <X className="h-3 w-3" />
-                                    </Button>
-                                </div>
-                            ))}
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium">Attached Photos ({previewUrls.length})</label>
+                            <div className="flex gap-2 overflow-x-auto pb-2">
+                                {previewUrls.map((url, index) => (
+                                    <div key={index} className="relative h-16 w-16 flex-shrink-0">
+                                        <Image src={url} alt="" fill className="object-cover rounded-md" />
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     )}
+
+                    <Button
+                        size="lg"
+                        className="w-full h-14 text-lg font-semibold"
+                        onClick={handleGenerateEstimate}
+                        disabled={!transcribedText.trim() && images.length === 0}
+                    >
+                        Generate Estimate
+                        <ArrowRight className="ml-2 h-5 w-5" />
+                    </Button>
+
+                    <Button
+                        variant="ghost"
+                        className="w-full"
+                        onClick={() => setStep("input")}
+                    >
+                        Back to Recording
+                    </Button>
                 </div>
+            )}
 
-                {/* Notes Area */}
-                <div className="space-y-2">
-                    <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                        Notes (Optional)
-                    </label>
-                    <Textarea
-                        placeholder="Describe the issue (e.g., 'Leaking pipe under sink, needs copper replacement')"
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
-                        className="min-h-[100px] text-base"
-                    />
+            {/* STEP 4: GENERATING */}
+            {step === "generating" && (
+                <div className="flex flex-col items-center justify-center py-12 space-y-4 animate-in fade-in">
+                    <Loader2 className="h-12 w-12 animate-spin text-primary" />
+                    <p className="text-lg font-medium">AI is drafting your estimate...</p>
+                    <p className="text-sm text-muted-foreground">Applying professional terminology</p>
                 </div>
+            )}
 
-                {/* Audio Recorder */}
-                <div className="space-y-2">
-                    <label className="text-sm font-medium leading-none">
-                        Voice Memo (Optional)
-                    </label>
-                    <AudioRecorder
-                        onAudioCaptured={(blob) => setAudioBlob(blob)}
-                        onAudioRemoved={() => setAudioBlob(null)}
-                    />
-                </div>
-
-                {/* Action Button */}
-                <Button
-                    className="w-full text-lg h-12 font-semibold"
-                    size="lg"
-                    disabled={images.length === 0 || isAnalyzing}
-                    onClick={handleGenerate}
-                >
-                    {isAnalyzing ? (
-                        <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Analyzing...
-                        </>
-                    ) : (
-                        "Generate Estimate"
-                    )}
-                </Button>
-
-                {/* Estimate Result */}
-                {estimate && (
-                    <Card className="mt-8 animate-in fade-in slide-in-from-bottom-4">
-                        <CardHeader>
-                            <CardTitle>Estimate Summary</CardTitle>
+            {/* STEP 5: RESULT */}
+            {step === "result" && estimate && (
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-xl font-bold">Estimate Draft</CardTitle>
+                            <div className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium flex items-center gap-1">
+                                <CheckCircle2 className="h-3 w-3" />
+                                AI Generated
+                            </div>
                         </CardHeader>
                         <CardContent className="space-y-4">
+                            {/* Warnings */}
+                            {estimate.warnings && estimate.warnings.length > 0 && (
+                                <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                    <p className="text-yellow-800 text-sm font-medium flex items-center gap-2">
+                                        ⚠️ Warnings
+                                    </p>
+                                    <ul className="mt-1 text-yellow-700 text-sm list-disc list-inside">
+                                        {estimate.warnings.map((warning: string, i: number) => (
+                                            <li key={i}>{warning}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
                             {/* Client Info */}
                             <div className="grid grid-cols-1 gap-3 p-4 bg-muted/50 rounded-lg">
                                 <div>
@@ -389,7 +453,7 @@ export default function NewEstimatePage() {
                                         value={clientName}
                                         onChange={(e) => setClientName(e.target.value)}
                                         placeholder="Enter client name"
-                                        className="mt-1"
+                                        className="mt-1 bg-background"
                                     />
                                 </div>
                                 <div>
@@ -398,7 +462,7 @@ export default function NewEstimatePage() {
                                         value={clientAddress}
                                         onChange={(e) => setClientAddress(e.target.value)}
                                         placeholder="Enter client address"
-                                        className="mt-1"
+                                        className="mt-1 bg-background"
                                     />
                                 </div>
                             </div>
@@ -413,50 +477,60 @@ export default function NewEstimatePage() {
                             </div>
 
                             <div className="space-y-4">
-                                {estimate.items.map((item, index) => (
-                                    <div key={index} className="flex flex-col gap-2 py-3 border-b last:border-0">
-                                        <div className="flex items-start gap-2">
-                                            <Input
-                                                value={item.description}
-                                                onChange={(e) => handleItemChange(index, "description", e.target.value)}
-                                                className="font-medium border-0 px-0 h-auto focus-visible:ring-0 flex-1"
-                                                placeholder="Item Description"
-                                            />
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-6 w-6 text-destructive hover:text-destructive"
-                                                onClick={() => handleDeleteItem(index)}
-                                            >
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
-                                        </div>
-                                        <div className="flex gap-2 items-center">
-                                            <div className="flex-1">
-                                                <label className="text-[10px] text-muted-foreground">Qty</label>
+                                {estimate.items.map((item, index) => {
+                                    const isFree = item.unit_price === 0
+                                    return (
+                                        <div key={index} className={`flex flex-col gap-2 py-3 border-b last:border-0 ${isFree ? 'bg-green-50 rounded-lg px-3 -mx-3' : ''}`}>
+                                            <div className="flex items-start gap-2">
+                                                {isFree && (
+                                                    <span className="px-2 py-0.5 bg-green-500 text-white text-xs rounded-full shrink-0">
+                                                        FREE
+                                                    </span>
+                                                )}
                                                 <Input
-                                                    type="number"
-                                                    value={item.quantity}
-                                                    onChange={(e) => handleItemChange(index, "quantity", e.target.value)}
-                                                    className="h-8"
+                                                    value={item.description}
+                                                    onChange={(e) => handleItemChange(index, "description", e.target.value)}
+                                                    className="font-medium border px-2 h-auto focus-visible:ring-1 flex-1 bg-white text-gray-900"
+                                                    placeholder="Item Description"
                                                 />
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-6 w-6 text-destructive hover:text-destructive"
+                                                    onClick={() => handleDeleteItem(index)}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
                                             </div>
-                                            <div className="flex-1">
-                                                <label className="text-[10px] text-muted-foreground">Price ($)</label>
-                                                <Input
-                                                    type="number"
-                                                    value={item.unit_price}
-                                                    onChange={(e) => handleItemChange(index, "unit_price", e.target.value)}
-                                                    className="h-8"
-                                                />
-                                            </div>
-                                            <div className="flex-1 text-right">
-                                                <label className="text-[10px] text-muted-foreground">Total</label>
-                                                <p className="font-bold py-1">${item.total.toFixed(2)}</p>
+                                            <div className="flex gap-2 items-center">
+                                                <div className="flex-1">
+                                                    <label className="text-[10px] text-muted-foreground">Qty</label>
+                                                    <Input
+                                                        type="number"
+                                                        value={item.quantity}
+                                                        onChange={(e) => handleItemChange(index, "quantity", e.target.value)}
+                                                        className="h-8 text-gray-900 bg-white border"
+                                                    />
+                                                </div>
+                                                <div className="flex-1">
+                                                    <label className="text-[10px] text-muted-foreground">Price ($)</label>
+                                                    <Input
+                                                        type="number"
+                                                        value={item.unit_price}
+                                                        onChange={(e) => handleItemChange(index, "unit_price", e.target.value)}
+                                                        className="h-8 text-gray-900 bg-white border"
+                                                    />
+                                                </div>
+                                                <div className="flex-1 text-right">
+                                                    <label className="text-[10px] text-muted-foreground">Total</label>
+                                                    <p className={`font-bold py-1 ${isFree ? 'text-green-600' : ''}`}>
+                                                        {isFree ? 'FREE' : `$${item.total.toFixed(2)}`}
+                                                    </p>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    )
+                                })}
                             </div>
 
                             <Button
@@ -495,13 +569,19 @@ export default function NewEstimatePage() {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-3 gap-2 mt-4">
+                            <div className="grid grid-cols-4 gap-2 mt-4">
                                 <Button
                                     onClick={handleSave}
                                     disabled={isSaving}
                                 >
                                     {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
                                     Save
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setIsPreviewOpen(true)}
+                                >
+                                    👁️ 미리보기
                                 </Button>
                                 <PDFDownloadLink
                                     document={
@@ -532,10 +612,33 @@ export default function NewEstimatePage() {
                                     Share
                                 </Button>
                             </div>
+
+                            <PDFPreviewModal
+                                open={isPreviewOpen}
+                                onClose={() => setIsPreviewOpen(false)}
+                                document={
+                                    <EstimatePDF
+                                        items={estimate.items}
+                                        total={estimate.items.reduce((sum, item) => sum + item.total, 0)}
+                                        summary={estimate.summary_note}
+                                        taxRate={taxRate}
+                                        client={{ name: clientName, address: clientAddress }}
+                                        business={businessProfile ?? undefined}
+                                    />
+                                }
+                            />
                         </CardContent>
                     </Card>
-                )}
-            </div>
+
+                    <Button
+                        variant="ghost"
+                        className="w-full"
+                        onClick={() => setStep("verifying")}
+                    >
+                        Back to Edit
+                    </Button>
+                </div>
+            )}
         </div>
     )
 }

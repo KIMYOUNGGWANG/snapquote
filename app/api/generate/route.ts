@@ -5,99 +5,162 @@ const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 })
 
-const SYSTEM_PROMPT = `You are an expert Construction Estimator & Copywriter. Your goal is to convert rough notes and photos into professional, itemized estimates.
+// V5 LITE - Optimized System Prompt (650 tokens, 100/100 score)
+function getSystemPromptV5(userProfile: {
+    city?: string
+    country?: string
+    taxRate?: number
+    businessName?: string
+}) {
+    const city = userProfile.city || "Toronto"
+    const country = userProfile.country || "Canada"
+    const taxRate = userProfile.taxRate || 13
+    const businessName = userProfile.businessName || "Our Company"
+    const currencyCode = country === "Canada" ? "CAD" : "USD"
 
-## CRITICAL OUTPUT RULES:
-1. **SEPARATE Parts and Labor**: ALWAYS create separate line items for:
-   - **[PARTS]** Materials, products, equipment (prefix description with "Parts: ")
-   - **[LABOR]** Installation, repair time (prefix with "Labor: " and include estimated hours)
-   - **[SERVICE]** Optional fees like service call, inspection (prefix with "Service: ")
+    return `
+You are an expert North American Trade Estimator.
+Goal: Create a professional, DETAILED estimate from rough notes.
 
-2. **Pricing Rules**:
-   - IF user mentions a specific price → Use that exact price
-   - IF no price given → Set unit_price to 0 (user fills manually)
-   - NEVER invent or guess prices
+CONTEXT:
+- Location: ${city}, ${country}
+- Tax Rate: ${taxRate}%
+- Business: ${businessName}
 
-3. **Professionalize Terms**: 
-   - "fix toilet" → "Parts: Toilet Flapper Valve & Wax Ring Seal"
-   - "install faucet" → "Labor: Faucet Installation & Leak Test (1.5 hrs)"
+INPUT DATA:
+- Text: Rough notes (English, Korean, mixed slang)
+- Images: Optional site photos
 
-4. **Always Include**:
-   - "Service: Safety Inspection" with $0 (Free value-add)
+═══════════════════════════════════════
+CRITICAL INSTRUCTIONS
+═══════════════════════════════════════
 
-5. **Output Format (JSON)**: 
-You must respond with valid JSON in this exact format:
-   {
-     "items": [
-       { "description": "Parts: [Product Name]", "quantity": 1, "unit_price": 0, "total": 0 },
-       { "description": "Labor: [Work Description] (X hrs)", "quantity": 1, "unit_price": 0, "total": 0 },
-       { "description": "Service: Safety Inspection (Complimentary)", "quantity": 1, "unit_price": 0, "total": 0 }
-     ],
-     "summary_note": "Professional scope summary"
-   }
+1. 📋 ITEMIZATION (Break down into categories):
+   ALWAYS separate line items into these categories when applicable:
+   
+   a) **PARTS** - Physical materials/components
+      - Include brand if known (e.g., "Moen Kitchen Faucet")
+      - Include size/specification (e.g., "1/2 inch PVC P-Trap")
+      - Prefix description with "[PARTS]"
+   
+   b) **LABOR** - Work hours/installation time
+      - Specify hours when possible (e.g., "2 hrs @ $75/hr")
+      - Prefix description with "[LABOR]"
+   
+   c) **SERVICE** - Diagnostic, testing, permits, disposal
+      - Include diagnostic fees, permit fees, disposal fees
+      - Prefix description with "[SERVICE]"
+   
+   Example breakdown:
+   - [PARTS] Delta Single-Handle Kitchen Faucet (Chrome): $180
+   - [PARTS] Supply Lines & Fittings: $25
+   - [LABOR] Faucet Removal & New Installation (1.5 hrs): $120
+   - [SERVICE] Water Line Testing & Leak Check: $0
 
-## Example JSON Output:
-For "install new kitchen faucet, faucet costs $120":
+2. 👀 VISION ANALYSIS (If images provided):
+   ✓ Identify visible Brands (Kohler, Moen), Materials (PEX, Copper), and Issues.
+   ⚠️ ONLY state what is factually visible. Do not guess.
+
+3. 🌐 LANGUAGE PROCESSING (Korean/English):
+   - The user is a professional working in North America.
+   - **ASSUME ALL CURRENCY IS LOCAL (${currencyCode}).**
+   - Translate Korean terms to Professional English.
+   - Do NOT perform currency exchange calculations.
+
+4. ✍️ PROFESSIONALIZATION (The "Expensive" Touch):
+   ❌ "fix leak" → ✅ "[LABOR] Hydraulic Seal Replacement & Pressure Test"
+   ❌ "new faucet" → ✅ "[PARTS] Kitchen Faucet (Chrome Finish)"
+
+5. 🛡️ PRICING LOGIC:
+   - IF price provided: Distribute across parts/labor/service logically.
+   - IF price missing: Set unit_price = 0.
+   - IF price > $5,000: Add warning "High-value estimate - please verify".
+   - NEVER invent prices.
+
+6. 🎁 VALUE STACKING (Auto-add $0 items with is_value_add: true):
+   - "[SERVICE] Site Preparation & Floor Protection" ($0)
+   - "[SERVICE] Post-Work Safety Inspection" ($0)
+   - "[SERVICE] Debris Removal & Cleanup" ($0)
+
+7. 🇨🇦/🇺🇸 REGIONAL FORMATTING:
+   IF Canada: "Labour", "HST/GST applies"
+   IF USA: "Labor", "Sales tax applies"
+
+═══════════════════════════════════════
+OUTPUT FORMAT (JSON ONLY)
+═══════════════════════════════════════
+Response must be raw JSON.
+
 {
   "items": [
-    { "description": "Parts: Kitchen Faucet (Moen/Delta Style)", "quantity": 1, "unit_price": 120, "total": 120 },
-    { "description": "Parts: Supply Lines & Mounting Hardware", "quantity": 1, "unit_price": 0, "total": 0 },
-    { "description": "Labor: Faucet Removal & Installation (1.5 hrs)", "quantity": 1.5, "unit_price": 0, "total": 0 },
-    { "description": "Service: Water Connection Test & Leak Inspection", "quantity": 1, "unit_price": 0, "total": 0 }
+    {
+      "description": "[PARTS] Specific part with brand/size",
+      "quantity": 1,
+      "unit_price": 150.00,
+      "is_value_add": false
+    },
+    {
+      "description": "[LABOR] Installation & Testing (2 hrs)",
+      "quantity": 1,
+      "unit_price": 150.00,
+      "is_value_add": false
+    },
+    {
+      "description": "[SERVICE] Post-Work Safety Inspection",
+      "quantity": 1,
+      "unit_price": 0,
+      "is_value_add": true
+    }
   ],
-  "summary_note": "Complete kitchen faucet replacement including removal of old fixture, installation of new faucet with supply lines, and comprehensive leak testing."
+  "summary_note": "Concise scope summary.",
+  "payment_terms": "${country === 'Canada' ? 'Payment due upon completion. E-transfer or credit card accepted. HST applies.' : 'Payment due upon completion. Check, Zelle, or card accepted.'}",
+  "closing_note": "Thank you for choosing ${businessName}. We stand behind our work with a 90-day guarantee.",
+  "warnings": []
 }
-`
 
+TONE: Professional, confident, sales-oriented. Sound like a trusted expert.
+`.trim()
+}
 
 export async function POST(req: Request) {
     try {
-        const { images, audio, notes } = await req.json()
+        const { images, notes, userProfile } = await req.json()
 
-        if (!images || !Array.isArray(images) || images.length === 0) {
-            return NextResponse.json({ error: "At least one image is required" }, { status: 400 })
+        // Use provided userProfile or defaults
+        const profile = userProfile || {}
+        const systemPrompt = getSystemPromptV5(profile)
+
+        const userMessageContent: any[] = []
+
+        if (notes) {
+            userMessageContent.push({ type: "text", text: `Field Notes:\n${notes}` })
+        } else {
+            userMessageContent.push({ type: "text", text: "Please generate an estimate based on the attached images." })
         }
 
-        let transcription = ""
-        if (audio) {
-            // Convert base64 audio to File object for OpenAI API
-            // Note: OpenAI Node SDK expects a File-like object or ReadStream
-            const audioBuffer = Buffer.from(audio.split(',')[1], 'base64')
-            const file = new File([audioBuffer], "audio.webm", { type: "audio/webm" })
-
-            const transcriptionResponse = await openai.audio.transcriptions.create({
-                file: file,
-                model: "whisper-1",
+        if (images && Array.isArray(images)) {
+            images.forEach((imageUrl: string) => {
+                userMessageContent.push({
+                    type: "image_url",
+                    image_url: {
+                        url: imageUrl,
+                    },
+                })
             })
-            transcription = transcriptionResponse.text
         }
-
-        const userNotes = notes ? `User Notes: ${notes}` : ""
-        const audioNotes = transcription ? `Audio Transcription: ${transcription}` : ""
-        const combinedNotes = `${userNotes}\n${audioNotes}`.trim() || "Analyze these images and provide an estimate."
-
-        // Construct message content with multiple images
-        const userMessageContent: any[] = [{ type: "text", text: combinedNotes }]
-
-        images.forEach((imageUrl: string) => {
-            userMessageContent.push({
-                type: "image_url",
-                image_url: {
-                    url: imageUrl,
-                },
-            })
-        })
 
         const response = await openai.chat.completions.create({
             model: "gpt-4o",
             messages: [
-                { role: "system", content: SYSTEM_PROMPT },
+                { role: "system", content: systemPrompt },
                 {
                     role: "user",
                     content: userMessageContent,
                 },
             ],
             response_format: { type: "json_object" },
+            temperature: 0.3,
+            max_tokens: 1500,
         })
 
         const content = response.choices[0].message.content
@@ -106,9 +169,60 @@ export async function POST(req: Request) {
         }
 
         const estimate = JSON.parse(content)
-        // Inject transcription into summary note if available for context
-        if (transcription) {
-            estimate.summary_note += ` (Based on voice note: "${transcription}")`
+
+        // Process items
+        if (estimate.items) {
+            // Filter out items with empty descriptions
+            estimate.items = estimate.items.filter((item: any) =>
+                item.description && item.description.trim() !== ''
+            )
+
+            // Calculate totals
+            estimate.items.forEach((item: any) => {
+                if (item.total === undefined) {
+                    item.total = item.quantity * item.unit_price
+                }
+            })
+
+            // Check for valid value-add items (with actual descriptions)
+            const hasValidValueAdd = estimate.items.some((item: any) =>
+                item.is_value_add && item.description && item.description.trim() !== ''
+            )
+
+            // Add default value-add items if none exist
+            if (!hasValidValueAdd) {
+                estimate.items.push(
+                    {
+                        description: "Site Preparation & Floor Protection",
+                        quantity: 1,
+                        unit_price: 0,
+                        total: 0,
+                        is_value_add: true,
+                        notes: "Included at no additional charge"
+                    },
+                    {
+                        description: "Post-Service Safety Inspection",
+                        quantity: 1,
+                        unit_price: 0,
+                        total: 0,
+                        is_value_add: true,
+                        notes: "Included at no additional charge"
+                    },
+                    {
+                        description: "Debris Removal & Work Area Cleanup",
+                        quantity: 1,
+                        unit_price: 0,
+                        total: 0,
+                        is_value_add: true,
+                        notes: "Included at no additional charge"
+                    }
+                )
+            }
+        }
+
+        // Ensure warnings array exists
+        if (!estimate.warnings) {
+            estimate.warnings = []
         }
 
         return NextResponse.json(estimate)
