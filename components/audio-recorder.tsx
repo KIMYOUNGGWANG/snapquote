@@ -97,7 +97,10 @@ export function AudioRecorder({ onAudioCaptured, onAudioRemoved, className }: Au
 
         } catch (error) {
             console.error("Error accessing microphone:", error)
-            alert("Microphone access denied. Please check your settings.")
+            // Use dynamic import for toast
+            import('@/components/toast').then(({ toast }) => {
+                toast("🎤 Microphone access denied. Please check your settings.", "error")
+            })
         }
     }
 

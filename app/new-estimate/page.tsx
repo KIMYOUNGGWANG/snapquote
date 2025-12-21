@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Camera, Upload, X, Loader2, Save, Share2, Download, Plus, Trash2, ArrowRight, Edit2, CheckCircle2 } from "lucide-react"
+import { Camera, Upload, X, Loader2, Save, Share2, Download, Plus, Trash2, ArrowRight, Edit2, CheckCircle2, CreditCard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
@@ -11,10 +11,13 @@ import dynamic from "next/dynamic"
 import { EstimatePDF } from "@/components/estimate-pdf"
 import { useRouter } from "next/navigation"
 import { saveEstimate, generateEstimateNumber, getProfile, saveProfile } from "@/lib/estimates-storage"
+import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI } from "@/lib/db"
 import type { BusinessInfo } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
 import { AudioRecorder } from "@/components/audio-recorder"
 import { PDFPreviewModal } from "@/components/pdf-preview-modal"
+import { EmailModal } from "@/components/email-modal"
+import { Mail } from "lucide-react"
 
 const PDFDownloadLink = dynamic(
     () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
@@ -62,17 +65,103 @@ export default function NewEstimatePage() {
     const [clientAddress, setClientAddress] = useState("")
     const [businessProfile, setBusinessProfile] = useState<BusinessInfo | undefined>(undefined)
     const [isPreviewOpen, setIsPreviewOpen] = useState(false)
+    const [isEmailModalOpen, setIsEmailModalOpen] = useState(false)
+    const [isOffline, setIsOffline] = useState(false)
+    const [pendingAudioId, setPendingAudioId] = useState<string | null>(null)
+    const [projectType, setProjectType] = useState<'residential' | 'commercial'>('residential')
+    const [paymentLink, setPaymentLink] = useState<string | null>(null)
+    const [isGeneratingPaymentLink, setIsGeneratingPaymentLink] = useState(false)
+    const [includePaymentLink, setIncludePaymentLink] = useState(false)
 
     const fileInputRef = useRef<HTMLInputElement>(null)
 
-    // Load business profile
+    // Load business profile and check for duplicate data
     useEffect(() => {
         const profile = getProfile()
         if (profile) {
             setBusinessProfile(profile)
             if (profile.tax_rate) setTaxRate(profile.tax_rate)
         }
+
+        // Check for duplicate estimate from history page
+        const duplicateData = localStorage.getItem('duplicate_estimate')
+        if (duplicateData) {
+            try {
+                const data = JSON.parse(duplicateData)
+                setEstimate({
+                    items: data.items || [],
+                    summary_note: data.summary_note || '',
+                    warnings: [],
+                    payment_terms: '',
+                    closing_note: ''
+                })
+                setClientName(data.clientName || '')
+                setClientAddress(data.clientAddress || '')
+                if (data.taxRate) setTaxRate(data.taxRate)
+                setStep('result')
+                localStorage.removeItem('duplicate_estimate')
+                toast('📋 Estimate duplicated! Edit and save.', 'success')
+            } catch (e) {
+                console.error('Failed to load duplicate data:', e)
+                localStorage.removeItem('duplicate_estimate')
+            }
+        }
     }, [])
+
+    // Offline detection and online recovery for pending audio
+    useEffect(() => {
+        setIsOffline(!navigator.onLine)
+
+        const handleOnline = async () => {
+            setIsOffline(false)
+
+            // Check for pending audio to process
+            try {
+                const pending = await getUnprocessedAudio()
+                if (pending.length > 0) {
+                    toast(`🔄 Processing ${pending.length} saved recording(s)...`, "info")
+
+                    for (const audio of pending) {
+                        try {
+                            const formData = new FormData()
+                            formData.append("file", audio.blob, "recording.webm")
+
+                            const response = await fetch("/api/transcribe", {
+                                method: "POST",
+                                body: formData,
+                            })
+
+                            if (response.ok) {
+                                const data = await response.json()
+                                // If this page has the matching pending audio, update state
+                                if (audio.id === pendingAudioId) {
+                                    setTranscribedText(data.text)
+                                    toast("✅ Your recording was transcribed!", "success")
+                                }
+                                await deletePendingAudio(audio.id)
+                            }
+                        } catch (err) {
+                            console.error("Failed to process pending audio:", err)
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("Error processing pending audio:", error)
+            }
+        }
+
+        const handleOffline = () => {
+            setIsOffline(true)
+        }
+
+        window.addEventListener('online', handleOnline)
+        window.addEventListener('offline', handleOffline)
+
+        return () => {
+            window.removeEventListener('online', handleOnline)
+            window.removeEventListener('offline', handleOffline)
+        }
+    }, [pendingAudioId])
 
     const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || [])
@@ -95,6 +184,28 @@ export default function NewEstimatePage() {
 
     const handleAudioCaptured = async (blob: Blob) => {
         setAudioBlob(blob)
+
+        // Check if offline
+        if (!navigator.onLine) {
+            // Save audio to IndexedDB for later processing
+            try {
+                const audioId = crypto.randomUUID()
+                await savePendingAudio({
+                    id: audioId,
+                    blob: blob,
+                    mimeType: 'audio/webm'
+                })
+                setPendingAudioId(audioId)
+                toast("📴 Offline: Audio saved. Will process when online.", "info")
+                setStep("verifying") // Let user type manually
+            } catch (error) {
+                console.error("Failed to save audio offline:", error)
+                toast("❌ Failed to save audio. Please try again.", "error")
+            }
+            return
+        }
+
+        // Online - process immediately
         setStep("transcribing")
 
         try {
@@ -113,7 +224,7 @@ export default function NewEstimatePage() {
             setStep("verifying")
         } catch (error) {
             console.error(error)
-            toast("Transcription failed. Please try again or type manually.", "error")
+            toast("❌ Transcription failed. Please try again or type manually.", "error")
             setStep("verifying") // Go to verify anyway so user can type
         }
     }
@@ -132,18 +243,23 @@ export default function NewEstimatePage() {
 
             const base64Images = await Promise.all(images.map(img => convertToBase64(img)))
 
+            // Load price list for AI
+            const priceListForAI = await getPriceListForAI()
+
             const response = await fetch("/api/generate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     images: base64Images,
                     notes: transcribedText,
+                    projectType,
                     userProfile: businessProfile ? {
                         city: businessProfile.address?.split(',')[0] || "Toronto",
                         country: "Canada",
                         taxRate: businessProfile.tax_rate || 13,
-                        businessName: businessProfile.business_name || "Our Company"
-                    } : undefined
+                        businessName: businessProfile.business_name || "Our Company",
+                        priceList: priceListForAI
+                    } : { priceList: priceListForAI }
                 }),
             })
 
@@ -154,7 +270,7 @@ export default function NewEstimatePage() {
             setStep("result")
         } catch (error) {
             console.error(error)
-            alert("Failed to generate estimate. Please try again.")
+            toast("❌ Failed to generate estimate. Please try again.", "error")
             setStep("verifying")
         }
     }
@@ -182,7 +298,7 @@ export default function NewEstimatePage() {
 
     const handleAddItem = () => {
         if (!estimate) return
-        const newItem: EstimateItem = { description: "", quantity: 1, unit_price: 0, total: 0 }
+        const newItem: EstimateItem = { description: "[PARTS] ", quantity: 1, unit_price: 0, total: 0 }
         setEstimate({ ...estimate, items: [...estimate.items, newItem] })
     }
 
@@ -253,10 +369,11 @@ export default function NewEstimatePage() {
                 a.download = "estimate.pdf"
                 a.click()
                 URL.revokeObjectURL(url)
-                alert("Share not supported on this device. PDF downloaded instead.")
+                toast("📥 Share not supported. PDF downloaded instead.", "info")
             }
         } catch (error) {
             console.error("Share failed:", error)
+            toast("❌ Failed to generate PDF. Please try again.", "error")
         } finally {
             setIsSharing(false)
         }
@@ -277,6 +394,25 @@ export default function NewEstimatePage() {
             {/* STEP 1: INPUT */}
             {step === "input" && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+
+                    {/* Project Type Selector */}
+                    <div className="flex p-1 bg-muted rounded-lg -mb-2">
+                        <Button
+                            variant={projectType === 'residential' ? 'default' : 'ghost'}
+                            className="flex-1 rounded-md h-8 text-xs font-medium"
+                            onClick={() => setProjectType('residential')}
+                        >
+                            🏠 Residential
+                        </Button>
+                        <Button
+                            variant={projectType === 'commercial' ? 'default' : 'ghost'}
+                            className="flex-1 rounded-md h-8 text-xs font-medium"
+                            onClick={() => setProjectType('commercial')}
+                        >
+                            🏢 Commercial
+                        </Button>
+                    </div>
+
                     {/* Voice Input (Primary) */}
                     <div className="flex flex-col items-center justify-center space-y-4 py-4">
                         <AudioRecorder
@@ -285,7 +421,7 @@ export default function NewEstimatePage() {
                         />
                         <p className="text-sm text-muted-foreground text-center">
                             Tap to record job details.<br />
-                            "Replace kitchen faucet, $80 labor"
+                            &quot;Replace kitchen faucet, $80 labor&quot;
                         </p>
                     </div>
 
@@ -478,18 +614,34 @@ export default function NewEstimatePage() {
 
                             <div className="space-y-4">
                                 {estimate.items.map((item, index) => {
-                                    const isFree = item.unit_price === 0
+                                    // Extract category from description if present
+                                    const categoryMatch = item.description.match(/^\[(PARTS|LABOR|SERVICE)\]\s*/i)
+                                    const currentCategory = categoryMatch ? categoryMatch[1].toUpperCase() : 'PARTS'
+                                    const descriptionWithoutCategory = item.description.replace(/^\[(PARTS|LABOR|SERVICE)\]\s*/i, '')
+
                                     return (
-                                        <div key={index} className={`flex flex-col gap-2 py-3 border-b last:border-0 ${isFree ? 'bg-green-50 rounded-lg px-3 -mx-3' : ''}`}>
+                                        <div key={index} className="flex flex-col gap-2 py-3 border-b last:border-0">
                                             <div className="flex items-start gap-2">
-                                                {isFree && (
-                                                    <span className="px-2 py-0.5 bg-green-500 text-white text-xs rounded-full shrink-0">
-                                                        FREE
-                                                    </span>
-                                                )}
+                                                {/* Category Dropdown */}
+                                                <select
+                                                    value={currentCategory}
+                                                    onChange={(e) => {
+                                                        const newCategory = e.target.value
+                                                        const newDescription = `[${newCategory}] ${descriptionWithoutCategory}`
+                                                        handleItemChange(index, "description", newDescription)
+                                                    }}
+                                                    className="h-9 px-2 rounded-md border bg-white text-xs font-medium text-gray-700 shrink-0"
+                                                >
+                                                    <option value="PARTS">🔧 Parts</option>
+                                                    <option value="LABOR">👷 Labor</option>
+                                                    <option value="SERVICE">📋 Service</option>
+                                                </select>
                                                 <Input
-                                                    value={item.description}
-                                                    onChange={(e) => handleItemChange(index, "description", e.target.value)}
+                                                    value={descriptionWithoutCategory}
+                                                    onChange={(e) => {
+                                                        const newDescription = `[${currentCategory}] ${e.target.value}`
+                                                        handleItemChange(index, "description", newDescription)
+                                                    }}
                                                     className="font-medium border px-2 h-auto focus-visible:ring-1 flex-1 bg-white text-gray-900"
                                                     placeholder="Item Description"
                                                 />
@@ -523,8 +675,8 @@ export default function NewEstimatePage() {
                                                 </div>
                                                 <div className="flex-1 text-right">
                                                     <label className="text-[10px] text-muted-foreground">Total</label>
-                                                    <p className={`font-bold py-1 ${isFree ? 'text-green-600' : ''}`}>
-                                                        {isFree ? 'FREE' : `$${item.total.toFixed(2)}`}
+                                                    <p className="font-bold py-1">
+                                                        ${item.total.toFixed(2)}
                                                     </p>
                                                 </div>
                                             </div>
@@ -592,6 +744,7 @@ export default function NewEstimatePage() {
                                             taxRate={taxRate}
                                             client={{ name: clientName, address: clientAddress }}
                                             business={businessProfile ?? undefined}
+                                            paymentLink={includePaymentLink && paymentLink ? paymentLink : undefined}
                                         />
                                     }
                                     fileName="estimate.pdf"
@@ -613,6 +766,82 @@ export default function NewEstimatePage() {
                                 </Button>
                             </div>
 
+                            {/* Payment Link Toggle */}
+                            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg mt-4">
+                                <div className="flex items-center gap-2">
+                                    <CreditCard className="h-4 w-4 text-primary" />
+                                    <span className="text-sm font-medium">Include Payment Link</span>
+                                </div>
+                                <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={includePaymentLink}
+                                    onClick={async () => {
+                                        const newValue = !includePaymentLink
+                                        setIncludePaymentLink(newValue)
+
+                                        if (newValue && !paymentLink && !isGeneratingPaymentLink) {
+                                            // Auto-generate payment link when toggled ON
+                                            setIsGeneratingPaymentLink(true)
+                                            try {
+                                                const grandTotal = estimate.items.reduce((sum, item) => sum + item.total, 0) * (1 + taxRate / 100)
+                                                const response = await fetch('/api/create-payment-link', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({
+                                                        amount: grandTotal,
+                                                        customerName: clientName || 'Customer',
+                                                    })
+                                                })
+
+                                                if (!response.ok) {
+                                                    const error = await response.json()
+                                                    throw new Error(error.error || 'Failed to create payment link')
+                                                }
+
+                                                const data = await response.json()
+                                                setPaymentLink(data.url)
+                                                toast('💳 Payment link ready!', 'success')
+                                            } catch (error: any) {
+                                                console.error('Payment link error:', error)
+                                                toast(`❌ ${error.message}`, 'error')
+                                                setIncludePaymentLink(false) // Revert toggle on error
+                                            } finally {
+                                                setIsGeneratingPaymentLink(false)
+                                            }
+                                        }
+                                    }}
+                                    disabled={isGeneratingPaymentLink}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${includePaymentLink ? 'bg-primary' : 'bg-gray-300'
+                                        } ${isGeneratingPaymentLink ? 'opacity-50' : ''}`}
+                                >
+                                    <span
+                                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${includePaymentLink ? 'translate-x-6' : 'translate-x-1'
+                                            }`}
+                                    />
+                                </button>
+                            </div>
+                            {isGeneratingPaymentLink && (
+                                <p className="text-xs text-muted-foreground text-center mt-1 flex items-center justify-center gap-1">
+                                    <Loader2 className="h-3 w-3 animate-spin" /> Generating payment link...
+                                </p>
+                            )}
+                            {paymentLink && includePaymentLink && (
+                                <p className="text-xs text-green-600 text-center mt-1">
+                                    ✓ Payment link will be included in PDF
+                                </p>
+                            )}
+
+                            {/* Email Button */}
+                            <Button
+                                variant="outline"
+                                className="w-full mt-2"
+                                onClick={() => setIsEmailModalOpen(true)}
+                            >
+                                <Mail className="h-4 w-4 mr-2" />
+                                📧 Send to Customer
+                            </Button>
+
                             <PDFPreviewModal
                                 open={isPreviewOpen}
                                 onClose={() => setIsPreviewOpen(false)}
@@ -624,8 +853,43 @@ export default function NewEstimatePage() {
                                         taxRate={taxRate}
                                         client={{ name: clientName, address: clientAddress }}
                                         business={businessProfile ?? undefined}
+                                        paymentLink={includePaymentLink && paymentLink ? paymentLink : undefined}
                                     />
                                 }
+                            />
+
+                            <EmailModal
+                                open={isEmailModalOpen}
+                                onClose={() => setIsEmailModalOpen(false)}
+                                estimateTotal={estimate.items.reduce((sum, item) => sum + item.total, 0) * (1 + taxRate / 100)}
+                                onSend={async (email, message) => {
+                                    try {
+                                        // Try to send via API
+                                        const response = await fetch('/api/send-email', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                                email,
+                                                subject: `Estimate from ${businessProfile?.business_name || 'SnapQuote'}`,
+                                                message,
+                                                businessName: businessProfile?.business_name
+                                            })
+                                        })
+
+                                        const data = await response.json()
+
+                                        if (data.method === 'mailto') {
+                                            // Open mailto if no email service configured
+                                            window.open(data.mailtoUrl, '_blank')
+                                            toast('📧 Email client opened. Please attach the PDF manually.', 'info')
+                                        } else {
+                                            toast('✅ Email sent successfully!', 'success')
+                                        }
+                                    } catch (error) {
+                                        console.error('Email send error:', error)
+                                        throw error
+                                    }
+                                }}
                             />
                         </CardContent>
                     </Card>

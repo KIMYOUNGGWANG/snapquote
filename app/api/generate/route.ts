@@ -11,21 +11,48 @@ function getSystemPromptV5(userProfile: {
     country?: string
     taxRate?: number
     businessName?: string
-}) {
+    priceList?: string  // Price list formatted for prompt
+}, projectType: 'residential' | 'commercial' = 'residential') {
     const city = userProfile.city || "Toronto"
     const country = userProfile.country || "Canada"
     const taxRate = userProfile.taxRate || 13
     const businessName = userProfile.businessName || "Our Company"
     const currencyCode = country === "Canada" ? "CAD" : "USD"
+    const priceList = userProfile.priceList || ""
+
+    // Build price list section if available
+    const priceListSection = priceList ? `
+═══════════════════════════════════════
+📋 CONTRACTOR'S PRICE LIST (USE THESE PRICES!)
+═══════════════════════════════════════
+The contractor has a FIXED price list. When matching items, USE THESE EXACT PRICES:
+
+${priceList}
+
+RULES:
+- If the user's input matches an item above (by name OR keywords), USE THAT EXACT PRICE.
+- If no match is found, set unit_price = 0 and add "(Price TBD)" to description.
+- Match keywords in any language (English, Korean, Spanish, etc.).
+
+` : ""
+
+    const projectContext = projectType === 'commercial'
+        ? `TYPE: COMMERCIAL / INDUSTRIAL
+   - MATERIALS: Use commercial specs (EMT/Rigid Conduit, Steel Studs, Plenum Cable, Drop Ceilings).
+   - TONE: Professional, Facility Manager focused (e.g., "shutdown coordination", "safety compliance").`
+        : `TYPE: RESIDENTIAL
+   - MATERIALS: Use residential specs (Romex, Wood Studs, PVC, Drywall).
+   - TONE: Homeowner friendly, warm but professional.`
 
     return `
 You are an expert North American Trade Estimator.
 Goal: Create a professional, DETAILED estimate from rough notes.
 
-CONTEXT:
+${priceListSection}CONTEXT:
 - Location: ${city}, ${country}
 - Tax Rate: ${taxRate}%
 - Business: ${businessName}
+- ${projectContext}
 
 INPUT DATA:
 - Text: Rough notes (English, Korean, mixed slang)
@@ -77,12 +104,7 @@ CRITICAL INSTRUCTIONS
    - IF price > $5,000: Add warning "High-value estimate - please verify".
    - NEVER invent prices.
 
-6. 🎁 VALUE STACKING (Auto-add $0 items with is_value_add: true):
-   - "[SERVICE] Site Preparation & Floor Protection" ($0)
-   - "[SERVICE] Post-Work Safety Inspection" ($0)
-   - "[SERVICE] Debris Removal & Cleanup" ($0)
-
-7. 🇨🇦/🇺🇸 REGIONAL FORMATTING:
+6. 🇨🇦/🇺🇸 REGIONAL FORMATTING:
    IF Canada: "Labour", "HST/GST applies"
    IF USA: "Labor", "Sales tax applies"
 
@@ -96,20 +118,12 @@ Response must be raw JSON.
     {
       "description": "[PARTS] Specific part with brand/size",
       "quantity": 1,
-      "unit_price": 150.00,
-      "is_value_add": false
+      "unit_price": 150.00
     },
     {
       "description": "[LABOR] Installation & Testing (2 hrs)",
       "quantity": 1,
-      "unit_price": 150.00,
-      "is_value_add": false
-    },
-    {
-      "description": "[SERVICE] Post-Work Safety Inspection",
-      "quantity": 1,
-      "unit_price": 0,
-      "is_value_add": true
+      "unit_price": 150.00
     }
   ],
   "summary_note": "Concise scope summary.",
@@ -124,11 +138,11 @@ TONE: Professional, confident, sales-oriented. Sound like a trusted expert.
 
 export async function POST(req: Request) {
     try {
-        const { images, notes, userProfile } = await req.json()
+        const { images, notes, userProfile, projectType } = await req.json()
 
         // Use provided userProfile or defaults
         const profile = userProfile || {}
-        const systemPrompt = getSystemPromptV5(profile)
+        const systemPrompt = getSystemPromptV5(profile, projectType)
 
         const userMessageContent: any[] = []
 
@@ -183,41 +197,6 @@ export async function POST(req: Request) {
                     item.total = item.quantity * item.unit_price
                 }
             })
-
-            // Check for valid value-add items (with actual descriptions)
-            const hasValidValueAdd = estimate.items.some((item: any) =>
-                item.is_value_add && item.description && item.description.trim() !== ''
-            )
-
-            // Add default value-add items if none exist
-            if (!hasValidValueAdd) {
-                estimate.items.push(
-                    {
-                        description: "Site Preparation & Floor Protection",
-                        quantity: 1,
-                        unit_price: 0,
-                        total: 0,
-                        is_value_add: true,
-                        notes: "Included at no additional charge"
-                    },
-                    {
-                        description: "Post-Service Safety Inspection",
-                        quantity: 1,
-                        unit_price: 0,
-                        total: 0,
-                        is_value_add: true,
-                        notes: "Included at no additional charge"
-                    },
-                    {
-                        description: "Debris Removal & Work Area Cleanup",
-                        quantity: 1,
-                        unit_price: 0,
-                        total: 0,
-                        is_value_add: true,
-                        notes: "Included at no additional charge"
-                    }
-                )
-            }
         }
 
         // Ensure warnings array exists

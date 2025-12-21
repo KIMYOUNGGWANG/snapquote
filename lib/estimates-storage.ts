@@ -73,25 +73,32 @@ export function getProfile(): BusinessInfo | undefined {
     }
 }
 
-// Storage stats (synchronous for profile page)
-export function getStorageStats() {
+// Storage stats (now async - reads from IndexedDB)
+export async function getStorageStats(): Promise<{ estimateCount: number, storageUsed: string }> {
     if (typeof window === 'undefined') return { estimateCount: 0, storageUsed: "0 KB" }
 
-    // Get estimates from localStorage fallback (for stats display)
-    const estimatesRaw = localStorage.getItem("snapquote_estimates") || "[]"
-    const profileRaw = localStorage.getItem("snapquote_business_profile") || "{}"
-
-    let estimateCount = 0
     try {
-        estimateCount = JSON.parse(estimatesRaw).length
-    } catch (e) { }
+        // Get estimates from IndexedDB (actual source of truth)
+        const estimates = await getEstimates()
+        const estimateCount = estimates.length
 
-    const totalBytes = estimatesRaw.length + profileRaw.length
-    const storageUsed = totalBytes > 1024
-        ? `${(totalBytes / 1024).toFixed(1)} KB`
-        : `${totalBytes} B`
+        // Calculate storage size
+        const profileRaw = localStorage.getItem("snapquote_business_profile") || "{}"
+        const estimatesSize = JSON.stringify(estimates).length
+        const profileSize = profileRaw.length
 
-    return { estimateCount, storageUsed }
+        const totalBytes = estimatesSize + profileSize
+        const storageUsed = totalBytes > 1024 * 1024
+            ? `${(totalBytes / 1024 / 1024).toFixed(2)} MB`
+            : totalBytes > 1024
+                ? `${(totalBytes / 1024).toFixed(1)} KB`
+                : `${totalBytes} B`
+
+        return { estimateCount, storageUsed }
+    } catch (error) {
+        console.error("Error getting storage stats:", error)
+        return { estimateCount: 0, storageUsed: "0 KB" }
+    }
 }
 
 // Clear all data

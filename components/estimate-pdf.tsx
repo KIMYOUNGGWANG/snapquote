@@ -218,6 +218,7 @@ export const EstimatePDF = ({
                 {/* Header with Business Info */}
                 <View style={styles.header}>
                     {business?.logo_url && (
+                        // eslint-disable-next-line jsx-a11y/alt-text
                         <Image style={styles.logo} src={business.logo_url} />
                     )}
                     <View style={styles.headerContent}>
@@ -251,7 +252,7 @@ export const EstimatePDF = ({
 
                 {/* Summary */}
                 <View style={styles.summaryBox}>
-                    <Text style={styles.summaryText}>"{summary}"</Text>
+                    <Text style={styles.summaryText}>&quot;{summary}&quot;</Text>
                 </View>
 
                 {/* Items Table */}
@@ -307,10 +308,38 @@ export const EstimatePDF = ({
 
                 {/* Payment Link Section */}
                 {paymentLink && (
-                    <View style={{ marginTop: 20, alignItems: 'center' }}>
-                        <Text style={{ fontSize: 10, color: '#2563EB', marginBottom: 5 }}>Pay Online:</Text>
-                        {/* QR Code would go here if we had an image */}
-                        <Text style={{ fontSize: 9, textDecoration: 'underline' }}>{paymentLink}</Text>
+                    <View style={{
+                        marginTop: 20,
+                        padding: 15,
+                        backgroundColor: '#EFF6FF',
+                        borderRadius: 8,
+                        borderWidth: 2,
+                        borderColor: '#2563EB',
+                        alignItems: 'center'
+                    }}>
+                        <Text style={{
+                            fontSize: 12,
+                            fontWeight: 'bold',
+                            color: '#1E40AF',
+                            marginBottom: 8
+                        }}>
+                            💳 PAY ONLINE
+                        </Text>
+                        <Text style={{
+                            fontSize: 9,
+                            color: '#3B82F6',
+                            textDecoration: 'underline',
+                            marginBottom: 5
+                        }}>
+                            {paymentLink}
+                        </Text>
+                        <Text style={{
+                            fontSize: 8,
+                            color: '#6B7280',
+                            textAlign: 'center'
+                        }}>
+                            Click or copy this link to make a secure payment
+                        </Text>
                     </View>
                 )}
 

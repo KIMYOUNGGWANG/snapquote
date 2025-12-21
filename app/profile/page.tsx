@@ -6,9 +6,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import { Loader2, Save, Building2, Upload, X } from "lucide-react"
+import { Loader2, Save, Building2, Upload, X, Plus, Pencil, Trash2, DollarSign } from "lucide-react"
 import Image from "next/image"
 import { getProfile, saveProfile, clearAllEstimates, getStorageStats, type BusinessInfo } from "@/lib/estimates-storage"
+import { getPriceList, savePriceListItem, deletePriceListItem } from "@/lib/db"
+import { toast } from "@/components/toast"
+import { PriceListModal } from "@/components/price-list-modal"
+import type { PriceListItem, CreatePriceListItem } from "@/types"
 
 export default function ProfilePage() {
     const router = useRouter()
@@ -27,11 +31,16 @@ export default function ProfilePage() {
     const [logoPreview, setLogoPreview] = useState<string | null>(null)
     const [storageStats, setStorageStats] = useState({ estimateCount: 0, storageUsed: "0 KB" })
 
+    // Price List state
+    const [priceList, setPriceList] = useState<PriceListItem[]>([])
+    const [isPriceModalOpen, setIsPriceModalOpen] = useState(false)
+    const [editingPriceItem, setEditingPriceItem] = useState<PriceListItem | null>(null)
+
     useEffect(() => {
         loadProfile()
     }, [])
 
-    const loadProfile = () => {
+    const loadProfile = async () => {
         try {
             const savedProfile = getProfile()
             if (savedProfile) {
@@ -40,7 +49,12 @@ export default function ProfilePage() {
                     setLogoPreview(savedProfile.logo_url)
                 }
             }
-            setStorageStats(getStorageStats())
+            // Load price list
+            const prices = await getPriceList()
+            setPriceList(prices)
+            // getStorageStats is now async
+            const stats = await getStorageStats()
+            setStorageStats(stats)
         } catch (error) {
             console.error("Error loading profile:", error)
         } finally {
@@ -48,15 +62,42 @@ export default function ProfilePage() {
         }
     }
 
-    const handleSave = () => {
+    const handleSavePriceItem = async (item: CreatePriceListItem & { id?: string }) => {
+        await savePriceListItem({ ...item, keywords: item.keywords || [] })
+        const prices = await getPriceList()
+        setPriceList(prices)
+        toast(item.id ? "✅ Price item updated!" : "✅ Price item added!", "success")
+    }
+
+    const handleDeletePriceItem = async (id: string) => {
+        if (confirm("Delete this price item?")) {
+            await deletePriceListItem(id)
+            const prices = await getPriceList()
+            setPriceList(prices)
+            toast("🗑️ Price item deleted.", "success")
+        }
+    }
+
+    const handleEditPriceItem = (item: PriceListItem) => {
+        setEditingPriceItem(item)
+        setIsPriceModalOpen(true)
+    }
+
+    const handleAddPriceItem = () => {
+        setEditingPriceItem(null)
+        setIsPriceModalOpen(true)
+    }
+
+    const handleSave = async () => {
         setSaving(true)
         try {
             saveProfile(profile)
-            alert("✅ Profile saved locally!")
-            setStorageStats(getStorageStats())
+            toast("✅ Profile saved!", "success")
+            const stats = await getStorageStats()
+            setStorageStats(stats)
         } catch (error) {
             console.error("Error saving profile:", error)
-            alert("Failed to save profile.")
+            toast("❌ Failed to save profile.", "error")
         } finally {
             setSaving(false)
         }
@@ -68,7 +109,7 @@ export default function ProfilePage() {
 
         // Validate file type
         if (!file.type.startsWith('image/')) {
-            alert('Please upload an image file')
+            toast('⚠️ Please upload an image file', 'error')
             return
         }
 
@@ -83,13 +124,13 @@ export default function ProfilePage() {
                 setUploading(false)
             }
             reader.onerror = () => {
-                alert('Failed to upload logo')
+                toast('❌ Failed to upload logo', 'error')
                 setUploading(false)
             }
             reader.readAsDataURL(file)
         } catch (error) {
             console.error('Error uploading logo:', error)
-            alert('Failed to upload logo')
+            toast('❌ Failed to upload logo', 'error')
             setUploading(false)
         }
     }
@@ -99,7 +140,7 @@ export default function ProfilePage() {
         setLogoPreview(null)
     }
 
-    const handleClearData = () => {
+    const handleClearData = async () => {
         if (confirm("⚠️ This will delete ALL your estimates and profile data. This cannot be undone. Are you sure?")) {
             clearAllEstimates()
             setProfile({
@@ -112,8 +153,9 @@ export default function ProfilePage() {
                 logo_url: ""
             })
             setLogoPreview(null)
-            alert("All data cleared successfully.")
-            setStorageStats(getStorageStats())
+            toast("🗑️ All data cleared.", "success")
+            const stats = await getStorageStats()
+            setStorageStats(stats)
         }
     }
 
@@ -265,6 +307,76 @@ export default function ProfilePage() {
                     </>
                 )}
             </Button>
+
+            {/* Price List Section */}
+            <Card>
+                <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <DollarSign className="h-5 w-5" />
+                            <CardTitle className="text-lg">My Price List</CardTitle>
+                        </div>
+                        <Button size="sm" onClick={handleAddPriceItem}>
+                            <Plus className="h-4 w-4 mr-1" />
+                            Add
+                        </Button>
+                    </div>
+                    <CardDescription>
+                        AI will use these fixed prices for consistent estimates.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                    {priceList.length === 0 ? (
+                        <div className="text-center py-6 text-muted-foreground">
+                            <DollarSign className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">No price items yet.</p>
+                            <p className="text-xs">Add items to ensure consistent pricing.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-2">
+                            {["PARTS", "LABOR", "SERVICE"].map(category => {
+                                const items = priceList.filter(p => p.category === category)
+                                if (items.length === 0) return null
+                                return (
+                                    <div key={category}>
+                                        <p className="text-xs font-semibold text-muted-foreground mb-1">{category}</p>
+                                        {items.map(item => (
+                                            <div key={item.id} className="flex items-center justify-between p-2 bg-muted rounded-lg">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-medium text-sm truncate">{item.name}</p>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        ${item.price}/{item.unit}
+                                                        {item.keywords.length > 0 && ` • ${item.keywords.join(", ")}`}
+                                                    </p>
+                                                </div>
+                                                <div className="flex gap-1 ml-2">
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEditPriceItem(item)}>
+                                                        <Pencil className="h-3 w-3" />
+                                                    </Button>
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeletePriceItem(item.id)}>
+                                                        <Trash2 className="h-3 w-3" />
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
+            {/* Price List Modal */}
+            <PriceListModal
+                open={isPriceModalOpen}
+                onClose={() => {
+                    setIsPriceModalOpen(false)
+                    setEditingPriceItem(null)
+                }}
+                onSave={handleSavePriceItem}
+                editItem={editingPriceItem}
+            />
 
             {/* Storage Info */}
             <Card className="border-dashed">

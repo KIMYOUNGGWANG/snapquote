@@ -41,5 +41,8 @@ yarn-error.log*
 next-env.d.ts
 
 snapquote_plan_v2.md
-snapquote_v3_final.md
+# snapquote_v3_final.md
 prompt_v5_lite_analysis.md
+
+# All markdown files
+*.md
