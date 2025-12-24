@@ -1,0 +1,167 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Mic, Zap, Send, X, ArrowRight, ChevronLeft, ChevronRight } from "lucide-react"
+
+interface OnboardingModalProps {
+    open: boolean
+    onClose: () => void
+    onComplete: () => void
+}
+
+const STEPS = [
+    {
+        icon: Mic,
+        iconBg: "bg-blue-500",
+        title: "Speak Your Job",
+        description: "Just describe the work into your microphone. AI will understand and organize it.",
+        example: '"Bathroom renovation, 50 sqft tile, toilet replacement, 4 hours labor"',
+    },
+    {
+        icon: Zap,
+        iconBg: "bg-amber-500",
+        title: "AI Creates Your Estimate",
+        description: "In 30 seconds, get a professional estimate with Parts, Labor, and Service itemized.",
+        example: "Parts: $450 | Labor: $320 | Tax: $100 | Total: $870",
+    },
+    {
+        icon: Send,
+        iconBg: "bg-green-500",
+        title: "Send PDF Instantly",
+        description: "Email a professional PDF estimate to your client with one tap.",
+        example: "📧 Professional estimate with your logo, sent instantly",
+    },
+]
+
+export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalProps) {
+    const [currentStep, setCurrentStep] = useState(0)
+    const [isAnimating, setIsAnimating] = useState(false)
+
+    // Reset step when modal opens
+    useEffect(() => {
+        if (open) {
+            setCurrentStep(0)
+        }
+    }, [open])
+
+    if (!open) return null
+
+    const handleNext = () => {
+        if (isAnimating) return
+
+        if (currentStep < STEPS.length - 1) {
+            setIsAnimating(true)
+            setCurrentStep(currentStep + 1)
+            setTimeout(() => setIsAnimating(false), 300)
+        } else {
+            onComplete()
+        }
+    }
+
+    const handlePrev = () => {
+        if (isAnimating || currentStep === 0) return
+
+        setIsAnimating(true)
+        setCurrentStep(currentStep - 1)
+        setTimeout(() => setIsAnimating(false), 300)
+    }
+
+    const handleSkip = () => {
+        onClose()
+    }
+
+    const step = STEPS[currentStep]
+    const StepIcon = step.icon
+    const isLastStep = currentStep === STEPS.length - 1
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <Card className="w-full max-w-sm overflow-hidden shadow-2xl">
+                {/* Header */}
+                <div className="flex items-center justify-between p-4 border-b">
+                    <span className="text-sm text-muted-foreground">
+                        {currentStep + 1} / {STEPS.length}
+                    </span>
+                    <Button variant="ghost" size="sm" onClick={handleSkip} className="text-muted-foreground">
+                        Skip <X className="h-4 w-4 ml-1" />
+                    </Button>
+                </div>
+
+                {/* Content */}
+                <CardContent className="p-6">
+                    <div
+                        className={`flex flex-col items-center text-center transition-opacity duration-300 ${isAnimating ? "opacity-0" : "opacity-100"
+                            }`}
+                    >
+                        {/* Icon */}
+                        <div className={`p-4 rounded-full ${step.iconBg} mb-6`}>
+                            <StepIcon className="h-8 w-8 text-white" />
+                        </div>
+
+                        {/* Title */}
+                        <h2 className="text-xl font-bold text-foreground mb-3">
+                            {step.title}
+                        </h2>
+
+                        {/* Description */}
+                        <p className="text-sm text-muted-foreground mb-4">
+                            {step.description}
+                        </p>
+
+                        {/* Example Box */}
+                        <div className="w-full bg-muted/50 rounded-lg p-3 border border-border">
+                            <p className="text-xs text-muted-foreground italic">
+                                {step.example}
+                            </p>
+                        </div>
+                    </div>
+                </CardContent>
+
+                {/* Progress Dots */}
+                <div className="flex justify-center gap-2 pb-4">
+                    {STEPS.map((_, index) => (
+                        <button
+                            key={index}
+                            onClick={() => !isAnimating && setCurrentStep(index)}
+                            className={`w-2 h-2 rounded-full transition-all ${index === currentStep
+                                    ? "bg-primary w-6"
+                                    : "bg-muted-foreground/30 hover:bg-muted-foreground/50"
+                                }`}
+                        />
+                    ))}
+                </div>
+
+                {/* Navigation */}
+                <div className="flex gap-2 p-4 border-t bg-muted/30">
+                    <Button
+                        variant="outline"
+                        onClick={handlePrev}
+                        disabled={currentStep === 0}
+                        className="flex-1"
+                    >
+                        <ChevronLeft className="h-4 w-4 mr-1" />
+                        Back
+                    </Button>
+                    <Button
+                        onClick={handleNext}
+                        className="flex-1"
+                    >
+                        {isLastStep ? (
+                            <>
+                                Get Started
+                                <ArrowRight className="h-4 w-4 ml-1" />
+                            </>
+                        ) : (
+                            <>
+                                Next
+                                <ChevronRight className="h-4 w-4 ml-1" />
+                            </>
+                        )}
+                    </Button>
+                </div>
+            </Card>
+        </div>
+    )
+}
