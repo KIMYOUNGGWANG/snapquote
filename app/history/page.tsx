@@ -3,14 +3,15 @@
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, Download, FileText, Copy, Trash2 } from "lucide-react"
+import { Loader2, Download, FileText, Copy, Trash2, Mail } from "lucide-react"
 import dynamic from "next/dynamic"
 import { EstimatePDF } from "@/components/estimate-pdf"
 import { useRouter } from "next/navigation"
-import { getEstimates, deleteEstimate, type LocalEstimate, type EstimateItem } from "@/lib/estimates-storage"
+import { getEstimates, deleteEstimate, getProfile, type LocalEstimate, type EstimateItem } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { PDFPreviewModal } from "@/components/pdf-preview-modal"
+import { FollowUpModal } from "@/components/follow-up-modal"
 
 const PDFDownloadLink = dynamic(
     () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
@@ -28,15 +29,24 @@ export default function HistoryPage() {
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
     const [estimateToDelete, setEstimateToDelete] = useState<string | null>(null)
     const [previewEstimate, setPreviewEstimate] = useState<LocalEstimate | null>(null)
+    const [followUpEstimate, setFollowUpEstimate] = useState<LocalEstimate | null>(null)
+    const [businessName, setBusinessName] = useState("")
 
     useEffect(() => {
         // Load estimates from IndexedDB
-        const loadEstimates = async () => {
+        const loadData = async () => {
             const localEstimates = await getEstimates()
             setEstimates(localEstimates)
+
+            // Load business name for follow-up emails
+            const profile = getProfile()
+            if (profile?.business_name) {
+                setBusinessName(profile.business_name)
+            }
+
             setLoading(false)
         }
-        loadEstimates()
+        loadData()
     }, [])
 
     const toggleExpand = (estimateId: string) => {
@@ -168,6 +178,14 @@ export default function HistoryPage() {
                                         Duplicate
                                     </Button>
                                     <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setFollowUpEstimate(estimate)}
+                                    >
+                                        <Mail className="h-3 w-3 mr-1" />
+                                        Follow-up
+                                    </Button>
+                                    <Button
                                         variant="destructive"
                                         size="sm"
                                         onClick={(e) => handleDeleteClick(e, estimate.id)}
@@ -239,6 +257,17 @@ export default function HistoryPage() {
                             }}
                         />
                     }
+                />
+            )}
+
+            {followUpEstimate && (
+                <FollowUpModal
+                    open={!!followUpEstimate}
+                    onClose={() => setFollowUpEstimate(null)}
+                    clientName={followUpEstimate.clientName}
+                    estimateNumber={followUpEstimate.estimateNumber}
+                    totalAmount={followUpEstimate.totalAmount}
+                    businessName={businessName}
                 />
             )}
         </div>
