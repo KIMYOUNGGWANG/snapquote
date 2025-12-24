@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/toast";
 import { SyncManager } from "@/components/sync-manager";
 import { OfflineBanner } from "@/components/offline-banner";
+import { InstallPrompt } from "@/components/install-prompt";
 import { cn } from "@/lib/utils";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -38,6 +39,7 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+          <InstallPrompt />
           <OfflineBanner />
           <main className="container mx-auto px-4 py-4">
             {children}
