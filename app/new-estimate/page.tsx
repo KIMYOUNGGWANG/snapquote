@@ -230,6 +230,12 @@ export default function NewEstimatePage() {
     }
 
     const handleGenerateEstimate = async () => {
+        // Check network first
+        if (!navigator.onLine) {
+            toast("📴 No internet connection. Please connect and try again.", "warning")
+            return
+        }
+
         setStep("generating")
         try {
             const convertToBase64 = (file: File): Promise<string> => {
@@ -263,14 +269,35 @@ export default function NewEstimatePage() {
                 }),
             })
 
-            if (!response.ok) throw new Error("Failed to generate")
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}))
+                const status = response.status
+
+                if (status === 429) {
+                    throw new Error("Too many requests. Please wait a moment and try again.")
+                } else if (status === 401 || status === 403) {
+                    throw new Error("API key issue. Please check your configuration.")
+                } else if (status >= 500) {
+                    throw new Error("Server error. Please try again in a few moments.")
+                } else {
+                    throw new Error(errorData.error || "Failed to generate estimate.")
+                }
+            }
 
             const data = await response.json()
             setEstimate(data)
             setStep("result")
-        } catch (error) {
-            console.error(error)
-            toast("❌ Failed to generate estimate. Please try again.", "error")
+            toast("✅ Estimate generated successfully!", "success")
+        } catch (error: any) {
+            console.error("Generate error:", error)
+
+            // Determine error type for better messaging
+            const isNetworkError = error.message?.includes("fetch") || error.message?.includes("network")
+            const errorMessage = isNetworkError
+                ? "Network error. Check your connection and try again."
+                : error.message || "Failed to generate estimate."
+
+            toast(`❌ ${errorMessage}`, "error")
             setStep("verifying")
         }
     }
@@ -721,19 +748,33 @@ export default function NewEstimatePage() {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-4 gap-2 mt-4">
+                            {/* Action Buttons - 2x2 Grid */}
+                            <div className="grid grid-cols-2 gap-3 mt-4">
                                 <Button
+                                    size="lg"
+                                    className="h-12 font-semibold"
                                     onClick={handleSave}
                                     disabled={isSaving}
                                 >
-                                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
-                                    Save
+                                    {isSaving ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Saving...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Save className="h-4 w-4 mr-2" />
+                                            Save Estimate
+                                        </>
+                                    )}
                                 </Button>
                                 <Button
                                     variant="outline"
+                                    size="lg"
+                                    className="h-12"
                                     onClick={() => setIsPreviewOpen(true)}
                                 >
-                                    👁️ 미리보기
+                                    👁️ Preview
                                 </Button>
                                 <PDFDownloadLink
                                     document={
@@ -749,20 +790,40 @@ export default function NewEstimatePage() {
                                     }
                                     fileName="estimate.pdf"
                                 >
-                                    {({ blob, url, loading, error }) => (
-                                        <Button variant="outline" disabled={loading} className="w-full">
-                                            <Download className="h-4 w-4 mr-1" />
-                                            {loading ? "..." : "PDF"}
+                                    {({ loading }) => (
+                                        <Button variant="outline" disabled={loading} size="lg" className="w-full h-12">
+                                            {loading ? (
+                                                <>
+                                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                    Creating...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Download className="h-4 w-4 mr-2" />
+                                                    Download PDF
+                                                </>
+                                            )}
                                         </Button>
                                     )}
                                 </PDFDownloadLink>
                                 <Button
                                     variant="secondary"
+                                    size="lg"
+                                    className="h-12"
                                     onClick={handleShare}
                                     disabled={isSharing}
                                 >
-                                    {isSharing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4 mr-1" />}
-                                    Share
+                                    {isSharing ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Sharing...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Share2 className="h-4 w-4 mr-2" />
+                                            Share
+                                        </>
+                                    )}
                                 </Button>
                             </div>
 
@@ -864,7 +925,35 @@ export default function NewEstimatePage() {
                                 estimateTotal={estimate.items.reduce((sum, item) => sum + item.total, 0) * (1 + taxRate / 100)}
                                 onSend={async (email, message) => {
                                     try {
-                                        // Try to send via API
+                                        // Generate PDF as base64
+                                        const { pdf } = await import("@react-pdf/renderer")
+                                        const pdfDoc = (
+                                            <EstimatePDF
+                                                items={estimate.items}
+                                                total={estimate.items.reduce((sum, item) => sum + item.total, 0)}
+                                                summary={estimate.summary_note}
+                                                taxRate={taxRate}
+                                                client={{ name: clientName, address: clientAddress }}
+                                                business={businessProfile ?? undefined}
+                                                paymentLink={includePaymentLink && paymentLink ? paymentLink : undefined}
+                                            />
+                                        )
+                                        const blob = await pdf(pdfDoc).toBlob()
+
+                                        // Convert blob to base64
+                                        const reader = new FileReader()
+                                        const pdfBase64 = await new Promise<string>((resolve, reject) => {
+                                            reader.onload = () => {
+                                                const result = reader.result as string
+                                                // Remove data URL prefix to get pure base64
+                                                const base64 = result.split(',')[1]
+                                                resolve(base64)
+                                            }
+                                            reader.onerror = reject
+                                            reader.readAsDataURL(blob)
+                                        })
+
+                                        // Send via API with PDF attachment
                                         const response = await fetch('/api/send-email', {
                                             method: 'POST',
                                             headers: { 'Content-Type': 'application/json' },
@@ -872,21 +961,28 @@ export default function NewEstimatePage() {
                                                 email,
                                                 subject: `Estimate from ${businessProfile?.business_name || 'SnapQuote'}`,
                                                 message,
+                                                pdfBase64,
                                                 businessName: businessProfile?.business_name
                                             })
                                         })
+
+                                        if (!response.ok) {
+                                            const errorData = await response.json()
+                                            throw new Error(errorData.error || 'Failed to send email')
+                                        }
 
                                         const data = await response.json()
 
                                         if (data.method === 'mailto') {
                                             // Open mailto if no email service configured
                                             window.open(data.mailtoUrl, '_blank')
-                                            toast('📧 Email client opened. Please attach the PDF manually.', 'info')
+                                            toast('📧 Email client opened. Please attach the PDF.', 'warning')
                                         } else {
-                                            toast('✅ Email sent successfully!', 'success')
+                                            toast('✅ Email sent with PDF attached!', 'success')
                                         }
-                                    } catch (error) {
+                                    } catch (error: any) {
                                         console.error('Email send error:', error)
+                                        toast(`❌ ${error.message || 'Failed to send. Try again.'}`, 'error')
                                         throw error
                                     }
                                 }}

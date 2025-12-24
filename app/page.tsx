@@ -3,93 +3,117 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Camera, FileText, History, Zap, ArrowRight, Shield, Clock } from "lucide-react"
+import { Mic, FileText, History, Zap, ArrowRight, Shield, Clock, Send, DollarSign } from "lucide-react"
 
 export default function Home() {
   return (
     <div className="flex flex-col min-h-[calc(100vh-80px)] pb-20">
       {/* Hero Section */}
-      <section className="flex flex-col items-center justify-center text-center px-4 py-12 bg-gradient-to-b from-primary/5 to-transparent">
-        <div className="inline-flex items-center gap-2 px-3 py-1 bg-primary/10 rounded-full text-primary text-sm font-medium mb-6">
-          <Zap className="h-4 w-4" />
-          AI-Powered Estimates
+      <section className="flex flex-col items-center justify-center text-center px-4 py-8 bg-gradient-to-b from-primary/5 to-transparent">
+        <div className="inline-flex items-center gap-2 px-3 py-1 bg-primary/10 rounded-full text-primary text-xs font-medium mb-4">
+          <Zap className="h-3 w-3" />
+          For Contractors & Tradespeople
         </div>
 
-        <h1 className="text-4xl font-bold tracking-tight text-foreground mb-4">
+        <h1 className="text-3xl font-bold tracking-tight text-foreground mb-2">
           SnapQuote
         </h1>
 
-        <p className="text-muted-foreground text-lg max-w-md mb-8">
-          Take a photo. Get a professional estimate in <span className="text-primary font-semibold">30 seconds</span>.
+        <p className="text-muted-foreground text-sm max-w-xs mb-6">
+          Speak your job details, get a <span className="text-primary font-semibold">professional estimate PDF</span> in seconds.
         </p>
+
+        {/* Example Voice Input */}
+        <div className="w-full max-w-sm mb-6">
+          <p className="text-xs text-muted-foreground mb-2">💡 Just say something like:</p>
+          <div className="bg-muted/50 border border-border rounded-xl p-4 text-left">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-primary/10 rounded-full shrink-0">
+                <Mic className="h-4 w-4 text-primary" />
+              </div>
+              <p className="text-sm text-foreground italic">
+                "Bathroom renovation, 50 sqft tile, toilet replacement, new faucet installation, labor 4 hours"
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center justify-center gap-2 mt-3 text-muted-foreground">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs">↓ 30 seconds later</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+          <div className="mt-3 bg-green-500/10 border border-green-500/20 rounded-xl p-3">
+            <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+              <FileText className="h-4 w-4" />
+              <span className="text-sm font-medium">Professional PDF Ready!</span>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Itemized parts, labor, taxes • Email to client instantly
+            </p>
+          </div>
+        </div>
 
         <Link href="/new-estimate" className="w-full max-w-xs">
           <Button size="lg" className="w-full h-14 text-lg font-semibold gap-2 rounded-xl shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all">
-            <Camera className="h-5 w-5" />
-            New Estimate
+            <Mic className="h-5 w-5" />
+            Create Estimate
             <ArrowRight className="h-5 w-5 ml-auto" />
           </Button>
         </Link>
       </section>
 
-      {/* Features Section */}
-      <section className="px-4 py-8">
-        <h2 className="text-lg font-semibold text-foreground mb-4">How It Works</h2>
-        <div className="grid grid-cols-1 gap-3">
+      {/* How It Works - Simplified */}
+      <section className="px-4 py-6">
+        <h2 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wider">How It Works</h2>
+        <div className="grid grid-cols-3 gap-2">
+          <StepCard step="1" icon={<Mic className="h-4 w-4" />} label="Speak" />
+          <StepCard step="2" icon={<Zap className="h-4 w-4" />} label="AI Generates" />
+          <StepCard step="3" icon={<Send className="h-4 w-4" />} label="Send PDF" />
+        </div>
+      </section>
+
+      {/* What You Get */}
+      <section className="px-4 py-4">
+        <h2 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wider">What You Get</h2>
+        <div className="grid grid-cols-1 gap-2">
           <FeatureCard
-            icon={<Camera className="h-5 w-5 text-blue-500" />}
-            title="1. Snap a Photo"
-            description="Take a picture of the job site or issue"
-            color="blue"
-          />
-          <FeatureCard
-            icon={<FileText className="h-5 w-5 text-green-500" />}
-            title="2. Add Notes (Optional)"
-            description="Type or record a quick voice memo"
+            icon={<DollarSign className="h-5 w-5 text-green-500" />}
+            title="Itemized Estimate"
+            description="Parts, Labor, Service - clearly separated"
             color="green"
           />
           <FeatureCard
-            icon={<Zap className="h-5 w-5 text-amber-500" />}
-            title="3. Generate & Share"
-            description="AI creates a professional PDF estimate"
+            icon={<FileText className="h-5 w-5 text-blue-500" />}
+            title="Professional PDF"
+            description="Your logo, tax calculation, estimate number"
+            color="blue"
+          />
+          <FeatureCard
+            icon={<Send className="h-5 w-5 text-amber-500" />}
+            title="Instant Email"
+            description="Send to clients with one tap"
             color="amber"
           />
         </div>
       </section>
 
-      {/* Stats Section */}
-      <section className="px-4 py-6">
-        <div className="grid grid-cols-3 gap-3">
-          <StatCard icon={<Clock className="h-5 w-5" />} value="30s" label="Avg. Time" />
-          <StatCard icon={<FileText className="h-5 w-5" />} value="PDF" label="Export" />
-          <StatCard icon={<Shield className="h-5 w-5" />} value="Pro" label="Quality" />
-        </div>
-      </section>
-
-      {/* Quick Actions */}
+      {/* Quick Start */}
       <section className="px-4 py-4 mt-auto">
-        <div className="grid grid-cols-2 gap-3">
-          <Link href="/new-estimate">
-            <Card className="hover:bg-muted/50 transition-colors cursor-pointer">
-              <CardContent className="flex flex-col items-center justify-center p-4 gap-2">
-                <div className="p-3 bg-primary/10 rounded-full">
-                  <Camera className="h-6 w-6 text-primary" />
+        <Link href="/new-estimate" className="block">
+          <Card className="border-primary/20 bg-primary/5 hover:bg-primary/10 transition-colors cursor-pointer">
+            <CardContent className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-primary rounded-full">
+                  <Mic className="h-5 w-5 text-primary-foreground" />
                 </div>
-                <span className="font-medium text-sm">New Estimate</span>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/history">
-            <Card className="hover:bg-muted/50 transition-colors cursor-pointer">
-              <CardContent className="flex flex-col items-center justify-center p-4 gap-2">
-                <div className="p-3 bg-muted rounded-full">
-                  <History className="h-6 w-6 text-muted-foreground" />
+                <div>
+                  <p className="font-semibold">Ready to create an estimate?</p>
+                  <p className="text-sm text-muted-foreground">Tap here to start</p>
                 </div>
-                <span className="font-medium text-sm">History</span>
-              </CardContent>
-            </Card>
-          </Link>
-        </div>
+              </div>
+              <ArrowRight className="h-5 w-5 text-primary" />
+            </CardContent>
+          </Card>
+        </Link>
       </section>
     </div>
   )
@@ -127,21 +151,21 @@ function FeatureCard({
   )
 }
 
-function StatCard({
+function StepCard({
+  step,
   icon,
-  value,
   label
 }: {
+  step: string
   icon: React.ReactNode
-  value: string
   label: string
 }) {
   return (
     <Card className="border-0 shadow-none bg-muted/30">
-      <CardContent className="flex flex-col items-center justify-center p-4 gap-1">
-        <div className="text-muted-foreground mb-1">{icon}</div>
-        <span className="text-xl font-bold text-foreground">{value}</span>
-        <span className="text-xs text-muted-foreground">{label}</span>
+      <CardContent className="flex flex-col items-center justify-center p-3 gap-1">
+        <div className="text-xs text-muted-foreground">Step {step}</div>
+        <div className="p-2 bg-primary/10 rounded-full text-primary">{icon}</div>
+        <span className="text-xs font-medium text-foreground">{label}</span>
       </CardContent>
     </Card>
   )
