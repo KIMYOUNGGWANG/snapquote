@@ -5,7 +5,6 @@ import { BottomNav } from "@/components/bottom-nav";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/toast";
 import { SyncManager } from "@/components/sync-manager";
-import { LegalModal } from "@/components/legal-modal";
 import { OfflineBanner } from "@/components/offline-banner";
 import { cn } from "@/lib/utils";
 
@@ -45,7 +44,6 @@ export default function RootLayout({
           </main>
           <BottomNav />
           <SyncManager />
-          <LegalModal />
           <Toaster />
         </ThemeProvider>
       </body>

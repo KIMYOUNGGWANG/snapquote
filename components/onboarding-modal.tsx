@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Mic, Zap, Send, X, ArrowRight, ChevronLeft, ChevronRight } from "lucide-react"
+import { Mic, Zap, Send, X, ArrowRight, ChevronLeft, ChevronRight, Check } from "lucide-react"
 
 interface OnboardingModalProps {
     open: boolean
@@ -31,18 +31,21 @@ const STEPS = [
         iconBg: "bg-green-500",
         title: "Send PDF Instantly",
         description: "Email a professional PDF estimate to your client with one tap.",
-        example: "📧 Professional estimate with your logo, sent instantly",
+        example: "Professional estimate with your logo, sent instantly",
+        showTerms: true,
     },
 ]
 
 export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalProps) {
     const [currentStep, setCurrentStep] = useState(0)
     const [isAnimating, setIsAnimating] = useState(false)
+    const [termsAccepted, setTermsAccepted] = useState(false)
 
-    // Reset step when modal opens
+    // Reset when modal opens
     useEffect(() => {
         if (open) {
             setCurrentStep(0)
+            setTermsAccepted(false)
         }
     }, [open])
 
@@ -56,6 +59,8 @@ export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalPr
             setCurrentStep(currentStep + 1)
             setTimeout(() => setIsAnimating(false), 300)
         } else {
+            // Save terms acceptance
+            localStorage.setItem("snapquote_terms_accepted", "true")
             onComplete()
         }
     }
@@ -75,6 +80,7 @@ export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalPr
     const step = STEPS[currentStep]
     const StepIcon = step.icon
     const isLastStep = currentStep === STEPS.length - 1
+    const canProceed = !isLastStep || termsAccepted
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -111,11 +117,36 @@ export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalPr
                         </p>
 
                         {/* Example Box */}
-                        <div className="w-full bg-muted/50 rounded-lg p-3 border border-border">
+                        <div className="w-full bg-muted/50 rounded-lg p-3 border border-border mb-4">
                             <p className="text-xs text-muted-foreground italic">
                                 {step.example}
                             </p>
                         </div>
+
+                        {/* Terms Checkbox - Only on last step */}
+                        {step.showTerms && (
+                            <button
+                                onClick={() => setTermsAccepted(!termsAccepted)}
+                                className="flex items-center gap-3 w-full p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors text-left"
+                            >
+                                <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${termsAccepted
+                                        ? "bg-primary border-primary"
+                                        : "border-muted-foreground/50"
+                                    }`}>
+                                    {termsAccepted && <Check className="h-3 w-3 text-primary-foreground" />}
+                                </div>
+                                <span className="text-sm text-foreground">
+                                    I agree to the{" "}
+                                    <a
+                                        href="#"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="text-primary underline"
+                                    >
+                                        Terms of Service
+                                    </a>
+                                </span>
+                            </button>
+                        )}
                     </div>
                 </CardContent>
 
@@ -146,6 +177,7 @@ export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalPr
                     </Button>
                     <Button
                         onClick={handleNext}
+                        disabled={!canProceed}
                         className="flex-1"
                     >
                         {isLastStep ? (
