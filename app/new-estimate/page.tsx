@@ -827,7 +827,7 @@ export default function NewEstimatePage() {
                                 </Button>
                             </div>
 
-                            {/* Payment Link Toggle */}
+                            {/* Payment Link Toggle - Temporarily Disabled
                             <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg mt-4">
                                 <div className="flex items-center gap-2">
                                     <CreditCard className="h-4 w-4 text-primary" />
@@ -892,6 +892,7 @@ export default function NewEstimatePage() {
                                     ✓ Payment link will be included in PDF
                                 </p>
                             )}
+                            */}
 
                             {/* Email Button */}
                             <Button
