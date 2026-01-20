@@ -7,6 +7,7 @@ import { Toaster } from "@/components/toast";
 import { SyncManager } from "@/components/sync-manager";
 import { OfflineBanner } from "@/components/offline-banner";
 import { InstallPrompt } from "@/components/install-prompt";
+import { FeedbackModal } from "@/components/feedback-modal";
 import { cn } from "@/lib/utils";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -46,6 +47,7 @@ export default function RootLayout({
           </main>
           <BottomNav />
           <SyncManager />
+          <FeedbackModal />
           <Toaster />
         </ThemeProvider>
       </body>

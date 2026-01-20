@@ -3,15 +3,16 @@
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, Download, FileText, Copy, Trash2, Mail } from "lucide-react"
+import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle } from "lucide-react"
 import dynamic from "next/dynamic"
 import { EstimatePDF } from "@/components/estimate-pdf"
 import { useRouter } from "next/navigation"
-import { getEstimates, deleteEstimate, getProfile, type LocalEstimate, type EstimateItem } from "@/lib/estimates-storage"
+import { getEstimates, deleteEstimate, getProfile, updateEstimateStatus, type LocalEstimate, type EstimateItem, type BusinessInfo } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { PDFPreviewModal } from "@/components/pdf-preview-modal"
 import { FollowUpModal } from "@/components/follow-up-modal"
+import { Badge } from "@/components/ui/badge"
 
 const PDFDownloadLink = dynamic(
     () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
@@ -21,44 +22,54 @@ const PDFDownloadLink = dynamic(
     }
 )
 
+type TabType = 'drafts' | 'sent'
+
 export default function HistoryPage() {
     const router = useRouter()
     const [estimates, setEstimates] = useState<LocalEstimate[]>([])
     const [loading, setLoading] = useState(true)
+    const [activeTab, setActiveTab] = useState<TabType>('drafts')
     const [expandedId, setExpandedId] = useState<string | null>(null)
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
     const [estimateToDelete, setEstimateToDelete] = useState<string | null>(null)
     const [previewEstimate, setPreviewEstimate] = useState<LocalEstimate | null>(null)
     const [followUpEstimate, setFollowUpEstimate] = useState<LocalEstimate | null>(null)
-    const [businessName, setBusinessName] = useState("")
+    const [businessProfile, setBusinessProfile] = useState<BusinessInfo | undefined>(undefined)
 
     useEffect(() => {
-        // Load estimates from IndexedDB
-        const loadData = async () => {
-            const localEstimates = await getEstimates()
-            setEstimates(localEstimates)
-
-            // Load business name for follow-up emails
-            const profile = getProfile()
-            if (profile?.business_name) {
-                setBusinessName(profile.business_name)
-            }
-
-            setLoading(false)
-        }
         loadData()
     }, [])
 
-    const toggleExpand = (estimateId: string) => {
-        if (expandedId === estimateId) {
-            setExpandedId(null)
-        } else {
-            setExpandedId(estimateId)
+    const loadData = async () => {
+        const localEstimates = await getEstimates()
+        setEstimates(localEstimates)
+        const profile = getProfile()
+        if (profile) setBusinessProfile(profile)
+        setLoading(false)
+    }
+
+    // Filter estimates based on active tab
+    const filteredEstimates = estimates.filter(e => {
+        if (activeTab === 'drafts') {
+            return e.status === 'draft' || !e.status  // Include legacy estimates
         }
+        return e.status === 'sent'
+    })
+
+    // Count for badges
+    const draftsCount = estimates.filter(e => e.status === 'draft' || !e.status).length
+    const sentCount = estimates.filter(e => e.status === 'sent').length
+
+    // Count items with price TBD
+    const getPriceTBDCount = (estimate: LocalEstimate): number => {
+        return estimate.items?.filter(item => item.unit_price === 0).length || 0
+    }
+
+    const toggleExpand = (estimateId: string) => {
+        setExpandedId(expandedId === estimateId ? null : estimateId)
     }
 
     const handleDuplicate = (estimate: LocalEstimate) => {
-        // Save to localStorage for new-estimate page to pick up
         const duplicateData = {
             items: estimate.items,
             summary_note: estimate.summary_note,
@@ -67,9 +78,13 @@ export default function HistoryPage() {
             taxRate: estimate.taxRate
         }
         localStorage.setItem('duplicate_estimate', JSON.stringify(duplicateData))
-
-        // Navigate to new estimate page
         router.push('/new-estimate')
+    }
+
+    const handleMarkAsSent = async (estimateId: string) => {
+        await updateEstimateStatus(estimateId, 'sent')
+        await loadData()
+        toast("✅ Marked as sent!", "success")
     }
 
     const handleDeleteClick = (e: React.MouseEvent, estimateId: string) => {
@@ -82,11 +97,10 @@ export default function HistoryPage() {
     const handleConfirmDelete = async () => {
         if (estimateToDelete) {
             await deleteEstimate(estimateToDelete)
-            const updatedEstimates = await getEstimates()
-            setEstimates(updatedEstimates)
-            toast(`✅ Estimate deleted (${updatedEstimates.length} remaining)`, "success")
+            await loadData()
+            toast("✅ Estimate deleted", "success")
             setEstimateToDelete(null)
-            setDeleteDialogOpen(false) // Close dialog after deletion
+            setDeleteDialogOpen(false)
         }
     }
 
@@ -94,13 +108,61 @@ export default function HistoryPage() {
 
     return (
         <div className="space-y-4 pb-20 max-w-2xl mx-auto px-4">
-            <h1 className="text-2xl font-bold">Estimate History</h1>
-            {estimates.length === 0 ? (
-                <p className="text-muted-foreground">No estimates yet.</p>
+            <h1 className="text-2xl font-bold">Estimates</h1>
+
+            {/* Tab Navigation */}
+            <div className="flex p-1 bg-muted rounded-lg">
+                <Button
+                    variant={activeTab === 'drafts' ? 'default' : 'ghost'}
+                    className="flex-1 rounded-md h-10"
+                    onClick={() => setActiveTab('drafts')}
+                >
+                    📝 Drafts
+                    {draftsCount > 0 && (
+                        <Badge variant="secondary" className="ml-2">
+                            {draftsCount}
+                        </Badge>
+                    )}
+                </Button>
+                <Button
+                    variant={activeTab === 'sent' ? 'default' : 'ghost'}
+                    className="flex-1 rounded-md h-10"
+                    onClick={() => setActiveTab('sent')}
+                >
+                    ✅ Sent
+                    {sentCount > 0 && (
+                        <Badge variant="secondary" className="ml-2">
+                            {sentCount}
+                        </Badge>
+                    )}
+                </Button>
+            </div>
+
+            {filteredEstimates.length === 0 ? (
+                <Card className="border-dashed">
+                    <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                        <FileText className="h-12 w-12 text-muted-foreground mb-4" />
+                        <h3 className="font-medium text-lg mb-2">
+                            {activeTab === 'drafts' ? 'No drafts yet' : 'No sent estimates'}
+                        </h3>
+                        <p className="text-muted-foreground text-sm mb-4">
+                            {activeTab === 'drafts'
+                                ? 'Create a new estimate to get started'
+                                : 'Drafts will appear here after you send them'}
+                        </p>
+                        {activeTab === 'drafts' && (
+                            <Button onClick={() => router.push("/new-estimate")}>
+                                Create New Estimate
+                            </Button>
+                        )}
+                    </CardContent>
+                </Card>
             ) : (
-                estimates.map((estimate) => {
+                filteredEstimates.map((estimate) => {
                     const isExpanded = expandedId === estimate.id
                     const items = estimate.items || []
+                    const priceTBDCount = getPriceTBDCount(estimate)
+
                     return (
                         <Card key={estimate.id}>
                             <CardHeader className="pb-3">
@@ -118,9 +180,20 @@ export default function HistoryPage() {
                                             {new Date(estimate.createdAt).toLocaleDateString()}
                                         </p>
                                     </div>
-                                    <span className="px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-green-100 text-green-800">
-                                        SAVED
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        {priceTBDCount > 0 && activeTab === 'drafts' && (
+                                            <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300">
+                                                <AlertCircle className="h-3 w-3 mr-1" />
+                                                {priceTBDCount} TBD
+                                            </Badge>
+                                        )}
+                                        <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${estimate.status === 'sent'
+                                            ? 'bg-green-100 text-green-800'
+                                            : 'bg-yellow-100 text-yellow-800'
+                                            }`}>
+                                            {estimate.status === 'sent' ? 'SENT' : 'DRAFT'}
+                                        </span>
+                                    </div>
                                 </div>
                             </CardHeader>
                             <CardContent className="space-y-3">
@@ -135,11 +208,12 @@ export default function HistoryPage() {
                                 {isExpanded && items.length > 0 && (
                                     <div className="pt-3 border-t space-y-2">
                                         {items.map((item: EstimateItem, idx: number) => (
-                                            <div key={idx} className="flex justify-between text-sm">
+                                            <div key={idx} className={`flex justify-between text-sm ${item.unit_price === 0 ? 'bg-yellow-50 p-2 rounded border border-yellow-200' : ''}`}>
                                                 <div>
                                                     <p className="font-medium">{item.description}</p>
                                                     <p className="text-xs text-muted-foreground">
                                                         Qty: {item.quantity} × ${item.unit_price.toFixed(2)}
+                                                        {item.unit_price === 0 && <span className="ml-2 text-yellow-600">⚠️ Price TBD</span>}
                                                     </p>
                                                 </div>
                                                 <p className="font-semibold">${item.total.toFixed(2)}</p>
@@ -157,6 +231,41 @@ export default function HistoryPage() {
                                                 </div>
                                             </div>
                                         )}
+
+                                        {/* Attachments Section - Dispute Prevention */}
+                                        {estimate.attachments && (estimate.attachments.photos?.length > 0 || estimate.attachments.originalTranscript) && (
+                                            <div className="pt-3 border-t mt-3">
+                                                <p className="text-sm font-medium text-muted-foreground mb-2">📎 Original Data</p>
+
+                                                {/* Photos */}
+                                                {estimate.attachments.photos && estimate.attachments.photos.length > 0 && (
+                                                    <div className="mb-2">
+                                                        <p className="text-xs text-muted-foreground mb-1">Photos ({estimate.attachments.photos.length})</p>
+                                                        <div className="flex gap-2 overflow-x-auto">
+                                                            {estimate.attachments.photos.map((url, i) => (
+                                                                // eslint-disable-next-line @next/next/no-img-element
+                                                                <img
+                                                                    key={i}
+                                                                    src={url}
+                                                                    alt={`Attachment ${i + 1}`}
+                                                                    className="h-16 w-16 object-cover rounded border"
+                                                                />
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Transcript */}
+                                                {estimate.attachments.originalTranscript && (
+                                                    <div>
+                                                        <p className="text-xs text-muted-foreground mb-1">🎤 Original Transcript</p>
+                                                        <p className="text-xs bg-muted p-2 rounded italic">
+                                                            &ldquo;{estimate.attachments.originalTranscript}&rdquo;
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 
@@ -167,8 +276,20 @@ export default function HistoryPage() {
                                         onClick={() => toggleExpand(estimate.id)}
                                     >
                                         <FileText className="h-3 w-3 mr-1" />
-                                        {isExpanded ? "Hide Details" : "View Details"}
+                                        {isExpanded ? "Hide" : "Details"}
                                     </Button>
+
+                                    {/* Mark as Sent button - only for drafts */}
+                                    {activeTab === 'drafts' && (
+                                        <Button
+                                            variant="default"
+                                            size="sm"
+                                            onClick={() => handleMarkAsSent(estimate.id)}
+                                        >
+                                            ✅ Mark Sent
+                                        </Button>
+                                    )}
+
                                     <Button
                                         variant="outline"
                                         size="sm"
@@ -213,6 +334,7 @@ export default function HistoryPage() {
                                                             name: estimate.clientName,
                                                             address: estimate.clientAddress
                                                         }}
+                                                        business={businessProfile}
                                                     />
                                                 }
                                                 fileName={`${estimate.estimateNumber || 'estimate'}.pdf`}
@@ -255,8 +377,10 @@ export default function HistoryPage() {
                                 name: previewEstimate.clientName,
                                 address: previewEstimate.clientAddress
                             }}
+                            business={businessProfile}
                         />
                     }
+                    fileName={`${previewEstimate.estimateNumber || 'estimate'}.pdf`}
                 />
             )}
 
@@ -267,7 +391,7 @@ export default function HistoryPage() {
                     clientName={followUpEstimate.clientName}
                     estimateNumber={followUpEstimate.estimateNumber}
                     totalAmount={followUpEstimate.totalAmount}
-                    businessName={businessName}
+                    businessName={businessProfile?.business_name || ""}
                 />
             )}
         </div>

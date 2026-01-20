@@ -25,7 +25,8 @@ export default function ProfilePage() {
         address: "",
         license_number: "",
         tax_rate: 13,
-        logo_url: ""
+        logo_url: "",
+        state_province: "ON"
     })
     const [uploading, setUploading] = useState(false)
     const [logoPreview, setLogoPreview] = useState<string | null>(null)
@@ -150,7 +151,8 @@ export default function ProfilePage() {
                 address: "",
                 license_number: "",
                 tax_rate: 13,
-                logo_url: ""
+                logo_url: "",
+                state_province: "ON"
             })
             setLogoPreview(null)
             toast("🗑️ All data cleared.", "success")
@@ -259,6 +261,28 @@ export default function ProfilePage() {
                             onChange={(e) => setProfile({ ...profile, address: e.target.value })}
                             placeholder="123 Main St, Toronto, ON"
                         />
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label htmlFor="state_province">State / Province (For Legal Templates)</Label>
+                        <select
+                            id="state_province"
+                            value={profile.state_province || "ON"}
+                            onChange={(e) => setProfile({ ...profile, state_province: e.target.value })}
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            <option value="ON">Ontario (Canada)</option>
+                            <option value="BC">British Columbia (Canada)</option>
+                            <option value="AB">Alberta (Canada)</option>
+                            <option value="CA">California (USA)</option>
+                            <option value="TX">Texas (USA)</option>
+                            <option value="NY">New York (USA)</option>
+                            <option value="FL">Florida (USA)</option>
+                            <option value="OTHER">Other / General</option>
+                        </select>
+                        <p className="text-xs text-muted-foreground">
+                            Required legal disclaimers will be added to PDF based on this.
+                        </p>
                     </div>
 
                     <div className="space-y-2">

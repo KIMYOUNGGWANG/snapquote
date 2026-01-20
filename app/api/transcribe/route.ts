@@ -15,7 +15,7 @@ export async function POST(req: Request) {
         // However, sometimes we need to ensure it has a name and type.
 
         // Trade terminology hint for better Whisper recognition
-        const TRADE_HINT = "2x4 2x6 4x4 studs joists drywall sheetrock PVC PEX copper P-trap ball valve Moen Delta Kohler GFCI breaker TBD mold rot labor parts materials";
+        const TRADE_HINT = "two 2x4, two 2x6, 4x4, studs, joists, drywall, sheetrock, PVC, PEX, copper, P-trap, ball valve, Moen, Delta, Kohler, GFCI, breaker, TBD, mold, rot, labor, parts, materials, rough-in, trim-out";
 
         const transcription = await openai.audio.transcriptions.create({
             file: audioFile,
@@ -24,7 +24,14 @@ export async function POST(req: Request) {
             prompt: TRADE_HINT,
         });
 
-        return NextResponse.json({ text: transcription.text });
+        let text = transcription.text;
+
+        // Post-processing to fix common Whisper "to" vs "two" errors with measurements
+        // Replaces "to 2x4" -> "two 2x4", "to 2 by 4" -> "two 2 by 4", "2 2x4" -> "two 2x4"
+        text = text.replace(/\b(to|too|2)\s+(\d+\s*[xX]\s*\d+)/gi, "two $2");
+        text = text.replace(/\b(to|too)\s+(\d+)\s+by\s+(\d+)/gi, "two $2 by $3");
+
+        return NextResponse.json({ text });
     } catch (error) {
         console.error("Transcription error:", error);
         return NextResponse.json({ error: "Transcription failed" }, { status: 500 });

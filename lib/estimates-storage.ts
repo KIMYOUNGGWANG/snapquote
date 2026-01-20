@@ -1,16 +1,42 @@
 import { saveEstimateToDB, getEstimatesFromDB, initDB } from "./db"
 
+// Unit types for professional estimating
+export type EstimateUnit = 'ea' | 'LS' | 'hr' | 'day' | 'SF' | 'LF' | '%' | 'other'
+
+// Category types
+export type EstimateCategory = 'PARTS' | 'LABOR' | 'SERVICE' | 'OTHER'
+
 export interface EstimateItem {
-    description: string
+    id: string              // Unique ID for drag-drop
+    itemNumber: number      // Display order (editable)
+    category: EstimateCategory
+    description: string     // No more [PARTS] prefix
     quantity: number
+    unit: EstimateUnit
     unit_price: number
     total: number
+}
+
+// Attachments for dispute prevention
+export interface EstimateAttachments {
+    photos: string[]           // base64 data URLs
+    audioUrl?: string          // base64 audio data
+    originalTranscript?: string // Original voice transcript
+}
+
+// Section/Division for large construction projects (CSI Divisions)
+export interface EstimateSection {
+    id: string
+    divisionCode?: string      // e.g., "03" for Concrete, "16" for Electrical
+    name: string               // e.g., "Concrete Work", "Electrical"
+    items: EstimateItem[]      // Items within this section (Parts + Labor mixed)
 }
 
 export interface LocalEstimate {
     id: string
     estimateNumber: string
-    items: EstimateItem[]
+    items: EstimateItem[]      // Legacy: flat items (for backward compatibility)
+    sections?: EstimateSection[] // NEW: Division-based grouping
     summary_note: string
     clientName: string
     clientAddress: string
@@ -19,6 +45,10 @@ export interface LocalEstimate {
     totalAmount: number
     createdAt: string
     synced?: boolean
+    status: 'draft' | 'sent'  // Capture-First status
+    attachments?: EstimateAttachments  // Original data preservation
+    clientSignature?: string; // base64 image (NEW for Phase 6)
+    signedAt?: string; // ISO date (NEW for Phase 6)
 }
 
 export interface BusinessInfo {
@@ -29,6 +59,7 @@ export interface BusinessInfo {
     license_number: string
     logo_url?: string
     tax_rate?: number
+    state_province?: string
 }
 
 // Estimates (IndexedDB)
@@ -45,6 +76,27 @@ export async function getEstimates(): Promise<LocalEstimate[]> {
 export async function deleteEstimate(id: string) {
     const db = await initDB()
     return db.delete('estimates', id)
+}
+
+// NEW: Get only draft estimates
+export async function getDraftEstimates(): Promise<LocalEstimate[]> {
+    const estimates = await getEstimates()
+    return estimates.filter(e => e.status === 'draft' || !e.status)  // Include legacy estimates without status
+}
+
+// NEW: Get only sent estimates
+export async function getSentEstimates(): Promise<LocalEstimate[]> {
+    const estimates = await getEstimates()
+    return estimates.filter(e => e.status === 'sent')
+}
+
+// NEW: Update estimate status
+export async function updateEstimateStatus(id: string, status: 'draft' | 'sent'): Promise<void> {
+    const db = await initDB()
+    const estimate = await db.get('estimates', id)
+    if (estimate) {
+        await db.put('estimates', { ...estimate, status })
+    }
 }
 
 export function generateEstimateNumber(): string {

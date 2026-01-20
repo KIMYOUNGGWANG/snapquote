@@ -7,17 +7,36 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Mic, FileText, History, Zap, ArrowRight, Shield, Clock, Send, DollarSign } from "lucide-react"
 import { OnboardingModal } from "@/components/onboarding-modal"
+import { QuickQuoteModal } from "@/components/quick-quote-modal"
 import { isFirstVisit, markOnboardingCompleted } from "@/lib/estimates-storage"
+import { getPriceList } from "@/lib/db"
+import type { PriceListItem } from "@/types"
 
 export default function Home() {
   const router = useRouter()
   const [showOnboarding, setShowOnboarding] = useState(false)
+  const [priceListItems, setPriceListItems] = useState<PriceListItem[]>([])
+  const [selectedQuickItem, setSelectedQuickItem] = useState<PriceListItem | null>(null)
+  const [showQuickQuote, setShowQuickQuote] = useState(false)
 
   useEffect(() => {
     // Check if first visit after component mounts
     if (isFirstVisit()) {
       setShowOnboarding(true)
     }
+
+    // Load price list for Quick Quote
+    const loadPriceList = async () => {
+      try {
+        const items = await getPriceList()
+        // Sort by usage count (most used first)
+        const sorted = items.sort((a, b) => b.usageCount - a.usageCount)
+        setPriceListItems(sorted.slice(0, 6)) // Top 6 items
+      } catch (err) {
+        console.error("Failed to load price list:", err)
+      }
+    }
+    loadPriceList()
   }, [])
 
   const handleOnboardingComplete = () => {
@@ -31,12 +50,22 @@ export default function Home() {
     setShowOnboarding(false)
   }
 
+  const handleQuickQuote = (item: PriceListItem) => {
+    setSelectedQuickItem(item)
+    setShowQuickQuote(true)
+  }
+
   return (
     <>
       <OnboardingModal
         open={showOnboarding}
         onClose={handleOnboardingSkip}
         onComplete={handleOnboardingComplete}
+      />
+      <QuickQuoteModal
+        open={showQuickQuote}
+        onClose={() => setShowQuickQuote(false)}
+        item={selectedQuickItem}
       />
       <div className="flex flex-col min-h-[calc(100vh-80px)] pb-20">
         {/* Hero Section */}
@@ -101,6 +130,36 @@ export default function Home() {
             <StepCard step="3" icon={<Send className="h-4 w-4" />} label="Send PDF" />
           </div>
         </section>
+
+        {/* Quick Quote Section */}
+        {priceListItems.length > 0 && (
+          <section className="px-4 py-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                <Zap className="h-4 w-4 text-amber-500" />
+                Quick Quote
+              </h2>
+              <Link href="/profile" className="text-xs text-primary hover:underline">
+                Edit Prices →
+              </Link>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {priceListItems.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => handleQuickQuote(item)}
+                  className="flex flex-col items-start p-3 bg-muted/50 hover:bg-muted rounded-lg border border-transparent hover:border-primary/20 transition-all text-left"
+                >
+                  <span className="text-sm font-medium line-clamp-1">{item.name}</span>
+                  <span className="text-lg font-bold text-primary">${item.price}</span>
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground text-center mt-2">
+              Tap an item for instant SMS-ready quote
+            </p>
+          </section>
+        )}
 
         {/* What You Get */}
         <section className="px-4 py-4">

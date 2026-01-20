@@ -59,6 +59,50 @@ export function PDFPreviewModal({ open, onClose, document: pdfDocument, fileName
         }
     }
 
+    const [sending, setSending] = useState(false)
+    const [showEmailInput, setShowEmailInput] = useState(false)
+    const [email, setEmail] = useState("")
+
+    const handleSendEmail = async () => {
+        if (!email) return
+
+        try {
+            setSending(true)
+            const { pdf } = await import("@react-pdf/renderer")
+            const blob = await pdf(pdfDocument).toBlob()
+
+            // Convert blob to base64
+            const reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onloadend = async () => {
+                const base64data = reader.result?.toString().split(',')[1];
+
+                const response = await fetch('/api/send-email', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        to: email,
+                        pdfBuffer: base64data,
+                        filename: fileName
+                    })
+                });
+
+                if (response.ok) {
+                    alert("Email sent successfully!")
+                    setShowEmailInput(false)
+                    setEmail("")
+                } else {
+                    alert("Failed to send email.")
+                }
+                setSending(false)
+            }
+        } catch (err) {
+            console.error(err)
+            alert("Error sending email")
+            setSending(false)
+        }
+    }
+
     return (
         <Dialog open={open} onOpenChange={onClose}>
             <DialogContent className="max-w-4xl w-[95vw] h-[90vh] p-0 overflow-hidden flex flex-col">
@@ -68,6 +112,27 @@ export function PDFPreviewModal({ open, onClose, document: pdfDocument, fileName
                         <DialogDescription className="sr-only">PDF 견적서를 미리 확인합니다</DialogDescription>
                     </div>
                     <div className="flex items-center gap-2">
+                        {showEmailInput ? (
+                            <div className="flex items-center gap-2 animate-in slide-in-from-right-5 fade-in duration-300">
+                                <input
+                                    type="email"
+                                    placeholder="Enter client email"
+                                    className="h-8 w-48 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                />
+                                <Button size="sm" onClick={handleSendEmail} disabled={sending || !email}>
+                                    {sending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Send"}
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={() => setShowEmailInput(false)}>
+                                    <X className="h-4 w-4" />
+                                </Button>
+                            </div>
+                        ) : (
+                            <Button variant="outline" size="sm" onClick={() => setShowEmailInput(true)}>
+                                📧 Email
+                            </Button>
+                        )}
                         <Button variant="outline" size="sm" onClick={handleDownload} disabled={!pdfUrl}>
                             <Download className="h-4 w-4 mr-1" />
                             다운로드

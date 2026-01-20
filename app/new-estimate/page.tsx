@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { Camera, Upload, X, Loader2, Save, Share2, Download, Plus, Trash2, ArrowRight, Edit2, CheckCircle2, CreditCard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -11,13 +11,16 @@ import dynamic from "next/dynamic"
 import { EstimatePDF } from "@/components/estimate-pdf"
 import { useRouter } from "next/navigation"
 import { saveEstimate, generateEstimateNumber, getProfile, saveProfile } from "@/lib/estimates-storage"
-import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI } from "@/lib/db"
+import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI, getClients, type Client } from "@/lib/db"
 import type { BusinessInfo } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
 import { AudioRecorder } from "@/components/audio-recorder"
 import { PDFPreviewModal } from "@/components/pdf-preview-modal"
 import { EmailModal } from "@/components/email-modal"
-import { Mail } from "lucide-react"
+import { ExcelImportModal } from "@/components/excel-import-modal"
+import { Mail, FileSpreadsheet, Users, PenTool } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { SignaturePad } from "@/components/signature-pad"
 
 const PDFDownloadLink = dynamic(
     () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
@@ -27,18 +30,38 @@ const PDFDownloadLink = dynamic(
     }
 )
 
+// Unit and Category types for professional estimating
+type EstimateUnit = 'ea' | 'LS' | 'hr' | 'day' | 'SF' | 'LF' | '%' | 'other'
+type EstimateCategory = 'PARTS' | 'LABOR' | 'SERVICE' | 'OTHER'
+
 interface EstimateItem {
+    id: string
+    itemNumber: number
+    category: EstimateCategory
     description: string
     quantity: number
+    unit: EstimateUnit
     unit_price: number
     total: number
     is_value_add?: boolean
     notes?: string
 }
 
-interface Estimate {
+// Section for Division-based grouping
+interface EstimateSection {
+    id: string
+    name: string                // e.g., "Concrete Work", "Electrical"
+    divisionCode?: string       // e.g., "03", "16"
     items: EstimateItem[]
+}
+
+interface Estimate {
+    items: EstimateItem[]          // Legacy flat items (for backward compat)
+    sections?: EstimateSection[]   // NEW: Division-based grouping
     summary_note: string
+    clientSignature?: string // NEW
+    signedAt?: string // NEW
+    status?: 'draft' | 'sent' // NEW
     warnings?: string[]
     payment_terms?: string
     closing_note?: string
@@ -57,6 +80,13 @@ export default function NewEstimatePage() {
     const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
     const [estimate, setEstimate] = useState<Estimate | null>(null)
 
+    // Client Load State
+    const [isClientModalOpen, setIsClientModalOpen] = useState(false)
+    const [availableClients, setAvailableClients] = useState<Client[]>([])
+
+    // Signature State
+    const [isSignatureModalOpen, setIsSignatureModalOpen] = useState(false)
+
     // UI States
     const [isSaving, setIsSaving] = useState(false)
     const [isSharing, setIsSharing] = useState(false)
@@ -66,6 +96,7 @@ export default function NewEstimatePage() {
     const [businessProfile, setBusinessProfile] = useState<BusinessInfo | undefined>(undefined)
     const [isPreviewOpen, setIsPreviewOpen] = useState(false)
     const [isEmailModalOpen, setIsEmailModalOpen] = useState(false)
+    const [isExcelModalOpen, setIsExcelModalOpen] = useState(false)
     const [isOffline, setIsOffline] = useState(false)
     const [pendingAudioId, setPendingAudioId] = useState<string | null>(null)
     const [projectType, setProjectType] = useState<'residential' | 'commercial'>('residential')
@@ -306,8 +337,12 @@ export default function NewEstimatePage() {
         if (!estimate) return
         const newItems = [...estimate.items]
         const item = { ...newItems[index] }
-        if (field === "description" || field === "notes") {
+        if (field === "description" || field === "notes" || field === "id") {
             (item as any)[field] = value as string
+        } else if (field === "category") {
+            item.category = value as EstimateCategory
+        } else if (field === "unit") {
+            item.unit = value as EstimateUnit
         } else if (field === "is_value_add") {
             item.is_value_add = value as boolean
         } else {
@@ -325,7 +360,18 @@ export default function NewEstimatePage() {
 
     const handleAddItem = () => {
         if (!estimate) return
-        const newItem: EstimateItem = { description: "[PARTS] ", quantity: 1, unit_price: 0, total: 0 }
+        const allItems = getAllItemsFromEstimate(estimate)
+        const nextNumber = allItems.length + 1
+        const newItem: EstimateItem = {
+            id: `item-${crypto.randomUUID().slice(0, 8)}`,
+            itemNumber: nextNumber,
+            category: 'PARTS',
+            description: "",
+            quantity: 1,
+            unit: 'ea',
+            unit_price: 0,
+            total: 0
+        }
         setEstimate({ ...estimate, items: [...estimate.items, newItem] })
     }
 
@@ -335,25 +381,127 @@ export default function NewEstimatePage() {
         setEstimate({ ...estimate, items: newItems })
     }
 
+    // ========== Section Handlers ==========
+    const handleAddSection = () => {
+        if (!estimate) return
+        const sections = estimate.sections || []
+        const newSection: EstimateSection = {
+            id: `section-${crypto.randomUUID().slice(0, 8)}`,
+            name: `Section ${sections.length + 1}`,
+            items: []
+        }
+        setEstimate({ ...estimate, sections: [...sections, newSection] })
+    }
+
+    const handleEditSectionName = (sectionId: string, newName: string) => {
+        if (!estimate || !estimate.sections) return
+        const updated = estimate.sections.map(s =>
+            s.id === sectionId ? { ...s, name: newName } : s
+        )
+        setEstimate({ ...estimate, sections: updated })
+    }
+
+    const handleDeleteSection = (sectionId: string) => {
+        if (!estimate || !estimate.sections) return
+        // Move items to main items array before deleting section
+        const sectionToDelete = estimate.sections.find(s => s.id === sectionId)
+        const remainingSections = estimate.sections.filter(s => s.id !== sectionId)
+        const itemsToMove = sectionToDelete?.items || []
+        setEstimate({
+            ...estimate,
+            items: [...estimate.items, ...itemsToMove],
+            sections: remainingSections
+        })
+    }
+
+    const handleAddItemToSection = (sectionId: string) => {
+        if (!estimate || !estimate.sections) return
+        const allItems = getAllItemsFromEstimate(estimate)
+        const nextNumber = allItems.length + 1
+        const newItem: EstimateItem = {
+            id: `item-${crypto.randomUUID().slice(0, 8)}`,
+            itemNumber: nextNumber,
+            category: 'PARTS',
+            description: "",
+            quantity: 1,
+            unit: 'ea',
+            unit_price: 0,
+            total: 0
+        }
+        const updated = estimate.sections.map(s =>
+            s.id === sectionId ? { ...s, items: [...s.items, newItem] } : s
+        )
+        setEstimate({ ...estimate, sections: updated })
+    }
+
+    const handleSectionItemChange = (sectionId: string, itemIndex: number, field: keyof EstimateItem, value: string | number | boolean) => {
+        if (!estimate || !estimate.sections) return
+        const updated = estimate.sections.map(section => {
+            if (section.id !== sectionId) return section
+            const newItems = [...section.items]
+            const item = { ...newItems[itemIndex] }
+            if (field === "description" || field === "notes" || field === "id") {
+                (item as any)[field] = value as string
+            } else if (field === "category") {
+                item.category = value as EstimateCategory
+            } else if (field === "unit") {
+                item.unit = value as EstimateUnit
+            } else {
+                (item as any)[field] = Number(value)
+                item.total = item.quantity * item.unit_price
+            }
+            newItems[itemIndex] = item
+            return { ...section, items: newItems }
+        })
+        setEstimate({ ...estimate, sections: updated })
+    }
+
+    const handleDeleteSectionItem = (sectionId: string, itemIndex: number) => {
+        if (!estimate || !estimate.sections) return
+        const updated = estimate.sections.map(section => {
+            if (section.id !== sectionId) return section
+            return { ...section, items: section.items.filter((_, i) => i !== itemIndex) }
+        })
+        setEstimate({ ...estimate, sections: updated })
+    }
+
+    // Helper: Get all items from both flat items and sections
+    const getAllItemsFromEstimate = (est: Estimate): EstimateItem[] => {
+        const flatItems = est.items || []
+        const sectionItems = (est.sections || []).flatMap(s => s.items)
+        return [...flatItems, ...sectionItems]
+    }
+
     const handleSave = async () => {
         if (!estimate) return
         setIsSaving(true)
         try {
-            const subtotal = estimate.items.reduce((sum, item) => sum + item.total, 0)
+            const allItems = getAllItemsFromEstimate(estimate)
+            const subtotal = allItems.reduce((sum, item) => sum + (item.total || item.quantity * item.unit_price), 0)
             const taxAmount = subtotal * (taxRate / 100)
             const totalAmount = subtotal + taxAmount
             const estimateNumber = generateEstimateNumber()
+
+            // Build attachments for dispute prevention
+            const attachments = {
+                photos: previewUrls,  // Already base64 data URLs
+                originalTranscript: transcribedText || undefined
+            }
+
             const localEstimate = {
                 id: crypto.randomUUID(),
                 estimateNumber,
                 items: estimate.items,
+                sections: estimate.sections,  // Include sections
                 summary_note: estimate.summary_note,
                 clientName: clientName || "Walk-in Client",
                 clientAddress: clientAddress || "N/A",
                 taxRate,
                 taxAmount,
                 totalAmount,
-                createdAt: new Date().toISOString()
+                createdAt: new Date().toISOString(),
+                status: 'draft' as const,
+                attachments: (previewUrls.length > 0 || transcribedText) ? attachments : undefined
             }
             await saveEstimate(localEstimate)
             toast("✅ Estimate saved successfully!", "success")
@@ -405,6 +553,28 @@ export default function NewEstimatePage() {
             setIsSharing(false)
         }
     }
+
+    const handleExcelImport = useCallback((importedItems: EstimateItem[]) => {
+        if (!estimate) {
+            // Create new estimate with imported items
+            setEstimate({
+                items: importedItems,
+                summary_note: "Imported from Excel",
+            })
+            setStep("verifying")
+        } else {
+            // Merge with existing items
+            const updatedItems = [
+                ...estimate.items,
+                ...importedItems.map((item, idx) => ({
+                    ...item,
+                    itemNumber: estimate.items.length + idx + 1
+                }))
+            ]
+            setEstimate({ ...estimate, items: updatedItems })
+        }
+        toast(`✅ Imported ${importedItems.length} items from Excel`, "success")
+    }, [estimate, setEstimate, setStep])
 
     return (
         <div className="max-w-md mx-auto space-y-6 pb-20">
@@ -609,9 +779,23 @@ export default function NewEstimatePage() {
                                 </div>
                             )}
                             {/* Client Info */}
-                            <div className="grid grid-cols-1 gap-3 p-4 bg-muted/50 rounded-lg">
+                            <div className="grid grid-cols-2 gap-4 bg-muted p-4 rounded-lg">
                                 <div>
-                                    <label className="text-xs font-medium text-muted-foreground">Client Name</label>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="text-xs font-medium text-muted-foreground">Client Name</label>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-5 text-[10px] px-1 text-primary"
+                                            onClick={async () => {
+                                                const clients = await getClients()
+                                                setAvailableClients(clients)
+                                                setIsClientModalOpen(true)
+                                            }}
+                                        >
+                                            <Users className="h-3 w-3 mr-1" /> Load
+                                        </Button>
+                                    </div>
                                     <Input
                                         value={clientName}
                                         onChange={(e) => setClientName(e.target.value)}
@@ -641,34 +825,32 @@ export default function NewEstimatePage() {
 
                             <div className="space-y-4">
                                 {estimate.items.map((item, index) => {
-                                    // Extract category from description if present
-                                    const categoryMatch = item.description.match(/^\[(PARTS|LABOR|SERVICE)\]\s*/i)
-                                    const currentCategory = categoryMatch ? categoryMatch[1].toUpperCase() : 'PARTS'
-                                    const descriptionWithoutCategory = item.description.replace(/^\[(PARTS|LABOR|SERVICE)\]\s*/i, '')
+                                    // Use the new category field directly (with fallback for old data)
+                                    const currentCategory = item.category || 'PARTS'
+                                    const currentUnit = item.unit || 'ea'
 
                                     return (
-                                        <div key={index} className="flex flex-col gap-2 py-3 border-b last:border-0">
+                                        <div key={item.id || index} className="flex flex-col gap-2 py-3 border-b last:border-0">
+                                            {/* Row 1: Item #, Category, Description, Delete */}
                                             <div className="flex items-start gap-2">
+                                                {/* Item Number */}
+                                                <span className="w-6 h-9 flex items-center justify-center text-xs font-mono text-muted-foreground">
+                                                    #{item.itemNumber || index + 1}
+                                                </span>
                                                 {/* Category Dropdown */}
                                                 <select
                                                     value={currentCategory}
-                                                    onChange={(e) => {
-                                                        const newCategory = e.target.value
-                                                        const newDescription = `[${newCategory}] ${descriptionWithoutCategory}`
-                                                        handleItemChange(index, "description", newDescription)
-                                                    }}
+                                                    onChange={(e) => handleItemChange(index, "category", e.target.value)}
                                                     className="h-9 px-2 rounded-md border bg-white text-xs font-medium text-gray-700 shrink-0"
                                                 >
                                                     <option value="PARTS">🔧 Parts</option>
                                                     <option value="LABOR">👷 Labor</option>
                                                     <option value="SERVICE">📋 Service</option>
+                                                    <option value="OTHER">📦 Other</option>
                                                 </select>
                                                 <Input
-                                                    value={descriptionWithoutCategory}
-                                                    onChange={(e) => {
-                                                        const newDescription = `[${currentCategory}] ${e.target.value}`
-                                                        handleItemChange(index, "description", newDescription)
-                                                    }}
+                                                    value={item.description}
+                                                    onChange={(e) => handleItemChange(index, "description", e.target.value)}
                                                     className="font-medium border px-2 h-auto focus-visible:ring-1 flex-1 bg-white text-gray-900"
                                                     placeholder="Item Description"
                                                 />
@@ -681,8 +863,9 @@ export default function NewEstimatePage() {
                                                     <Trash2 className="h-4 w-4" />
                                                 </Button>
                                             </div>
-                                            <div className="flex gap-2 items-center">
-                                                <div className="flex-1">
+                                            {/* Row 2: Qty, Unit, Unit Price, Total */}
+                                            <div className="flex gap-2 items-center ml-8">
+                                                <div className="w-16">
                                                     <label className="text-[10px] text-muted-foreground">Qty</label>
                                                     <Input
                                                         type="number"
@@ -691,8 +874,25 @@ export default function NewEstimatePage() {
                                                         className="h-8 text-gray-900 bg-white border"
                                                     />
                                                 </div>
+                                                <div className="w-20">
+                                                    <label className="text-[10px] text-muted-foreground">Unit</label>
+                                                    <select
+                                                        value={currentUnit}
+                                                        onChange={(e) => handleItemChange(index, "unit", e.target.value)}
+                                                        className="w-full h-8 px-2 rounded-md border bg-white text-xs text-gray-700"
+                                                    >
+                                                        <option value="ea">ea</option>
+                                                        <option value="LS">LS</option>
+                                                        <option value="hr">hr</option>
+                                                        <option value="day">day</option>
+                                                        <option value="SF">SF</option>
+                                                        <option value="LF">LF</option>
+                                                        <option value="%">%</option>
+                                                        <option value="other">other</option>
+                                                    </select>
+                                                </div>
                                                 <div className="flex-1">
-                                                    <label className="text-[10px] text-muted-foreground">Price ($)</label>
+                                                    <label className="text-[10px] text-muted-foreground">Unit $ ({currentUnit})</label>
                                                     <Input
                                                         type="number"
                                                         value={item.unit_price}
@@ -700,10 +900,10 @@ export default function NewEstimatePage() {
                                                         className="h-8 text-gray-900 bg-white border"
                                                     />
                                                 </div>
-                                                <div className="flex-1 text-right">
+                                                <div className="w-24 text-right">
                                                     <label className="text-[10px] text-muted-foreground">Total</label>
                                                     <p className="font-bold py-1">
-                                                        ${item.total.toFixed(2)}
+                                                        ${(item.total || item.quantity * item.unit_price).toFixed(2)}
                                                     </p>
                                                 </div>
                                             </div>
@@ -712,20 +912,158 @@ export default function NewEstimatePage() {
                                 })}
                             </div>
 
-                            <Button
-                                variant="outline"
-                                className="w-full"
-                                onClick={handleAddItem}
-                            >
-                                <Plus className="h-4 w-4 mr-2" />
-                                Add Item
-                            </Button>
+                            {/* Action Buttons: Add Item / Add Section / Upload Excel */}
+                            <div className="flex gap-2 flex-wrap">
+                                <Button
+                                    variant="outline"
+                                    className="flex-1"
+                                    onClick={handleAddItem}
+                                >
+                                    <Plus className="h-4 w-4 mr-2" />
+                                    Add Item
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    className="flex-1"
+                                    onClick={handleAddSection}
+                                >
+                                    <Plus className="h-4 w-4 mr-2" />
+                                    📁 Section
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    className="flex-1"
+                                    onClick={() => setIsExcelModalOpen(true)}
+                                >
+                                    <FileSpreadsheet className="h-4 w-4 mr-2" />
+                                    📊 Excel
+                                </Button>
+                            </div>
+
+                            {/* ========== Sections (Division Groups) ========== */}
+                            {estimate.sections && estimate.sections.length > 0 && (
+                                <div className="space-y-4 mt-4">
+                                    {estimate.sections.map((section) => {
+                                        const sectionSubtotal = section.items.reduce((sum, item) => sum + (item.total || item.quantity * item.unit_price), 0)
+                                        return (
+                                            <div key={section.id} className="border-2 border-primary/30 rounded-lg p-3 bg-primary/5">
+                                                {/* Section Header */}
+                                                <div className="flex items-center justify-between mb-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-lg">📁</span>
+                                                        <Input
+                                                            value={section.name}
+                                                            onChange={(e) => handleEditSectionName(section.id, e.target.value)}
+                                                            className="font-semibold text-primary bg-transparent border-0 border-b focus-visible:ring-0 px-0 h-7"
+                                                            placeholder="Section Name"
+                                                        />
+                                                    </div>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="text-destructive hover:text-destructive h-7 px-2"
+                                                        onClick={() => handleDeleteSection(section.id)}
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
+
+                                                {/* Section Items */}
+                                                <div className="space-y-2">
+                                                    {section.items.map((item, itemIdx) => {
+                                                        const currentCategory = item.category || 'PARTS'
+                                                        const currentUnit = item.unit || 'ea'
+                                                        return (
+                                                            <div key={item.id || itemIdx} className="flex flex-col gap-1 py-2 border-b border-primary/20 last:border-0">
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="w-5 text-xs font-mono text-muted-foreground">#{item.itemNumber || itemIdx + 1}</span>
+                                                                    <select
+                                                                        value={currentCategory}
+                                                                        onChange={(e) => handleSectionItemChange(section.id, itemIdx, "category", e.target.value)}
+                                                                        className="h-8 px-2 rounded-md border bg-white text-xs font-medium text-gray-700"
+                                                                    >
+                                                                        <option value="PARTS">🔧</option>
+                                                                        <option value="LABOR">👷</option>
+                                                                        <option value="SERVICE">📋</option>
+                                                                        <option value="OTHER">📦</option>
+                                                                    </select>
+                                                                    <Input
+                                                                        value={item.description}
+                                                                        onChange={(e) => handleSectionItemChange(section.id, itemIdx, "description", e.target.value)}
+                                                                        className="flex-1 h-8 text-sm bg-white"
+                                                                        placeholder="Description"
+                                                                    />
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="icon"
+                                                                        className="h-6 w-6 text-destructive"
+                                                                        onClick={() => handleDeleteSectionItem(section.id, itemIdx)}
+                                                                    >
+                                                                        <Trash2 className="h-3 w-3" />
+                                                                    </Button>
+                                                                </div>
+                                                                <div className="flex gap-2 ml-5">
+                                                                    <Input
+                                                                        type="number"
+                                                                        value={item.quantity}
+                                                                        onChange={(e) => handleSectionItemChange(section.id, itemIdx, "quantity", e.target.value)}
+                                                                        className="w-16 h-7 text-xs bg-white"
+                                                                        placeholder="Qty"
+                                                                    />
+                                                                    <select
+                                                                        value={currentUnit}
+                                                                        onChange={(e) => handleSectionItemChange(section.id, itemIdx, "unit", e.target.value)}
+                                                                        className="w-16 h-7 px-1 rounded-md border bg-white text-xs"
+                                                                    >
+                                                                        <option value="ea">ea</option>
+                                                                        <option value="LS">LS</option>
+                                                                        <option value="hr">hr</option>
+                                                                        <option value="day">day</option>
+                                                                        <option value="SF">SF</option>
+                                                                        <option value="LF">LF</option>
+                                                                    </select>
+                                                                    <Input
+                                                                        type="number"
+                                                                        value={item.unit_price}
+                                                                        onChange={(e) => handleSectionItemChange(section.id, itemIdx, "unit_price", e.target.value)}
+                                                                        className="w-20 h-7 text-xs bg-white"
+                                                                        placeholder="$"
+                                                                    />
+                                                                    <span className="text-sm font-semibold w-20 text-right">
+                                                                        ${(item.total || item.quantity * item.unit_price).toFixed(2)}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+
+                                                {/* Add Item to Section + Subtotal */}
+                                                <div className="flex items-center justify-between mt-2 pt-2 border-t border-primary/20">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="text-primary h-7"
+                                                        onClick={() => handleAddItemToSection(section.id)}
+                                                    >
+                                                        <Plus className="h-3 w-3 mr-1" />
+                                                        Add Item
+                                                    </Button>
+                                                    <div className="text-sm font-semibold text-primary">
+                                                        Subtotal: ${sectionSubtotal.toFixed(2)}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            )}
 
                             {/* Totals Calculation */}
                             <div className="space-y-2 pt-4 border-t">
                                 <div className="flex justify-between items-center text-sm">
                                     <span className="text-muted-foreground">Subtotal</span>
-                                    <span>${estimate.items.reduce((sum, item) => sum + item.total, 0).toFixed(2)}</span>
+                                    <span>${getAllItemsFromEstimate(estimate).reduce((sum, item) => sum + (item.total || item.quantity * item.unit_price), 0).toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-between items-center text-sm">
                                     <div className="flex items-center gap-2">
@@ -786,6 +1124,8 @@ export default function NewEstimatePage() {
                                             client={{ name: clientName, address: clientAddress }}
                                             business={businessProfile ?? undefined}
                                             paymentLink={includePaymentLink && paymentLink ? paymentLink : undefined}
+                                            signature={estimate?.clientSignature}
+                                            signedAt={estimate?.signedAt}
                                         />
                                     }
                                     fileName="estimate.pdf"
@@ -807,6 +1147,16 @@ export default function NewEstimatePage() {
                                     )}
                                 </PDFDownloadLink>
                                 <Button
+                                    variant={estimate.clientSignature ? "default" : "secondary"}
+                                    size="lg"
+                                    className="h-12 border border-primary/20"
+                                    onClick={() => setIsSignatureModalOpen(true)}
+                                >
+                                    <PenTool className="h-4 w-4 mr-2" />
+                                    {estimate.clientSignature ? "Signature Added" : "Sign & Accept"}
+                                </Button>
+
+                                <Button
                                     variant="secondary"
                                     size="lg"
                                     className="h-12"
@@ -827,7 +1177,7 @@ export default function NewEstimatePage() {
                                 </Button>
                             </div>
 
-                            {/* Payment Link Toggle - Temporarily Disabled
+                            {/* Payment Link Toggle */}
                             <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg mt-4">
                                 <div className="flex items-center gap-2">
                                     <CreditCard className="h-4 w-4 text-primary" />
@@ -838,6 +1188,10 @@ export default function NewEstimatePage() {
                                     role="switch"
                                     aria-checked={includePaymentLink}
                                     onClick={async () => {
+                                        if (!navigator.onLine) {
+                                            toast('📴 Payment links require internet connection.', 'warning')
+                                            return
+                                        }
                                         const newValue = !includePaymentLink
                                         setIncludePaymentLink(newValue)
 
@@ -872,9 +1226,9 @@ export default function NewEstimatePage() {
                                             }
                                         }
                                     }}
-                                    disabled={isGeneratingPaymentLink}
+                                    disabled={isGeneratingPaymentLink || isOffline}
                                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${includePaymentLink ? 'bg-primary' : 'bg-gray-300'
-                                        } ${isGeneratingPaymentLink ? 'opacity-50' : ''}`}
+                                        } ${isGeneratingPaymentLink || isOffline ? 'opacity-50' : ''}`}
                                 >
                                     <span
                                         className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${includePaymentLink ? 'translate-x-6' : 'translate-x-1'
@@ -882,6 +1236,11 @@ export default function NewEstimatePage() {
                                     />
                                 </button>
                             </div>
+                            {isOffline && (
+                                <p className="text-xs text-yellow-600 text-center mt-1">
+                                    📴 Offline - Payment links unavailable
+                                </p>
+                            )}
                             {isGeneratingPaymentLink && (
                                 <p className="text-xs text-muted-foreground text-center mt-1 flex items-center justify-center gap-1">
                                     <Loader2 className="h-3 w-3 animate-spin" /> Generating payment link...
@@ -892,7 +1251,6 @@ export default function NewEstimatePage() {
                                     ✓ Payment link will be included in PDF
                                 </p>
                             )}
-                            */}
 
                             {/* Email Button */}
                             <Button
@@ -1000,6 +1358,77 @@ export default function NewEstimatePage() {
                     </Button>
                 </div>
             )}
+
+            {/* Excel Import Modal */}
+            <ExcelImportModal
+                isOpen={isExcelModalOpen}
+                onClose={() => setIsExcelModalOpen(false)}
+                onImport={handleExcelImport}
+            />
+
+            {/* Client Load Modal */}
+            <Dialog open={isClientModalOpen} onOpenChange={setIsClientModalOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Select Client</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+                        {availableClients.length === 0 ? (
+                            <p className="text-center text-muted-foreground py-4">No clients found.</p>
+                        ) : (
+                            availableClients.map(client => (
+                                <div
+                                    key={client.id}
+                                    className="p-3 border rounded-lg hover:bg-muted cursor-pointer transition-colors"
+                                    onClick={() => {
+                                        setClientName(client.name)
+                                        if (client.address) setClientAddress(client.address)
+                                        setIsClientModalOpen(false)
+                                        toast(`✅ Loaded ${client.name}`, "success")
+                                    }}
+                                >
+                                    <p className="font-bold">{client.name}</p>
+                                    {client.address && <p className="text-xs text-muted-foreground">{client.address}</p>}
+                                </div>
+                            ))
+                        )}
+                        <Button
+                            variant="outline"
+                            className="w-full mt-2"
+                            onClick={() => {
+                                setIsClientModalOpen(false)
+                                router.push('/clients')
+                            }}
+                        >
+                            <Plus className="h-4 w-4 mr-2" /> Add New Client
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+            {/* Signature Modal */}
+            <Dialog open={isSignatureModalOpen} onOpenChange={setIsSignatureModalOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Sign Estimate</DialogTitle>
+                    </DialogHeader>
+                    <SignaturePad
+                        onSave={(signature) => {
+                            if (estimate) {
+                                setEstimate({
+                                    ...estimate,
+                                    clientSignature: signature,
+                                    signedAt: new Date().toISOString(),
+                                    status: 'sent' // Auto-approve/send
+                                })
+                                toast("✅ Signature captured!", "success")
+                                setIsSignatureModalOpen(false)
+                            }
+                        }}
+                        onCancel={() => setIsSignatureModalOpen(false)}
+                    />
+                </DialogContent>
+            </Dialog>
+
         </div>
     )
 }

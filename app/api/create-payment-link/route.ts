@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     })
 
     try {
-        const { amount, customerName, estimateNumber } = await req.json()
+        const { amount, customerName, estimateNumber, estimateId } = await req.json()
 
         // Validate amount
         if (!amount || amount <= 0) {
@@ -30,6 +30,10 @@ export async function POST(req: Request) {
 
         // Create a Payment Link with dynamic pricing
         const paymentLink = await stripe.paymentLinks.create({
+            metadata: {
+                estimateId: estimateId || "",
+                estimateNumber: estimateNumber || "",
+            },
             line_items: [
                 {
                     price_data: {

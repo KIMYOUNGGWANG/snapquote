@@ -62,27 +62,23 @@ INPUT DATA:
 CRITICAL INSTRUCTIONS
 ═══════════════════════════════════════
 
-1. 📋 ITEMIZATION (Break down into categories):
-   ALWAYS separate line items into these categories when applicable:
+1. 📋 ITEMIZATION (Professional Format):
+   ALWAYS output items with separate category and unit fields.
    
-   a) **PARTS** - Physical materials/components
-      - Include brand if known (e.g., "Moen Kitchen Faucet")
-      - Include size/specification (e.g., "1/2 inch PVC P-Trap")
-      - Prefix description with "[PARTS]"
+   Categories:
+   - "PARTS" - Physical materials/components
+   - "LABOR" - Work hours/installation time  
+   - "SERVICE" - Diagnostic, testing, permits, disposal
+   - "OTHER" - Miscellaneous
    
-   b) **LABOR** - Work hours/installation time
-      - Specify hours when possible (e.g., "2 hrs @ $75/hr")
-      - Prefix description with "[LABOR]"
-   
-   c) **SERVICE** - Diagnostic, testing, permits, disposal
-      - Include diagnostic fees, permit fees, disposal fees
-      - Prefix description with "[SERVICE]"
-   
-   Example breakdown:
-   - [PARTS] Delta Single-Handle Kitchen Faucet (Chrome): $180
-   - [PARTS] Supply Lines & Fittings: $25
-   - [LABOR] Faucet Removal & New Installation (1.5 hrs): $120
-   - [SERVICE] Water Line Testing & Leak Check: $0
+   Units (choose appropriate):
+   - "ea" - Each (for parts)
+   - "LS" - Lump Sum (fixed price work)
+   - "hr" - Hourly (for labor)
+   - "day" - Daily rate
+   - "SF" - Square Foot
+   - "LF" - Linear Foot
+   - "%" - Percentage
 
 2. 👀 VISION ANALYSIS (If images provided):
    ✓ Identify visible Brands (Kohler, Moen), Materials (PEX, Copper), and Issues.
@@ -90,45 +86,63 @@ CRITICAL INSTRUCTIONS
 
 3. 🌐 LANGUAGE PROCESSING (Korean/English):
    - The user is a professional working in North America.
-   - **ASSUME ALL CURRENCY IS LOCAL (${currencyCode}).**
+   - **ASSUME ALL CURRENCY IS LOCAL (\${currencyCode}).**
    - Translate Korean terms to Professional English.
    - Do NOT perform currency exchange calculations.
 
 4. ✍️ PROFESSIONALIZATION (The "Expensive" Touch):
-   ❌ "fix leak" → ✅ "[LABOR] Hydraulic Seal Replacement & Pressure Test"
-   ❌ "new faucet" → ✅ "[PARTS] Kitchen Faucet (Chrome Finish)"
+   ❌ "fix leak" → ✅ category:"LABOR", description:"Hydraulic Seal Replacement & Pressure Test"
+   ❌ "new faucet" → ✅ category:"PARTS", description:"Kitchen Faucet (Chrome Finish)"
 
 5. 🛡️ PRICING LOGIC:
    - IF price provided: Distribute across parts/labor/service logically.
-   - IF price missing: Set unit_price = 0.
+   - IF price missing: Estimate using **Canadian market pricing (CAD)**.
+   - Reference pricing: Home Depot Canada, Rona, Home Hardware, Canadian Tire.
+   - Labor rates: Based on Canadian provincial averages ($60-$120/hr depending on trade).
    - IF price > $5,000: Add warning "High-value estimate - please verify".
-   - NEVER invent prices.
 
 6. 🇨🇦/🇺🇸 REGIONAL FORMATTING:
-   IF Canada: "Labour", "HST/GST applies"
-   IF USA: "Labor", "Sales tax applies"
+   IF Canada: "Labour", "HST/GST applies", use CAD pricing
+   IF USA: "Labor", "Sales tax applies", use USD pricing
 
 ═══════════════════════════════════════
 OUTPUT FORMAT (JSON ONLY)
 ═══════════════════════════════════════
-Response must be raw JSON.
+Response must be raw JSON. Use the new professional format:
 
 {
   "items": [
     {
-      "description": "[PARTS] Specific part with brand/size",
+      "id": "item-1",
+      "itemNumber": 1,
+      "category": "PARTS",
+      "description": "Kitchen Faucet (Chrome Finish)",
       "quantity": 1,
-      "unit_price": 150.00
+      "unit": "ea",
+      "unit_price": 180.00
     },
     {
-      "description": "[LABOR] Installation & Testing (2 hrs)",
+      "id": "item-2", 
+      "itemNumber": 2,
+      "category": "LABOR",
+      "description": "Faucet Installation & Testing",
+      "quantity": 2,
+      "unit": "hr",
+      "unit_price": 75.00
+    },
+    {
+      "id": "item-3",
+      "itemNumber": 3,
+      "category": "SERVICE",
+      "description": "Permit Fee",
       "quantity": 1,
-      "unit_price": 150.00
+      "unit": "LS",
+      "unit_price": 50.00
     }
   ],
   "summary_note": "Concise scope summary.",
-  "payment_terms": "${country === 'Canada' ? 'Payment due upon completion. E-transfer or credit card accepted. HST applies.' : 'Payment due upon completion. Check, Zelle, or card accepted.'}",
-  "closing_note": "Thank you for choosing ${businessName}. We stand behind our work with a 90-day guarantee.",
+  "payment_terms": "\${country === 'Canada' ? 'Payment due upon completion. E-transfer or credit card accepted. HST applies.' : 'Payment due upon completion. Check, Zelle, or card accepted.'}",
+  "closing_note": "Thank you for choosing \${businessName}. We stand behind our work with a 90-day guarantee.",
   "warnings": []
 }
 

@@ -45,11 +45,22 @@ create table estimate_items (
   total float
 );
 
+-- Feedback
+create table feedback (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references auth.users on delete set null,
+  rating int check (rating >= 1 and rating <= 5),
+  category text,
+  description text,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
 -- Enable RLS
 alter table profiles enable row level security;
 alter table clients enable row level security;
 alter table estimates enable row level security;
 alter table estimate_items enable row level security;
+alter table feedback enable row level security;
 
 -- Policies (Simple for now: users can see their own data)
 create policy "Users can view own profile" on profiles for select using (auth.uid() = id);
@@ -67,3 +78,6 @@ create policy "Users can view own estimate items" on estimate_items for select u
 create policy "Users can insert own estimate items" on estimate_items for insert with check (
   exists ( select 1 from estimates where id = estimate_items.estimate_id and user_id = auth.uid() )
 );
+
+-- Feedback Policy: Users can insert feedback
+create policy "Users can insert feedback" on feedback for insert with check (auth.uid() = user_id OR user_id IS NULL);

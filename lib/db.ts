@@ -16,8 +16,9 @@ interface SnapQuoteDB extends DBSchema {
             totalAmount: number;
             createdAt: string;
             synced: boolean;
+            status: 'draft' | 'sent';  // NEW: Capture-First status
         };
-        indexes: { 'by-date': string };
+        indexes: { 'by-date': string; 'by-status': string };  // Added by-status
     };
     photos: {
         key: string;
@@ -47,14 +48,55 @@ interface SnapQuoteDB extends DBSchema {
         value: PriceListItem;
         indexes: { 'by-category': PriceCategory; 'by-name': string };
     };
+    // NEW: Receipt Storage for daily use
+    receipts: {
+        key: string;
+        value: {
+            id: string;
+            photoUrl: string;      // base64
+            amount?: number;
+            vendor?: string;
+            note?: string;
+            date: string;          // ISO date
+            createdAt: string;
+        };
+        indexes: { 'by-date': string };
+    };
+    // NEW: Time Tracking for daily use
+    timeEntries: {
+        key: string;
+        value: {
+            id: string;
+            projectName?: string;
+            startTime: string;     // ISO datetime
+            endTime?: string;
+            duration?: number;     // minutes
+            date: string;          // ISO date
+        };
+        indexes: { 'by-date': string };
+    };
+    // NEW: Client Management for Phase 6
+    clients: {
+        key: string;
+        value: {
+            id: string;
+            name: string;
+            email?: string;
+            phone?: string;
+            address?: string;
+            notes?: string;
+            createdAt: string;
+        };
+        indexes: { 'by-name': string };
+    };
 }
 
 const DB_NAME = 'snapquote-db';
-const DB_VERSION = 3; // Upgraded from 2 to 3
+const DB_VERSION = 6; // Upgraded to 6 for clients
 
 export async function initDB() {
     return openDB<SnapQuoteDB>(DB_NAME, DB_VERSION, {
-        upgrade(db, oldVersion) {
+        upgrade(db, oldVersion, _newVersion, transaction) {
             // Version 1: estimates and photos
             if (oldVersion < 1) {
                 if (!db.objectStoreNames.contains('estimates')) {
@@ -82,6 +124,32 @@ export async function initDB() {
                     priceStore.createIndex('by-name', 'name');
                 }
             }
+            // Version 4: Add status field and index to estimates
+            if (oldVersion < 4) {
+                const estimatesStore = transaction.objectStore('estimates');
+                // Add by-status index if not exists
+                if (!estimatesStore.indexNames.contains('by-status')) {
+                    estimatesStore.createIndex('by-status', 'status');
+                }
+            }
+            // Version 5: receipts and timeEntries for daily use
+            if (oldVersion < 5) {
+                if (!db.objectStoreNames.contains('receipts')) {
+                    const receiptsStore = db.createObjectStore('receipts', { keyPath: 'id' });
+                    receiptsStore.createIndex('by-date', 'date');
+                }
+                if (!db.objectStoreNames.contains('timeEntries')) {
+                    const timeStore = db.createObjectStore('timeEntries', { keyPath: 'id' });
+                    timeStore.createIndex('by-date', 'date');
+                }
+            }
+            // Version 6: clients for CRM
+            if (oldVersion < 6) {
+                if (!db.objectStoreNames.contains('clients')) {
+                    const clientStore = db.createObjectStore('clients', { keyPath: 'id' });
+                    clientStore.createIndex('by-name', 'name');
+                }
+            }
         },
     });
 }
@@ -89,7 +157,13 @@ export async function initDB() {
 // ============ ESTIMATES ============
 export async function saveEstimateToDB(estimate: any) {
     const db = await initDB();
-    return db.put('estimates', { ...estimate, synced: false });
+    // Default status to 'draft' if not set
+    const estimateWithStatus = {
+        ...estimate,
+        synced: false,
+        status: estimate.status || 'draft',
+    };
+    return db.put('estimates', estimateWithStatus);
 }
 
 export async function getEstimatesFromDB() {
@@ -224,5 +298,116 @@ export async function getPriceListForAI(): Promise<string> {
     return items.map(item =>
         `- "${item.name}": $${item.price}/${item.unit} [${item.category}] (keywords: ${item.keywords.join(', ')})`
     ).join('\n');
+}
+
+// ============ RECEIPTS ============
+export interface Receipt {
+    id: string;
+    photoUrl: string;
+    amount?: number;
+    vendor?: string;
+    note?: string;
+    date: string;
+    createdAt: string;
+}
+
+export async function saveReceipt(receipt: Omit<Receipt, 'id' | 'createdAt'>): Promise<string> {
+    const db = await initDB();
+    const id = crypto.randomUUID();
+    await db.put('receipts', {
+        ...receipt,
+        id,
+        createdAt: new Date().toISOString(),
+    });
+    return id;
+}
+
+export async function getReceipts(): Promise<Receipt[]> {
+    const db = await initDB();
+    return db.getAllFromIndex('receipts', 'by-date');
+}
+
+export async function deleteReceipt(id: string): Promise<void> {
+    const db = await initDB();
+    await db.delete('receipts', id);
+}
+
+// ============ TIME ENTRIES ============
+export interface TimeEntry {
+    id: string;
+    projectName?: string;
+    startTime: string;
+    endTime?: string;
+    duration?: number; // minutes
+    date: string;
+}
+
+export async function saveTimeEntry(entry: Omit<TimeEntry, 'id'>): Promise<string> {
+    const db = await initDB();
+    const id = crypto.randomUUID();
+    await db.put('timeEntries', { ...entry, id });
+    return id;
+}
+
+export async function updateTimeEntry(entry: TimeEntry): Promise<void> {
+    const db = await initDB();
+    await db.put('timeEntries', entry);
+}
+
+export async function getTimeEntries(): Promise<TimeEntry[]> {
+    const db = await initDB();
+    return db.getAllFromIndex('timeEntries', 'by-date');
+}
+
+export async function getTimeEntriesByDate(date: string): Promise<TimeEntry[]> {
+    const db = await initDB();
+    return db.getAllFromIndex('timeEntries', 'by-date', date);
+}
+
+export async function deleteTimeEntry(id: string): Promise<void> {
+    const db = await initDB();
+    await db.delete('timeEntries', id);
+}
+
+// ============ CLIENTS (CRM) ============
+export interface Client {
+    id: string;
+    name: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+    notes?: string;
+    createdAt: string;
+}
+
+export async function saveClient(client: Omit<Client, 'id' | 'createdAt'> & { id?: string }): Promise<string> {
+    const db = await initDB();
+    const id = client.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    // Check existing to preserve createdAt if updating
+    const existing = client.id ? await db.get('clients', client.id) : null;
+
+    await db.put('clients', {
+        ...client,
+        id,
+        createdAt: existing?.createdAt || now,
+    });
+    return id;
+}
+
+export async function getClients(): Promise<Client[]> {
+    const db = await initDB();
+    return db.getAllFromIndex('clients', 'by-name');
+}
+
+export async function getClient(id: string): Promise<Client | undefined> {
+    const db = await initDB();
+    return db.get('clients', id);
+}
+
+export async function deleteClient(id: string): Promise<void> {
+    const db = await initDB();
+    await db.delete('clients', id);
 }
 
