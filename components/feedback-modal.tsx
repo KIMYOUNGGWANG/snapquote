@@ -8,6 +8,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { MessageSquarePlus, Star, Loader2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { toast } from "@/components/toast"
+
 
 export function FeedbackModal() {
     const [open, setOpen] = useState(false)
@@ -34,14 +36,14 @@ export function FeedbackModal() {
 
             if (error) throw error
 
-            alert("Feedback submitted! Thank you.")
+            toast("✅ Feedback submitted! Thank you.", "success")
             setOpen(false)
             setDescription("")
             setRating(5)
             setCategory("feature")
         } catch (error) {
             console.error("Feedback error:", error)
-            alert("Failed to submit feedback.")
+            toast("❌ Failed to submit feedback. Please try again.", "error")
         } finally {
             setLoading(false)
         }
