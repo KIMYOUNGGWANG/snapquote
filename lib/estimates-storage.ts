@@ -60,6 +60,8 @@ export interface BusinessInfo {
     logo_url?: string
     tax_rate?: number
     state_province?: string
+    tradeType?: string // 'general' | 'plumber' | 'electrician' | 'hvac' | 'handyman'
+    estimate_template_url?: string // Custom estimate background (base64)
 }
 
 // Estimates (IndexedDB)

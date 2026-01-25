@@ -11,6 +11,9 @@ import { QuickQuoteModal } from "@/components/quick-quote-modal"
 import { isFirstVisit, markOnboardingCompleted } from "@/lib/estimates-storage"
 import { getPriceList } from "@/lib/db"
 import type { PriceListItem } from "@/types"
+import { getEstimatesNeedingFollowUp, type FollowUpItem, generateFollowUpMessage } from "@/lib/follow-up-service"
+import { toast } from "@/components/toast"
+import { RevenueChart } from "@/components/revenue-chart"
 
 export default function Home() {
   const router = useRouter()
@@ -18,6 +21,7 @@ export default function Home() {
   const [priceListItems, setPriceListItems] = useState<PriceListItem[]>([])
   const [selectedQuickItem, setSelectedQuickItem] = useState<PriceListItem | null>(null)
   const [showQuickQuote, setShowQuickQuote] = useState(false)
+  const [followUps, setFollowUps] = useState<FollowUpItem[]>([])
 
   useEffect(() => {
     // Check if first visit after component mounts
@@ -39,6 +43,14 @@ export default function Home() {
     loadPriceList()
   }, [])
 
+  useEffect(() => {
+    const checkFollowUps = async () => {
+      const items = await getEstimatesNeedingFollowUp()
+      setFollowUps(items)
+    }
+    checkFollowUps()
+  }, [])
+
   const handleOnboardingComplete = () => {
     markOnboardingCompleted()
     setShowOnboarding(false)
@@ -55,6 +67,12 @@ export default function Home() {
     setShowQuickQuote(true)
   }
 
+  const handleCopyFollowUp = (item: FollowUpItem) => {
+    const text = generateFollowUpMessage(item.estimate.clientName, item.estimate.estimateNumber)
+    navigator.clipboard.writeText(text)
+    toast("📋 Message copied! Ready to paste.", "success")
+  }
+
   return (
     <>
       <OnboardingModal
@@ -68,6 +86,42 @@ export default function Home() {
         item={selectedQuickItem}
       />
       <div className="flex flex-col min-h-[calc(100vh-80px)] pb-20">
+
+        {/* Follow-up Alert (Smart Feature) */}
+        {followUps.length > 0 && (
+          <section className="px-4 pt-4">
+            <Card className="border-amber-200 bg-amber-50">
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-amber-100 rounded-full shrink-0">
+                    <Clock className="h-4 w-4 text-amber-700" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-amber-900 text-sm">Action Required ({followUps.length})</h3>
+                    <p className="text-amber-800 text-xs mt-1 mb-3">
+                      Client hasn&apos;t responded to estimate <b>#{followUps[0].estimate.estimateNumber}</b> sent {followUps[0].daysSinceSent} days ago.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs bg-white border-amber-200 hover:bg-amber-100 text-amber-900 w-full justify-start gap-2"
+                      onClick={() => handleCopyFollowUp(followUps[0])}
+                    >
+                      <Send className="h-3 w-3" />
+                      Copy Follow-up Text
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+        )}
+
+        {/* Revenue Dashboard (Smart Feature) */}
+        <section className="px-4 pb-4">
+          <RevenueChart />
+        </section>
+
         {/* Hero Section */}
         <section className="flex flex-col items-center justify-center text-center px-4 py-8 bg-gradient-to-b from-primary/5 to-transparent">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-primary/10 rounded-full text-primary text-xs font-medium mb-4">

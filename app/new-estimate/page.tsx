@@ -14,6 +14,7 @@ import { saveEstimate, generateEstimateNumber, getProfile, saveProfile } from "@
 import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI, getClients, type Client } from "@/lib/db"
 import type { BusinessInfo } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
+import { PaymentOptionModal } from "@/components/payment-option-modal"
 import { AudioRecorder } from "@/components/audio-recorder"
 import { PDFPreviewModal } from "@/components/pdf-preview-modal"
 import { EmailModal } from "@/components/email-modal"
@@ -101,8 +102,10 @@ export default function NewEstimatePage() {
     const [pendingAudioId, setPendingAudioId] = useState<string | null>(null)
     const [projectType, setProjectType] = useState<'residential' | 'commercial'>('residential')
     const [paymentLink, setPaymentLink] = useState<string | null>(null)
+    const [paymentLinkType, setPaymentLinkType] = useState<'full' | 'deposit' | 'custom' | null>('full')
     const [isGeneratingPaymentLink, setIsGeneratingPaymentLink] = useState(false)
     const [includePaymentLink, setIncludePaymentLink] = useState(false)
+    const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
 
     const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -527,6 +530,9 @@ export default function NewEstimatePage() {
                     taxRate={taxRate}
                     client={{ name: clientName, address: clientAddress }}
                     business={businessProfile ?? undefined}
+                    templateUrl={businessProfile?.estimate_template_url}
+                    paymentLabel={paymentLinkType === 'deposit' ? 'PAY DEPOSIT' : (paymentLinkType === 'custom' ? 'PAY AMOUNT' : 'PAY ONLINE')}
+                    photos={previewUrls}
                 />
             )
             const blob = await pdf(pdfDoc).toBlob()
@@ -1126,6 +1132,8 @@ export default function NewEstimatePage() {
                                             paymentLink={includePaymentLink && paymentLink ? paymentLink : undefined}
                                             signature={estimate?.clientSignature}
                                             signedAt={estimate?.signedAt}
+                                            templateUrl={businessProfile?.estimate_template_url}
+                                            paymentLabel={paymentLinkType === 'deposit' ? 'PAY DEPOSIT' : (paymentLinkType === 'custom' ? 'PAY AMOUNT' : 'PAY ONLINE')}
                                         />
                                     }
                                     fileName="estimate.pdf"
@@ -1181,61 +1189,83 @@ export default function NewEstimatePage() {
                             <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg mt-4">
                                 <div className="flex items-center gap-2">
                                     <CreditCard className="h-4 w-4 text-primary" />
-                                    <span className="text-sm font-medium">Include Payment Link</span>
+                                    <div className="flex flex-col">
+                                        <span className="text-sm font-medium">Include Payment Link</span>
+                                        {includePaymentLink && paymentLink && (
+                                            <span className="text-xs text-muted-foreground">
+                                                {paymentLinkType === 'deposit' && '50% Deposit'}
+                                                {paymentLinkType === 'custom' && 'Custom Amount'}
+                                                {paymentLinkType === 'full' && 'Full Payment'}
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
                                 <button
                                     type="button"
                                     role="switch"
                                     aria-checked={includePaymentLink}
-                                    onClick={async () => {
-                                        if (!navigator.onLine) {
-                                            toast('📴 Payment links require internet connection.', 'warning')
-                                            return
-                                        }
-                                        const newValue = !includePaymentLink
-                                        setIncludePaymentLink(newValue)
-
-                                        if (newValue && !paymentLink && !isGeneratingPaymentLink) {
-                                            // Auto-generate payment link when toggled ON
-                                            setIsGeneratingPaymentLink(true)
-                                            try {
-                                                const grandTotal = estimate.items.reduce((sum, item) => sum + item.total, 0) * (1 + taxRate / 100)
-                                                const response = await fetch('/api/create-payment-link', {
-                                                    method: 'POST',
-                                                    headers: { 'Content-Type': 'application/json' },
-                                                    body: JSON.stringify({
-                                                        amount: grandTotal,
-                                                        customerName: clientName || 'Customer',
-                                                    })
-                                                })
-
-                                                if (!response.ok) {
-                                                    const error = await response.json()
-                                                    throw new Error(error.error || 'Failed to create payment link')
-                                                }
-
-                                                const data = await response.json()
-                                                setPaymentLink(data.url)
-                                                toast('💳 Payment link ready!', 'success')
-                                            } catch (error: any) {
-                                                console.error('Payment link error:', error)
-                                                toast(`❌ ${error.message}`, 'error')
-                                                setIncludePaymentLink(false) // Revert toggle on error
-                                            } finally {
-                                                setIsGeneratingPaymentLink(false)
+                                    onClick={() => {
+                                        if (!includePaymentLink) {
+                                            if (!navigator.onLine) {
+                                                toast('📴 Payment links require internet connection.', 'warning')
+                                                return
                                             }
+                                            setIsPaymentModalOpen(true)
+                                        } else {
+                                            setIncludePaymentLink(false)
+                                            setPaymentLink(null)
+                                            setPaymentLinkType(null)
                                         }
                                     }}
                                     disabled={isGeneratingPaymentLink || isOffline}
-                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${includePaymentLink ? 'bg-primary' : 'bg-gray-300'
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${includePaymentLink ? 'bg-primary' : 'bg-muted-foreground/30'
                                         } ${isGeneratingPaymentLink || isOffline ? 'opacity-50' : ''}`}
                                 >
                                     <span
-                                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${includePaymentLink ? 'translate-x-6' : 'translate-x-1'
+                                        className={`inline-block h-4 w-4 transform rounded-full bg-background transition-transform ${includePaymentLink ? 'translate-x-6' : 'translate-x-1'
                                             }`}
                                     />
                                 </button>
                             </div>
+
+                            {/* Payment Option Modal */}
+                            {estimate && (
+                                <PaymentOptionModal
+                                    open={isPaymentModalOpen}
+                                    onClose={() => setIsPaymentModalOpen(false)}
+                                    totalAmount={estimate.items.reduce((sum, item) => sum + item.total, 0) * (1 + taxRate / 100)}
+                                    onConfirm={async (amount: number, type: 'full' | 'deposit' | 'custom') => {
+                                        setIsPaymentModalOpen(false)
+                                        setIncludePaymentLink(true)
+                                        setPaymentLinkType(type)
+                                        setIsGeneratingPaymentLink(true)
+
+                                        try {
+                                            const response = await fetch('/api/create-payment-link', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({
+                                                    amount: amount,
+                                                    customerName: clientName || 'Customer',
+                                                    estimateNumber: `Draft-${new Date().toISOString().slice(0, 10)}`
+                                                })
+                                            })
+                                            const data = await response.json()
+
+                                            if (!response.ok) throw new Error(data.error || "Failed to create link")
+
+                                            setPaymentLink(data.url)
+                                            toast("✅ Payment link generated", "success")
+                                        } catch (error) {
+                                            console.error(error)
+                                            toast("❌ Failed to generate payment link", "error")
+                                            setIncludePaymentLink(false)
+                                        } finally {
+                                            setIsGeneratingPaymentLink(false)
+                                        }
+                                    }}
+                                />
+                            )}
                             {isOffline && (
                                 <p className="text-xs text-yellow-600 text-center mt-1">
                                     📴 Offline - Payment links unavailable
@@ -1274,6 +1304,8 @@ export default function NewEstimatePage() {
                                         client={{ name: clientName, address: clientAddress }}
                                         business={businessProfile ?? undefined}
                                         paymentLink={includePaymentLink && paymentLink ? paymentLink : undefined}
+                                        templateUrl={businessProfile?.estimate_template_url}
+                                        paymentLabel={paymentLinkType === 'deposit' ? 'PAY DEPOSIT' : (paymentLinkType === 'custom' ? 'PAY AMOUNT' : 'PAY ONLINE')}
                                     />
                                 }
                             />
@@ -1295,6 +1327,8 @@ export default function NewEstimatePage() {
                                                 client={{ name: clientName, address: clientAddress }}
                                                 business={businessProfile ?? undefined}
                                                 paymentLink={includePaymentLink && paymentLink ? paymentLink : undefined}
+                                                templateUrl={businessProfile?.estimate_template_url}
+                                                paymentLabel={paymentLinkType === 'deposit' ? 'PAY DEPOSIT' : (paymentLinkType === 'custom' ? 'PAY AMOUNT' : 'PAY ONLINE')}
                                             />
                                         )
                                         const blob = await pdf(pdfDoc).toBlob()

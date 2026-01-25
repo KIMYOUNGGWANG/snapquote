@@ -5,9 +5,9 @@ description: Provides the single source of truth for brand guidelines, design to
 
 # Brand Identity & Guidelines
 
-**Brand Name:** SnapQuote
+**Brand Name:** [INSERT BRAND NAME HERE]
 
-This skill defines the core constraints for visual design and technical implementation for the brand. You must adhere to these guidelines strictly to maintain consistency. SnapQuote is a "Dirty Hands, Clean Quotes" tool for trade professionals, emphasizing speed, reliability, and offline capability.
+This skill defines the core constraints for visual design and technical implementation for the brand. You must adhere to these guidelines strictly to maintain consistency.
 
 ## Reference Documentation
 
@@ -24,3 +24,14 @@ If you are generating code, choosing libraries, or structuring UI components, re
 ### For Copywriting & Content Generation
 If you are writing marketing copy, error messages, documentation, or user-facing text, read the persona guidelines here:
 👉 **[`resources/voice-tone.md`](resources/voice-tone.md)**
+
+## 🚫 Design Commandments (Never Do This)
+1.  **NO AI Slop**: Avoid generic "AI style" gradients, contextless cards, or typical "tech blue" color schemes.
+2.  **Typography**: Never use system fonts (Arial, Times). Use the tokens.
+3.  **XSS Protection**: `dangerouslySetInnerHTML` is FORBIDDEN.
+
+## 🖌️ Design Thinking
+Before designing, answer:
+1.  **Purpose**: What problem does this solve?
+2.  **Tone**: (Pick one) Minimal / Brutalist / High-end Luxury / Toss-style.
+3.  **Differentiation**: What is the ONE thing users will remember?

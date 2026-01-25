@@ -20,8 +20,8 @@ export function BottomNav() {
     ]
 
     return (
-        <nav className="fixed bottom-0 left-0 right-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 p-2 pb-4 z-50">
-            <div className="flex justify-around items-center max-w-md mx-auto">
+        <nav className="fixed bottom-0 left-0 right-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 p-1 pb-3 z-50 safe-area-inset-bottom">
+            <div className="flex justify-between items-center w-full px-1">
                 {links.map(({ href, label, icon: Icon }) => {
                     const isActive = pathname === href
                     return (
@@ -29,21 +29,22 @@ export function BottomNav() {
                             key={href}
                             href={href}
                             className={cn(
-                                "flex flex-col items-center p-2 rounded-lg transition-colors min-w-[60px]",
+                                "flex flex-col items-center p-1 rounded-lg transition-colors flex-1",
                                 isActive ? "text-primary" : "text-muted-foreground hover:text-primary"
                             )}
                         >
                             <Icon className="h-5 w-5" />
-                            <span className="text-[10px] mt-1">{label}</span>
+                            <span className="text-[9px] mt-0.5 truncate max-w-full">{label}</span>
                         </Link>
                     )
                 })}
                 {/* Theme Toggle */}
-                <div className="flex flex-col items-center p-2 min-w-[60px]">
+                <div className="flex flex-col items-center p-1 flex-1">
                     <ThemeToggle />
-                    <span className="text-[10px] mt-1 text-muted-foreground">Theme</span>
+                    <span className="text-[9px] mt-0.5 text-muted-foreground">Theme</span>
                 </div>
             </div>
         </nav>
     )
 }
+

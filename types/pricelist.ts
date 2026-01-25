@@ -1,7 +1,7 @@
 // Price List Types
 
 export type PriceCategory = "PARTS" | "LABOR" | "SERVICE"
-export type PriceUnit = "each" | "hour" | "sqft" | "linear_ft" | "unit"
+export type PriceUnit = "ea" | "LS" | "hr" | "day" | "SF" | "LF" | "%" | "lb" | "other" | "each" | "hour" | "sqft" | "linear_ft" | "unit"
 
 export interface PriceListItem {
     id: string

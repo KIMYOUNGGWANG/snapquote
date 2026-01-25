@@ -222,6 +222,56 @@ export default function ProfilePage() {
                         </div>
                     </div>
 
+                    {/* Estimate Template Upload */}
+                    <div className="space-y-2">
+                        <Label>견적서 양식 (Estimate Template)</Label>
+                        <div className="flex items-center gap-4">
+                            {profile.estimate_template_url ? (
+                                <div className="relative w-24 h-32 border-2 border-primary/50 rounded-lg overflow-hidden bg-muted">
+                                    <Image
+                                        src={profile.estimate_template_url}
+                                        alt="Estimate Template"
+                                        fill
+                                        className="object-contain p-1"
+                                    />
+                                    <button
+                                        onClick={() => setProfile({ ...profile, estimate_template_url: "" })}
+                                        className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 hover:bg-destructive/90"
+                                    >
+                                        <X className="h-3 w-3" />
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="w-24 h-32 border-2 border-dashed border-primary/30 rounded-lg flex flex-col items-center justify-center bg-primary/5">
+                                    <Upload className="h-5 w-5 text-primary/50 mb-1" />
+                                    <span className="text-[10px] text-primary/50">A4</span>
+                                </div>
+                            )}
+                            <div className="flex-1">
+                                <Input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                        const file = e.target.files?.[0]
+                                        if (!file) return
+                                        const reader = new FileReader()
+                                        reader.onloadend = () => {
+                                            setProfile({ ...profile, estimate_template_url: reader.result as string })
+                                        }
+                                        reader.readAsDataURL(file)
+                                    }}
+                                    className="cursor-pointer"
+                                />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    📄 회사 견적서 양식을 업로드하세요 (PDF 배경으로 사용됩니다)
+                                </p>
+                                <p className="text-[10px] text-muted-foreground">
+                                    권장: A4 크기 (210×297mm) 이미지. 없으면 기본 양식이 사용됩니다.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
                     <div className="space-y-2">
                         <Label htmlFor="business_name">Business Name *</Label>
                         <Input

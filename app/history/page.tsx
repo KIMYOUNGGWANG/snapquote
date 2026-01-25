@@ -335,6 +335,8 @@ export default function HistoryPage() {
                                                             address: estimate.clientAddress
                                                         }}
                                                         business={businessProfile}
+                                                        templateUrl={businessProfile?.estimate_template_url}
+                                                        photos={estimate.attachments?.photos}
                                                     />
                                                 }
                                                 fileName={`${estimate.estimateNumber || 'estimate'}.pdf`}
@@ -378,6 +380,8 @@ export default function HistoryPage() {
                                 address: previewEstimate.clientAddress
                             }}
                             business={businessProfile}
+                            templateUrl={businessProfile?.estimate_template_url}
+                            photos={previewEstimate.attachments?.photos}
                         />
                     }
                     fileName={`${previewEstimate.estimateNumber || 'estimate'}.pdf`}

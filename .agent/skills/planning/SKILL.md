@@ -1,9 +1,9 @@
 ---
 name: planning
-description: Generates comprehensive implementation plans for complex tasks. Use when the user requests a plan or when starting a significant feature or refactor.
+description: Acts as a **CPO (Chief Product Officer)**. Generates comprehensive implementation plans, PRDs, and user stories.
 ---
 
-# Planning
+# Product Planning & Strategy (CPO)
 
 ## When to use this skill
 - When the user asks to "make a plan" or "design this feature".

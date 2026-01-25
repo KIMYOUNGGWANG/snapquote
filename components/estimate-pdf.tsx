@@ -241,6 +241,9 @@ interface EstimatePDFProps {
     paymentLink?: string;
     signature?: string;
     signedAt?: string;
+    templateUrl?: string; // Custom background template
+    paymentLabel?: string;
+    photos?: string[];
 }
 
 export const EstimatePDF = ({
@@ -252,7 +255,11 @@ export const EstimatePDF = ({
     client,
     paymentLink,
     signature,
-    signedAt
+    signedAt,
+
+    templateUrl,
+    paymentLabel = "PAY ONLINE",
+    photos
 }: EstimatePDFProps) => {
     const subtotal = items.reduce((sum, item) => sum + item.total, 0);
     const taxAmount = subtotal * (taxRate / 100);
@@ -266,6 +273,21 @@ export const EstimatePDF = ({
     return (
         <Document>
             <Page size="A4" style={styles.page}>
+                {/* Custom Template Background */}
+                {templateUrl && (
+                    // eslint-disable-next-line jsx-a11y/alt-text
+                    <Image
+                        src={templateUrl}
+                        style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            height: '100%',
+                            zIndex: -1
+                        }}
+                    />
+                )}
                 {/* Header with Business Info */}
                 <View style={styles.header}>
                     {business?.logo_url ? (
@@ -382,7 +404,7 @@ export const EstimatePDF = ({
                             color: '#1E40AF',
                             marginBottom: 8
                         }}>
-                            💳 PAY ONLINE
+                            💳 {paymentLabel.toUpperCase()}
                         </Text>
                         <Text style={{
                             fontSize: 9,
@@ -433,6 +455,37 @@ export const EstimatePDF = ({
                     </View>
                 </View>
             </Page>
+
+
+            {/* Photo Attachment Page */}
+            {
+                photos && photos.length > 0 && (
+                    <Page size="A4" style={styles.page}>
+                        <View style={styles.header}>
+                            <View style={styles.headerContent}>
+                                <Text style={styles.title}>SITE PHOTOS</Text>
+                                <Text style={styles.businessInfo}>Attached to Estimate</Text>
+                            </View>
+                        </View>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                            {photos.map((photo, index) => (
+                                <View key={index} style={{ width: '48%', height: 200, marginBottom: 10 }}>
+                                    {/* eslint-disable-next-line jsx-a11y/alt-text */}
+                                    <Image
+                                        src={photo}
+                                        style={{
+                                            width: '100%',
+                                            height: '100%',
+                                            objectFit: 'cover',
+                                            borderRadius: 4
+                                        }}
+                                    />
+                                </View>
+                            ))}
+                        </View>
+                    </Page>
+                )
+            }
         </Document >
     );
 };
