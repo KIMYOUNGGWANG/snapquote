@@ -10,8 +10,12 @@ description: Execute a full product launch from code to marketing.
 
 ## Steps
 
+### Phase 0: Setup
+1.  **Branch Check**: Create a new branch. `main` is forbidden.
+    - `git checkout -b launch/[feature-name]`
+
 ### Phase 1: Build (The /ship process)
-1.  **Plan (CPO)**: Define spec.
+2.  **Plan (CPO)**: Define spec.
 2.  **Design (CDO)**: Create UI visual.
 3.  **Build (Engineer)**: Write code.
 4.  **Verify (QA/CISO)**: Test & Audit.

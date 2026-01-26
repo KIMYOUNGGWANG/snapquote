@@ -11,7 +11,9 @@ description: 마스터 모드 - 기획부터 배포 감사까지 모든 단계�
 이 워크플로우는 모든 단계를 자동으로 진행합니다.
 
 ## 📝 실행 파이프라인
-1.  **Step 1: Planning (`/plan`)**
+1.  **Step 0: Branch Setup**
+    - `git checkout -b feature/[name]` (Main 브랜치 작업 금지)
+2.  **Step 1: Planning (`/plan`)**
     - 요구사항을 분석하여 PRD 및 영향도 분석 보고서를 작성합니다.
 2.  **Step 2: Architecting (`/architect`)**
     - PRD를 기반으로 DB 스키마와 API 명세를 확정합니다.

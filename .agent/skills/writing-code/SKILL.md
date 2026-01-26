@@ -58,6 +58,9 @@ You MUST implement these security measures. If not applicable, explicitly explai
     - **Audit Log**: Force log critical actions (access/modify).
     - **Error Handling**: No stack traces to user. Return generic errors.
     - **Dependency**: Check CVEs for dependencies.
+6.  **Git Safety**:
+    - **NEVER** commit directly to `main` or `master`.
+    - Always create a feature branch: `git checkout -b feature/[name]` or `fix/[name]`.
 
 ## Resources
 - [Tech Stack Guide](../brand-identity/resources/tech-stack.md) (Always check this for allowable libraries)

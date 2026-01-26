@@ -54,9 +54,20 @@ export async function POST(req: Request) {
             ],
         });
 
+        if (data.error) {
+            console.error('Resend API Error:', data.error);
+            return NextResponse.json({
+                success: false,
+                error: data.error.message || 'Failed to send email'
+            }, { status: 400 });
+        }
+
         return NextResponse.json({ success: true, data });
-    } catch (error) {
-        console.error('Email send error:', error);
-        return NextResponse.json({ error: 'Failed to send email' }, { status: 500 });
+    } catch (error: any) {
+        console.error('Email send exception:', error);
+        return NextResponse.json({
+            success: false,
+            error: error.message || 'Internal server error during email sending'
+        }, { status: 500 });
     }
 }
