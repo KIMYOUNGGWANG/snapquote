@@ -7,8 +7,9 @@ import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle } from "lu
 import dynamic from "next/dynamic"
 import { EstimatePDF } from "@/components/estimate-pdf"
 import { useRouter } from "next/navigation"
-import { getEstimates, deleteEstimate, getProfile, updateEstimateStatus, type LocalEstimate, type EstimateItem, type BusinessInfo } from "@/lib/estimates-storage"
+import { getEstimates, deleteEstimate, getProfile, updateEstimateStatus, updateEstimate, type LocalEstimate, type EstimateItem, type BusinessInfo } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
+import { generateQuickBooksCSV, downloadCSV } from "@/lib/export-service"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { PDFPreviewModal } from "@/components/pdf-preview-modal"
 import { FollowUpModal } from "@/components/follow-up-modal"
@@ -87,11 +88,32 @@ export default function HistoryPage() {
         toast("✅ Marked as sent!", "success")
     }
 
+    const handleConvertToInvoice = async (estimate: LocalEstimate) => {
+        // Optimistic update
+        await updateEstimate(estimate.id, {
+            type: 'invoice',
+            status: 'sent' // Ensure it's marked as sent/final
+        })
+        await loadData()
+        toast("💰 Converted to Invoice!", "success")
+    }
+
     const handleDeleteClick = (e: React.MouseEvent, estimateId: string) => {
         e.stopPropagation()
         e.preventDefault()
         setEstimateToDelete(estimateId)
         setDeleteDialogOpen(true)
+        setDeleteDialogOpen(true)
+    }
+
+    const handleExportCSV = () => {
+        if (estimates.length === 0) {
+            toast("⚠️ No estimates to export.", "error")
+            return
+        }
+        const csv = generateQuickBooksCSV(estimates)
+        downloadCSV(csv, `snapquote_export_${new Date().toISOString().split('T')[0]}.csv`)
+        toast("📊 Exported to CSV!", "success")
     }
 
     const handleConfirmDelete = async () => {
@@ -108,7 +130,12 @@ export default function HistoryPage() {
 
     return (
         <div className="space-y-4 pb-20 max-w-2xl mx-auto px-4">
-            <h1 className="text-2xl font-bold">Estimates</h1>
+            <div className="flex justify-between items-center">
+                <h1 className="text-2xl font-bold">Estimates</h1>
+                <Button variant="outline" size="sm" onClick={handleExportCSV} title="Export for QuickBooks">
+                    📊 Export CSV
+                </Button>
+            </div>
 
             {/* Tab Navigation */}
             <div className="flex p-1 bg-muted rounded-lg">
@@ -191,7 +218,7 @@ export default function HistoryPage() {
                                             ? 'bg-green-100 text-green-800'
                                             : 'bg-yellow-100 text-yellow-800'
                                             }`}>
-                                            {estimate.status === 'sent' ? 'SENT' : 'DRAFT'}
+                                            {estimate.type === 'invoice' ? 'INVOICE' : (estimate.status === 'sent' ? 'SENT' : 'DRAFT')}
                                         </span>
                                     </div>
                                 </div>
@@ -290,6 +317,17 @@ export default function HistoryPage() {
                                         </Button>
                                     )}
 
+                                    {/* Convert to Invoice - only for sent estimates that aren't already invoices */}
+                                    {estimate.status === 'sent' && estimate.type !== 'invoice' && (
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={() => handleConvertToInvoice(estimate)}
+                                        >
+                                            💰 To Invoice
+                                        </Button>
+                                    )}
+
                                     <Button
                                         variant="outline"
                                         size="sm"
@@ -335,8 +373,12 @@ export default function HistoryPage() {
                                                             address: estimate.clientAddress
                                                         }}
                                                         business={businessProfile}
+
+
                                                         templateUrl={businessProfile?.estimate_template_url}
                                                         photos={estimate.attachments?.photos}
+                                                        type={estimate.type}
+                                                        paymentLink={businessProfile?.payment_link}
                                                     />
                                                 }
                                                 fileName={`${estimate.estimateNumber || 'estimate'}.pdf`}
@@ -365,39 +407,45 @@ export default function HistoryPage() {
                 description="Are you sure you want to delete this estimate? This action cannot be undone."
             />
 
-            {previewEstimate && (
-                <PDFPreviewModal
-                    open={!!previewEstimate}
-                    onClose={() => setPreviewEstimate(null)}
-                    document={
-                        <EstimatePDF
-                            items={previewEstimate.items}
-                            total={previewEstimate.totalAmount}
-                            summary={previewEstimate.summary_note}
-                            taxRate={previewEstimate.taxRate || 0}
-                            client={{
-                                name: previewEstimate.clientName,
-                                address: previewEstimate.clientAddress
-                            }}
-                            business={businessProfile}
-                            templateUrl={businessProfile?.estimate_template_url}
-                            photos={previewEstimate.attachments?.photos}
-                        />
-                    }
-                    fileName={`${previewEstimate.estimateNumber || 'estimate'}.pdf`}
-                />
-            )}
+            {
+                previewEstimate && (
+                    <PDFPreviewModal
+                        open={!!previewEstimate}
+                        onClose={() => setPreviewEstimate(null)}
+                        document={
+                            <EstimatePDF
+                                items={previewEstimate.items}
+                                total={previewEstimate.totalAmount}
+                                summary={previewEstimate.summary_note}
+                                taxRate={previewEstimate.taxRate || 0}
+                                client={{
+                                    name: previewEstimate.clientName,
+                                    address: previewEstimate.clientAddress
+                                }}
+                                business={businessProfile}
+                                templateUrl={businessProfile?.estimate_template_url}
+                                photos={previewEstimate.attachments?.photos}
+                                type={previewEstimate.type}
+                                paymentLink={businessProfile?.payment_link}
+                            />
+                        }
+                        fileName={`${previewEstimate.estimateNumber || 'estimate'}.pdf`}
+                    />
+                )
+            }
 
-            {followUpEstimate && (
-                <FollowUpModal
-                    open={!!followUpEstimate}
-                    onClose={() => setFollowUpEstimate(null)}
-                    clientName={followUpEstimate.clientName}
-                    estimateNumber={followUpEstimate.estimateNumber}
-                    totalAmount={followUpEstimate.totalAmount}
-                    businessName={businessProfile?.business_name || ""}
-                />
-            )}
-        </div>
+            {
+                followUpEstimate && (
+                    <FollowUpModal
+                        open={!!followUpEstimate}
+                        onClose={() => setFollowUpEstimate(null)}
+                        clientName={followUpEstimate.clientName}
+                        estimateNumber={followUpEstimate.estimateNumber}
+                        totalAmount={followUpEstimate.totalAmount}
+                        businessName={businessProfile?.business_name || ""}
+                    />
+                )
+            }
+        </div >
     )
 }

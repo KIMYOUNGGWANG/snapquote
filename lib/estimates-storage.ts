@@ -35,6 +35,7 @@ export interface EstimateSection {
 export interface LocalEstimate {
     id: string
     estimateNumber: string
+    type?: 'estimate' | 'invoice' // Default is 'estimate'
     items: EstimateItem[]      // Legacy: flat items (for backward compatibility)
     sections?: EstimateSection[] // NEW: Division-based grouping
     summary_note: string
@@ -62,11 +63,31 @@ export interface BusinessInfo {
     state_province?: string
     tradeType?: string // 'general' | 'plumber' | 'electrician' | 'hvac' | 'handyman'
     estimate_template_url?: string // Custom estimate background (base64)
+    payment_link?: string // User's personal payment link (Venmo, PayPal, Stripe)
 }
 
 // Estimates (IndexedDB)
-export async function saveEstimate(estimate: LocalEstimate) {
-    return saveEstimateToDB(estimate)
+// Save all estimates (for Restore)
+export async function saveEstimates(estimates: LocalEstimate[]): Promise<void> {
+    const db = await initDB()
+    const tx = db.transaction('estimates', 'readwrite')
+    const store = tx.objectStore('estimates')
+    await store.clear() // Wipe existing
+    for (const est of estimates) {
+        // Ensure strictly typed for DB
+        await store.put({
+            ...est,
+            synced: est.synced ?? false
+        })
+    }
+    await tx.done
+}
+
+export async function saveEstimate(estimate: LocalEstimate): Promise<void> {
+    await saveEstimateToDB({
+        ...estimate,
+        synced: estimate.synced ?? false
+    })
 }
 
 export async function getEstimates(): Promise<LocalEstimate[]> {
@@ -92,12 +113,21 @@ export async function getSentEstimates(): Promise<LocalEstimate[]> {
     return estimates.filter(e => e.status === 'sent')
 }
 
-// NEW: Update estimate status
+// NEW: Update estimate status (Legacy)
 export async function updateEstimateStatus(id: string, status: 'draft' | 'sent'): Promise<void> {
     const db = await initDB()
     const estimate = await db.get('estimates', id)
     if (estimate) {
         await db.put('estimates', { ...estimate, status })
+    }
+}
+
+// NEW: Generic Update (for type: invoice conversion)
+export async function updateEstimate(id: string, updates: Partial<LocalEstimate>): Promise<void> {
+    const db = await initDB()
+    const estimate = await db.get('estimates', id)
+    if (estimate) {
+        await db.put('estimates', { ...estimate, ...updates })
     }
 }
 

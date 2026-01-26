@@ -13,6 +13,9 @@ import { getPriceList, savePriceListItem, deletePriceListItem } from "@/lib/db"
 import { toast } from "@/components/toast"
 import { PriceListModal } from "@/components/price-list-modal"
 import type { PriceListItem, CreatePriceListItem } from "@/types"
+import { generateFullBackupJSON, type SnapQuoteBackup } from "@/lib/export-service"
+import { saveEstimates } from "@/lib/estimates-storage"
+import { savePriceList } from "@/lib/db"
 
 export default function ProfilePage() {
     const router = useRouter()
@@ -280,6 +283,23 @@ export default function ProfilePage() {
                             onChange={(e) => setProfile({ ...profile, business_name: e.target.value })}
                             placeholder="Your Company Name"
                         />
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label htmlFor="payment_link">My Payment Link (Get Paid 💵)</Label>
+                        <div className="flex gap-2">
+                            <Input
+                                id="payment_link"
+                                value={profile.payment_link || ""}
+                                onChange={(e) => setProfile({ ...profile, payment_link: e.target.value })}
+                                placeholder="https://venmo.com/u/yourname or Stripe Link"
+                            />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            Paste your personal payment link here (Venmo, PayPal, CashApp, or Stripe).
+                            <br />
+                            If added, a <b>&quot;PAY NOW&quot;</b> button will appear on your PDF estimates.
+                        </p>
                     </div>
 
                     <div className="space-y-2">

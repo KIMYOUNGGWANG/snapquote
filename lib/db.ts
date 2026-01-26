@@ -241,6 +241,18 @@ export async function clearProcessedAudio(): Promise<void> {
 }
 
 // ============ PRICE LIST ============
+// Bulk save price list (for Restore)
+export async function savePriceList(items: PriceListItem[]): Promise<void> {
+    const db = await initDB()
+    const tx = db.transaction('priceList', 'readwrite')
+    const store = tx.objectStore('priceList')
+    await store.clear()
+    for (const item of items) {
+        await store.put(item)
+    }
+    await tx.done
+}
+
 export async function savePriceListItem(item: Omit<PriceListItem, 'id' | 'createdAt' | 'updatedAt' | 'usageCount'> & { id?: string }): Promise<string> {
     const db = await initDB();
     const now = new Date().toISOString();

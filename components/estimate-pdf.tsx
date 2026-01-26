@@ -1,4 +1,4 @@
-import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer';
+import { Document, Page, Text, View, StyleSheet, Image, Link } from '@react-pdf/renderer';
 
 const styles = StyleSheet.create({
     page: {
@@ -243,7 +243,9 @@ interface EstimatePDFProps {
     signedAt?: string;
     templateUrl?: string; // Custom background template
     paymentLabel?: string;
+
     photos?: string[];
+    type?: 'estimate' | 'invoice';
 }
 
 export const EstimatePDF = ({
@@ -258,8 +260,10 @@ export const EstimatePDF = ({
     signedAt,
 
     templateUrl,
+
     paymentLabel = "PAY ONLINE",
-    photos
+    photos,
+    type = 'estimate'
 }: EstimatePDFProps) => {
     const subtotal = items.reduce((sum, item) => sum + item.total, 0);
     const taxAmount = subtotal * (taxRate / 100);
@@ -307,7 +311,7 @@ export const EstimatePDF = ({
                         {business?.email ? (
                             <Text style={styles.businessInfo}>Email: {business.email}</Text>
                         ) : null}
-                        <Text style={styles.title}>ESTIMATE</Text>
+                        <Text style={styles.title}>{type === 'invoice' ? 'INVOICE' : 'ESTIMATE'}</Text>
                         <Text style={styles.businessInfo}>Date: {today}</Text>
                     </View>
                 </View>
@@ -387,7 +391,8 @@ export const EstimatePDF = ({
                     </View>
                 </View>
 
-                {/* Payment Link Section */}
+                {/* Payment Link Section (Profile Link overrides custom link if present, or we can fallback) */}
+                {/* For MVP, let's prioritize the specific paymentLink prop passed down (which comes from business profile) */}
                 {paymentLink ? (
                     <View style={{
                         marginTop: 20,
@@ -399,27 +404,31 @@ export const EstimatePDF = ({
                         alignItems: 'center'
                     }}>
                         <Text style={{
-                            fontSize: 12,
+                            fontSize: 14,
                             fontWeight: 'bold',
                             color: '#1E40AF',
                             marginBottom: 8
                         }}>
-                            💳 {paymentLabel.toUpperCase()}
+                            {type === 'invoice' ? 'PAY INVOICE NOW' : 'PAY DEPOSIT NOW'}
                         </Text>
-                        <Text style={{
-                            fontSize: 9,
-                            color: '#3B82F6',
-                            textDecoration: 'underline',
-                            marginBottom: 5
+                        <Link src={paymentLink} style={{
+                            fontSize: 12,
+                            color: '#FFFFFF',
+                            backgroundColor: '#2563EB',
+                            paddingVertical: 8,
+                            paddingHorizontal: 20,
+                            borderRadius: 4,
+                            textDecoration: 'none'
                         }}>
-                            {paymentLink}
-                        </Text>
+                            CLICK TO PAY SECURELY
+                        </Link>
                         <Text style={{
                             fontSize: 8,
                             color: '#6B7280',
-                            textAlign: 'center'
+                            textAlign: 'center',
+                            marginTop: 8
                         }}>
-                            Click or copy this link to make a secure payment
+                            You will be redirected to our secure payment page.
                         </Text>
                     </View>
                 ) : null}
