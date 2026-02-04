@@ -1,29 +1,20 @@
 ---
-description: Ideate and validate new business ideas or features.
+description: Brainstorming and Initial Ideation (Ideate Phase)
 ---
 
-# 💡 Ideation & Validation Workflow
+# 💡 Ideate Workflow (The Idea Forge)
 
-## Role
-- **Goal**: Turn raw ideas into validated concepts.
-- **Participants**: CIO (Brainstorming), CMO (Marketing), CRO (Tech Research), CPO (Planning).
+Use this BEFORE `launch`. This is for when you have a raw idea and want to expand, critique, and validate it.
 
-## Steps
+## 1. Discovery & Research (`deep-research`)
+- [ ] **Market Scan**: Search for existing solutions and identify gaps.
+- [ ] **Tech Feasibility**: Check if the required technology is available and mature.
 
-1.  **Diverge (CIO)**
-    - Generate 10+ variations of the core idea.
-    - Ask: "What if we did the opposite?", "How would a giant company do this?"
+## 2. Multi-Agent Brainstorming (`multi-agent-brainstorming`)
+- [ ] **Expert Panel**: I will summon 가상 CPO, CTO, and Marketer personas.
+- [ ] **Endless Debate**: Let the agents critique the idea, find pitfalls, and propose "Killer Features".
+- [ ] **User Feedback**: User (You) intervenes to steer the direction based on agent suggestions.
 
-2.  **Market Validation (CMO)**
-    - "Who needs this?"
-    - "Is it sellable?" (Check trends, keywords).
-    - "What is the hook?"
-
-3.  **Tech Feasibility (CRO)**
-    - "Is it possible within 2 weeks?"
-    - "What is the risk?" (Cost, complexity).
-
-4.  **Converge (CPO)**
-    - Select ONE best idea.
-    - Define the MVP scope.
-    - Output: A clear "One-Pager" concept.
+## 3. Strategy Summary (`brainstorming`)
+- [ ] **Final Concept**: Summarize the refined idea.
+- [ ] **Ready for Launch**: Prepare the core message to be handed over to the `launch` workflow.

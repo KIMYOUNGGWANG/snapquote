@@ -1,19 +1,20 @@
 ---
-description: 빠른 수정 모드 - UI 트윅, 오타 수정 등 작은 단위의 작업을 빠르게 처리합니다.
+description: Debugging and bug fixing (Fix Phase)
 ---
 
-# ⚡ /fix - 초소형 개발 및 수정
+# 🚑 Fix Workflow
 
-## 🎯 목적
-기획이나 복잡한 설계가 필요 없는 작은 작업을 가장 빠르게 처리합니다. 절차를 최소화하고 결과물에 집중합니다.
+Use this workflow when something is broken.
 
-## 📝 수행 원칙
-1. **Speed First**: 기획(CPO), 설계(CTO) 단계를 생략하고 즉시 `writing-code` 실행.
-2. **Atomic Change**: 요청받은 부분만 정확하게 수정.
-3. **Minimal Verification**: 수정된 파일과 연관된 부분만 가볍게 체크.
+## 1. Diagnosis (`debugging-strategies`)
+- [ ] **Reproduce**: Create a reproduction script or test case that demonstrates the bug.
+- [ ] **Analyze**: Read logs, stack traces, and use `error-analysis` skill.
+- [ ] **Log**: Write findings to `findings.md` (don't trust your memory).
 
-## 🚀 사용 예시
-- "먼저 `fix/ui-tweak` 브랜치 만들고,"
-- "버튼 텍스트를 '제출'에서 '전송'으로 바꿔줘."
-- "헤더 배경색을 좀 더 어둡게 트윅해줘."
-- "메인 페이지 하단에 저작권 연도를 2024로 업데이트해줘."
+## 2. Correction (`test-driven-development`)
+- [ ] **Test**: Ensure the reproduction test fails (RED).
+- [ ] **Fix**: Apply the fix.
+- [ ] **Verify**: Ensure the test passes (GREEN) and no regressions occurred.
+
+## 3. Prevention
+- [ ] **Reflect**: Add a note to `progress.md` about why this happened to avoid repeating it.

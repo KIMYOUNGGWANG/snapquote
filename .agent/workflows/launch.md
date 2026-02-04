@@ -1,40 +1,19 @@
 ---
-description: Execute a full product launch from code to marketing.
+description: Start a new feature or project (Launch Phase)
 ---
 
-# 🚀 Product Launch Workflow
+# 🚀 Launch Workflow (Ace Edition)
 
-## Role
-- **Goal**: Ship a feature AND tell the world about it.
-- **Participants**: All Agents (CPO, CTO, CDO, Engineer, QA, CISO, CMO).
+Use this for new features or projects. Focuses on setting the stage with CPO/CTO precision.
 
-## Steps
+## 1. Context Alignment (`context-driven-development`)
+- [ ] **Sync**: Read `conductor/product.md` and `conductor/tech-stack.md`.
+- [ ] **Verify**: Ensure I understand the "Why" and "What" before writing a single line of code.
 
-### Phase 0: Setup
-1.  **Branch Check**: Create a new branch. `main` is forbidden.
-    - `git checkout -b launch/[feature-name]`
+## 2. Elite Planning (`planning-with-files`)
+- [ ] **Initialize**: Create `task_plan.md`, `findings.md`, and `progress.md`.
+- [ ] **Phase Breakdown**: Define clear milestones.
+- [ ] **Architectural Review**: Use `senior-architect` skill to critique the plan before approval.
 
-### Phase 1: Build (The /ship process)
-2.  **Plan (CPO)**: Define spec.
-2.  **Design (CDO)**: Create UI visual.
-3.  **Build (Engineer)**: Write code.
-4.  **Verify (QA/CISO)**: Test & Audit.
-
-### Phase 2: Go-to-Market (The Extra Mile)
-5.  **Packaging (CMO)**
-    - Write Release Notes.
-    - Create "What's New" modal content.
-    - Generate App Store / Landing Page screenshots.
-
-6.  **Promotion (CMO)**
-    - Write 1 Twitter/Threads thread.
-    - Write 1 Email newsletter draft.
-    - Write 1 Blog post outline.
-
-7.  **Final Check**
-    - Is the "Buy" button working?
-    - Are analytics event firing?
-
-## Output
-- A deployed feature.
-- A folder of marketing assets ready to post.
+## 3. User Sign-off
+- [ ] **Present**: Show the `task_plan.md` to the user for final approval.
