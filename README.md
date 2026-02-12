@@ -81,7 +81,11 @@ npm run dev
 
 ## 📖 Documentation
 
-자세한 개발 현황은 [DEVELOPMENT.md](./DEVELOPMENT.md) 참고
+- [Product Requirements (PRD)](./PRODUCT_REQUIREMENTS_DOCUMENT.md)
+- [Master Specification](./MASTER_SPECIFICATION.md)
+- [Automation Expansion PRD](./AUTOMATION_PRD.md)
+- [Platform Expansion Plan (Activepieces)](./SNAPQUOTE_PLATFORM_EXPANSION_PLAN.md)
+- [Development Status](./DEVELOPMENT.md)
 
 ---
 

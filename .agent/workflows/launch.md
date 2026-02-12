@@ -1,19 +1,34 @@
 ---
-description: Start a new feature or project (Launch Phase)
+description: Autonomous Strategic Planning (Orchestrator 3.0)
 ---
 
-# 🚀 Launch Workflow (Ace Edition)
+# 🚀 Launch (Agentic Engine v3.0)
 
-Use this for new features or projects. Focuses on setting the stage with CPO/CTO precision.
+Strategic feature inception with auto-skill detection and model routing.
 
-## 1. Context Alignment (`context-driven-development`)
-- [ ] **Sync**: Read `conductor/product.md` and `conductor/tech-stack.md`.
-- [ ] **Verify**: Ensure I understand the "Why" and "What" before writing a single line of code.
+## 0. [AGENT] Orchestrator: Intelligence Setup
+- [ ] **Model Router**: Architecture tasks are always `[HEAVY]` → Recommend Pro/Sonnet.
+- [ ] **Skill Discovery**: Scan `conductor/tech-stack.md` and auto-load relevant architecture skills.
+- [ ] **Board Init**: Initialize `.agent/memory/task_board.md`.
 
-## 2. Elite Planning (`planning-with-files`)
-- [ ] **Initialize**: Create `task_plan.md`, `findings.md`, and `progress.md`.
-- [ ] **Phase Breakdown**: Define clear milestones.
-- [ ] **Architectural Review**: Use `senior-architect` skill to critique the plan before approval.
+## 1. [AGENT] Orchestrator: Goal Alignment
+- [ ] **Context Sync**: Read `conductor/product.md` and `conductor/tech-stack.md`.
+- [ ] **Strategy**: Load `startup-business-analyst-market-opportunity` for value verification.
 
-## 3. User Sign-off
-- [ ] **Present**: Show the `task_plan.md` to the user for final approval.
+## 2. [AGENT] Architect: Blueprinting
+- [ ] **Design**: Draft technical plan:
+    - [ ] `fsd-lite` directory structure.
+    - [ ] API contracts (using `api-design-principles`).
+- [ ] **Boarding**: Generate task breakdown in `task_board.md`.
+
+## 3. [AGENT] Critic: Strategic Audit
+- [ ] **Critique**: Audit plan for technical debt and token waste.
+- [ ] **Debate**: Record critique in `.agent/memory/agent_debate.md` (IN ENGLISH).
+- [ ] **Iterate**: If rejected, Architect must refactor.
+
+## 4. [USER] Final Sign-off
+- [ ] **Present**: Show orchestrated `task_board.md` to user for approval.
+
+---
+> [!NOTE]
+> Launch always uses heavyweight model. Debate log is in English.

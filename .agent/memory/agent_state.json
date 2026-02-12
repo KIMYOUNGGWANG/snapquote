@@ -1,0 +1,16 @@
+{
+  "session": {
+    "id": "none",
+    "startTime": "",
+    "status": "idle"
+  },
+  "roles": {
+    "lead_dev": "inactive",
+    "critic": "inactive",
+    "qa_ciso": "inactive"
+  },
+  "memory": {
+    "last_compact_turn": 0,
+    "current_tags": []
+  }
+}

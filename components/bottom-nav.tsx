@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Home, PlusCircle, History, User, Receipt, Clock, Users } from "lucide-react"
+import { Home, PlusCircle, History, User, Receipt, Clock, Users, Bot } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ThemeToggle } from "./theme-toggle"
 
@@ -13,7 +13,7 @@ export function BottomNav() {
         { href: "/", label: "Home", icon: Home },
         { href: "/new-estimate", label: "New", icon: PlusCircle },
         { href: "/receipts", label: "Receipts", icon: Receipt },
-        { href: "/time-tracking", label: "Time", icon: Clock },
+        { href: "/automation", label: "Auto", icon: Bot },
         { href: "/clients", label: "Clients", icon: Users },
         { href: "/history", label: "History", icon: History },
         { href: "/profile", label: "Profile", icon: User },

@@ -79,5 +79,54 @@ create policy "Users can insert own estimate items" on estimate_items for insert
   exists ( select 1 from estimates where id = estimate_items.estimate_id and user_id = auth.uid() )
 );
 
--- Feedback Policy: Users can insert feedback
-create policy "Users can insert feedback" on feedback for insert with check (auth.uid() = user_id OR user_id IS NULL);
+-- Estimates (Update with tracking columns)
+alter table estimates add column sent_at timestamp with time zone;
+alter table estimates add column last_followed_up_at timestamp with time zone;
+
+-- Automation Settings
+create table automations (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references profiles(id) on delete cascade not null,
+  type text not null, -- 'quote_chaser', 'review_request'
+  is_enabled boolean default false,
+  settings jsonb default '{}'::jsonb, -- { "delay_days": 3, "template_id": "default" }
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  unique(user_id, type)
+);
+
+-- Job Queue (for Edge Functions)
+create table job_queue (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references profiles(id) on delete cascade not null,
+  task_type text not null, -- 'email_followup', 'sms_followup', 'review_request'
+  payload jsonb not null,
+  status text check (status in ('pending', 'processing', 'completed', 'failed')) default 'pending',
+  error_message text,
+  scheduled_for timestamp with time zone default timezone('utc'::text, now()) not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Enable RLS
+alter table automations enable row level security;
+alter table job_queue enable row level security;
+
+-- Policies for Automations
+create policy "Users can view own automations" on automations for select using (auth.uid() = user_id);
+create policy "Users can update own automations" on automations for update using (auth.uid() = user_id);
+create policy "Users can insert own automations" on automations for insert with check (auth.uid() = user_id);
+
+-- Policies for Job Queue
+-- Note: Edge Functions use service_role key which bypasses RLS
+-- These policies protect against direct client-side access
+create policy "Users can view own jobs" on job_queue for select using (auth.uid() = user_id);
+create policy "Users cannot insert jobs directly" on job_queue for insert with check (false);
+-- Jobs should only be created by Edge Functions with service_role key
+
+-- Index for performance
+create index idx_job_queue_status_scheduled on job_queue (status, scheduled_for) where status = 'pending';
+create index idx_estimates_followup on estimates (status, last_followed_up_at, created_at) where status = 'sent';
+
+-- Estimates (Add review tracking column)
+alter table estimates add column if not exists review_requested_at timestamp with time zone;

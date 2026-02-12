@@ -1,18 +1,28 @@
 ---
-description: Small feature or quick implementation (Micro Phase)
+description: Lean Autonomous Execution (Orchestrator 3.0)
 ---
 
-# ⚡ Micro Workflow (Lean Edition)
+# ⚡ Micro (Agentic Lean v3.0)
 
-Fast-track for small tasks that don't need heavy planning.
+Fast-track engine for 5-10 minute tasks. Maximum speed, minimum overhead.
 
-## 1. Quick Sync
-- [ ] **Requirement**: One-sentence goal check.
-- [ ] **Task List**: Quick checkbox list in chat or `task_plan.md`.
+## 0. [AGENT] Orchestrator: Intelligence Setup
+- [ ] **Model Router**: Micro tasks are `[LIGHT]` → Recommend Flash/mini model.
+- [ ] **Skill Discovery**: Quick scan → load only essential skills.
 
-## 2. Direct Build (`typescript-expert` / `clean-code`)
-- [ ] **Implement**: Skip separate sub-agents. Code directly with `clean-code` on-the-fly.
-- [ ] **Quick Test**: Run essential unit tests only.
+## 1. [AGENT] Lead Dev: Direct Action
+- [ ] **Goal**: One-sentence requirement check.
+- [ ] **Implement**: Code directly using `clean-code` principles.
 
-## 3. Fast Merge
-- [ ] **Verify**: Smoke test and ship.
+## 2. [AGENT] Critic: Instant Audit
+- [ ] **Check**: Quick sanity check on syntax and structure.
+- [ ] **Verify**: Smoke test (`npm run build` or core units).
+
+## 3. [AGENT] Secretary: Minimal Log
+- [ ] **History (EN)**: One-line summary to `.agent/memory/feature_history_en.md`.
+- [ ] **History (KR)**: One-line summary to `.agent/memory/feature_history_kr.md`.
+
+---
+> [!NOTE]
+> Micro skips full debate log for speed. Critic does instant pass/fail only.
+> **Always recommend lightweight model to save tokens.**

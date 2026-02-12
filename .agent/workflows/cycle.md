@@ -1,23 +1,35 @@
 ---
-description: Run the Full Development Lifecycle (Ideate -> Ship)
+description: High-Level Autonomous Lifecycle (Orchestrator 3.0)
 ---
 
-# ♾️ Full Cycle Workflow (The Master Loop)
+# ♾️ Cycle (Master Orchestrator v3.0)
 
-This is the **God Mode** workflow. It chains specific phases together to take a raw idea to a shipped feature in one continuous run. Use with caution/patience.
+The **God Mode** engine. Orchestrates the full lifecycle from idea to production.
 
-## 1. Phase 1: Inception (`ideate` + `launch`)
-- [ ] **Ideate**: Run the `ideate` chain to refine the concept.
-- [ ] **Launch**: Lock in the PRD and `task_plan.md` using the `launch` workflow.
+## 0. [AGENT] Orchestrator: Intelligence Setup
+- [ ] **Model Router**: Cycle is always `[HEAVY]` → Recommend Pro/Sonnet.
+- [ ] **Skill Discovery**: Full codebase scan → auto-load all relevant skills.
+- [ ] **Board Init**: Create master `.agent/memory/task_board.md`.
 
-## 2. Phase 2: Blueprint (`design`)
-- [ ] **Design**: Execute `design` workflow to finalize Architecture and/or UI mocks.
+## 1. [AGENT] Strategist: Inception Phase
+- [ ] **Trigger**: Execute `ideate` + `launch` sub-flows.
+- [ ] **Outcome**: Verified `task_plan.md` and PRD locked.
 
-## 3. Phase 3: Construction (`develop`)
-- [ ] **Develop**: Iterate through `task_plan.md` using the `develop` workflow (TDD + Clean Code).
+## 2. [AGENT] Lead Dev & Architect: Construction Phase
+- [ ] **Trigger**: Execute `develop` engine.
+- [ ] **Autonomy**: Self-correction loop until milestones reached.
+- [ ] **Debate**: All decisions recorded in `.agent/memory/agent_debate.md` (IN ENGLISH).
 
-## 4. Phase 4: Polish (`uiux`)
-- [ ] **Polishing**: If UI is involved, run `uiux` workflow for final aesthetic touches.
+## 3. [AGENT] Designer & Critic: Polish Phase
+- [ ] **Trigger**: Execute `uiux` engine (if applicable).
+- [ ] **Refinement**: Premium aesthetic audit.
 
-## 5. Phase 5: Delivery (`ship`)
-- [ ] **Ship**: Perform final Security Audit (CISO) and generate PR ($ship).
+## 4. [AGENT] CISO & Secretary: Delivery Phase
+- [ ] **Trigger**: Execute `ship` engine.
+- [ ] **Documentation**: Bilingual feature history updated.
+- [ ] **Pruning**: Context archived and reset automatically.
+
+---
+> [!IMPORTANT]
+> Cycle = continuous loop. User interaction only at strategic checkpoints.
+> All internal debate in English, all user reports in Korean.
