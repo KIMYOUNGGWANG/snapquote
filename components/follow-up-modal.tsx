@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { X, Send, Loader2 } from "lucide-react"
 import { toast } from "@/components/toast"
+import { withAuthHeaders } from "@/lib/auth-headers"
+import { getReferralShareUrl } from "@/lib/referrals"
 
 interface FollowUpModalProps {
     open: boolean
@@ -41,14 +43,16 @@ export function FollowUpModal({
 
         setSending(true)
         try {
+            const referralUrl = await getReferralShareUrl({ source: "follow_up_email" })
             const response = await fetch("/api/send-email", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: await withAuthHeaders({ "Content-Type": "application/json" }),
                 body: JSON.stringify({
                     email,
                     subject: `Following up on Estimate ${estimateNumber}`,
                     message,
                     businessName,
+                    referralUrl: referralUrl || undefined,
                 }),
             })
 
@@ -58,6 +62,8 @@ export function FollowUpModal({
                 // Open mailto link
                 window.open(result.mailtoUrl, "_blank")
                 toast("📧 Email client opened. Please send manually.", "success")
+            } else if (response.status === 402) {
+                toast("⚠️ Monthly email quota reached. Upgrade flow will be enabled soon.", "warning")
             } else if (result.success) {
                 toast("📧 Follow-up email sent!", "success")
             } else {

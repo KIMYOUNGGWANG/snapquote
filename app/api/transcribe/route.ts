@@ -1,13 +1,48 @@
 import { NextResponse } from "next/server";
 import { openai } from "@/lib/openai";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { enforceUsageQuota, recordUsage } from "@/lib/server/usage-quota";
 
 export async function POST(req: Request) {
     try {
+        const quota = await enforceUsageQuota(req, "transcribe", { requireAuth: true })
+        if (!quota.ok) {
+            return NextResponse.json(
+                {
+                    error: quota.error || "Free plan limit reached",
+                    code: "FREE_PLAN_LIMIT_REACHED",
+                    metric: "transcribe",
+                    usage: quota.used,
+                    limit: quota.limit,
+                },
+                { status: quota.status || 402 }
+            )
+        }
+
+        const ip = getClientIp(req)
+        const rateLimit = await checkRateLimit({
+            key: `transcribe:${ip}`,
+            limit: 40,
+            windowMs: 10 * 60 * 1000,
+        })
+
+        if (!rateLimit.allowed) {
+            return NextResponse.json({ error: "Too many requests. Please try again later." }, { status: 429 });
+        }
+
         const formData = await req.formData();
         const audioFile = formData.get("file") as File;
 
         if (!audioFile) {
             return NextResponse.json({ error: "No file provided" }, { status: 400 });
+        }
+
+        if (!audioFile.type.startsWith("audio/")) {
+            return NextResponse.json({ error: "Invalid file type" }, { status: 400 });
+        }
+
+        if (audioFile.size > 20 * 1024 * 1024) {
+            return NextResponse.json({ error: "Audio file too large" }, { status: 413 });
         }
 
         // Trade terminology hint for better Whisper recognition
@@ -56,6 +91,8 @@ export async function POST(req: Request) {
 
         // 6. Clean up extra whitespace
         text = text.replace(/\s+/g, " ").trim();
+
+        await recordUsage(quota.context, "transcribe")
 
         return NextResponse.json({ text });
     } catch (error) {

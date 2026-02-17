@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "🚀 Bridge to Codex",
+      "type": "shell",
+      "command": "./.agent/scripts/bridge.sh ${input:workflowName}",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      },
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "detail": "Generates context for the selected workflow in the current project."
+    }
+  ],
+  "inputs": [
+    {
+      "id": "workflowName",
+      "type": "pickString",
+      "description": "Select the workflow for Codex:",
+      "options": [
+        "develop",
+        "fix",
+        "launch",
+        "ship",
+        "micro",
+        "cycle",
+        "ideate",
+        "uiux",
+        "optimize",
+        "marketing"
+      ],
+      "default": "develop"
+    }
+  ]
+}

@@ -409,7 +409,7 @@ export const EstimatePDF = ({
                             color: '#1E40AF',
                             marginBottom: 8
                         }}>
-                            {type === 'invoice' ? 'PAY INVOICE NOW' : 'PAY DEPOSIT NOW'}
+                            {paymentLabel || (type === 'invoice' ? 'PAY INVOICE NOW' : 'PAY DEPOSIT NOW')}
                         </Text>
                         <Link src={paymentLink} style={{
                             fontSize: 12,

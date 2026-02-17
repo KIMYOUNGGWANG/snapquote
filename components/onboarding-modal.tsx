@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Mic, Zap, Send, X, ArrowRight, ChevronLeft, ChevronRight, Check, Hammer, Droplets, HardHat, Thermometer } from "lucide-react"
+import { Mic, Zap, Send, X, ArrowRight, ChevronLeft, ChevronRight, Check, Hammer, Droplets, HardHat, Thermometer, Sparkles } from "lucide-react"
 import { TRADE_PRESETS, TradeType } from "@/lib/trade-presets"
 import { savePriceListItem } from "@/lib/db"
 import { getProfile, saveProfile, BusinessInfo } from "@/lib/estimates-storage"
@@ -188,8 +188,8 @@ export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalPr
                                             key={trade.id}
                                             onClick={() => setSelectedTrade(trade.id)}
                                             className={`flex flex-col items-center p-3 rounded-lg border-2 transition-all ${isSelected
-                                                    ? "border-primary bg-primary/10"
-                                                    : "border-muted hover:border-primary/50"
+                                                ? "border-primary bg-primary/10"
+                                                : "border-muted hover:border-primary/50"
                                                 }`}
                                         >
                                             <div className={`p-2 rounded-full mb-2 ${trade.color} text-white`}>
@@ -270,8 +270,8 @@ export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalPr
                     >
                         {isSaving ? "Setting up..." : isLastStep ? (
                             <>
-                                Get Started
-                                <ArrowRight className="h-4 w-4 ml-1" />
+                                Try Practice Estimate
+                                <Sparkles className="h-4 w-4 ml-2 fill-primary-foreground" />
                             </>
                         ) : (
                             <>

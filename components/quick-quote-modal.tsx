@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input"
 import { X, Loader2, Copy, CreditCard, FileText, Check, Minus, Plus } from "lucide-react"
 import { toast } from "@/components/toast"
 import { getProfile } from "@/lib/estimates-storage"
+import { trackAnalyticsEvent } from "@/lib/analytics"
+import { withAuthHeaders } from "@/lib/auth-headers"
 import type { PriceListItem } from "@/types"
 
 interface QuickQuoteModalProps {
@@ -91,9 +93,10 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
 
         setIsGeneratingLink(true)
         try {
+            const headers = await withAuthHeaders({ 'Content-Type': 'application/json' })
             const response = await fetch('/api/create-payment-link', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify({
                     amount: total,
                     customerName: 'Customer',
@@ -107,6 +110,15 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
 
             const data = await response.json()
             setPaymentLink(data.url)
+            void trackAnalyticsEvent({
+                event: "payment_link_created",
+                channel: "quick_quote",
+                metadata: {
+                    amount: total,
+                    itemName: item.name,
+                    quantity,
+                },
+            })
             toast("💳 Payment link ready!", "success")
         } catch (error: any) {
             console.error('Payment link error:', error)

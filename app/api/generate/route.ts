@@ -1,5 +1,7 @@
 import { OpenAI } from "openai"
 import { NextResponse } from "next/server"
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
+import { enforceUsageQuota, recordUsage } from "@/lib/server/usage-quota"
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -152,7 +154,61 @@ TONE: Professional, confident, sales-oriented. Sound like a trusted expert.
 
 export async function POST(req: Request) {
     try {
+        const quota = await enforceUsageQuota(req, "generate", { requireAuth: true })
+        if (!quota.ok) {
+            return NextResponse.json(
+                {
+                    error: quota.error || "Free plan limit reached",
+                    code: "FREE_PLAN_LIMIT_REACHED",
+                    metric: "generate",
+                    usage: quota.used,
+                    limit: quota.limit,
+                },
+                { status: quota.status || 402 }
+            )
+        }
+
         const { images, notes, userProfile, projectType } = await req.json()
+        const ip = getClientIp(req)
+        const rateLimit = await checkRateLimit({
+            key: `generate:${ip}`,
+            limit: 20,
+            windowMs: 10 * 60 * 1000,
+        })
+
+        if (!rateLimit.allowed) {
+            return NextResponse.json(
+                { error: "Too many requests. Please wait and try again." },
+                { status: 429 }
+            )
+        }
+
+        if (notes && (typeof notes !== "string" || notes.length > 8000)) {
+            return NextResponse.json(
+                { error: "Invalid notes input" },
+                { status: 400 }
+            )
+        }
+
+        if (images !== undefined) {
+            if (!Array.isArray(images) || images.length > 8) {
+                return NextResponse.json(
+                    { error: "Invalid images input" },
+                    { status: 400 }
+                )
+            }
+
+            const hasInvalidImage = images.some((image) =>
+                typeof image !== "string" || image.length > 2_000_000
+            )
+
+            if (hasInvalidImage) {
+                return NextResponse.json(
+                    { error: "Invalid image payload" },
+                    { status: 400 }
+                )
+            }
+        }
 
         // Use provided userProfile or defaults
         const profile = userProfile || {}
@@ -217,6 +273,11 @@ export async function POST(req: Request) {
         if (!estimate.warnings) {
             estimate.warnings = []
         }
+
+        await recordUsage(quota.context, "generate", {
+            promptTokens: response.usage?.prompt_tokens || 0,
+            completionTokens: response.usage?.completion_tokens || 0,
+        })
 
         return NextResponse.json(estimate)
     } catch (error) {

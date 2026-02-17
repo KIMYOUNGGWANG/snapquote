@@ -16,7 +16,7 @@ interface SnapQuoteDB extends DBSchema {
             totalAmount: number;
             createdAt: string;
             synced: boolean;
-            status: 'draft' | 'sent';  // NEW: Capture-First status
+            status: 'draft' | 'sent' | 'paid';  // NEW: Capture-First status
         };
         indexes: { 'by-date': string; 'by-status': string };  // Added by-status
     };
@@ -422,4 +422,3 @@ export async function deleteClient(id: string): Promise<void> {
     const db = await initDB();
     await db.delete('clients', id);
 }
-

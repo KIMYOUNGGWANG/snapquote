@@ -33,7 +33,17 @@ npm install
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 OPENAI_API_KEY=your_openai_api_key
+CRON_SECRET=your_cron_secret
+JOB_RUNNER_SECRET=your_job_runner_secret
+RESEND_API_KEY=your_resend_api_key
+OPS_ALERT_EMAIL=your_ops_inbox@example.com
+
+# Distributed rate limiting (recommended for production)
+# RATE_LIMIT_PROVIDER=upstash
+# UPSTASH_REDIS_REST_URL=your_upstash_rest_url
+# UPSTASH_REDIS_REST_TOKEN=your_upstash_rest_token
 ```
 
 ### 3. 실행

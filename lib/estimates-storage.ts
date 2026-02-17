@@ -45,8 +45,9 @@ export interface LocalEstimate {
     taxAmount: number
     totalAmount: number
     createdAt: string
+    sentAt?: string
     synced?: boolean
-    status: 'draft' | 'sent'  // Capture-First status
+    status: 'draft' | 'sent' | 'paid'  // Capture-First status
     attachments?: EstimateAttachments  // Original data preservation
     clientSignature?: string; // base64 image (NEW for Phase 6)
     signedAt?: string; // ISO date (NEW for Phase 6)
@@ -113,12 +114,30 @@ export async function getSentEstimates(): Promise<LocalEstimate[]> {
     return estimates.filter(e => e.status === 'sent')
 }
 
+// NEW: Get only paid estimates
+export async function getPaidEstimates(): Promise<LocalEstimate[]> {
+    const estimates = await getEstimates()
+    return estimates.filter(e => e.status === 'paid')
+}
+
 // NEW: Update estimate status (Legacy)
-export async function updateEstimateStatus(id: string, status: 'draft' | 'sent'): Promise<void> {
+export async function updateEstimateStatus(id: string, status: 'draft' | 'sent' | 'paid'): Promise<void> {
     const db = await initDB()
     const estimate = await db.get('estimates', id)
     if (estimate) {
-        await db.put('estimates', { ...estimate, status })
+        const nowIso = new Date().toISOString()
+        const next: any = {
+            ...estimate,
+            status,
+            // Ensure cloud sync picks up status changes.
+            synced: false,
+        }
+
+        if (status === 'sent' && !next.sentAt) {
+            next.sentAt = nowIso
+        }
+
+        await db.put('estimates', next)
     }
 }
 

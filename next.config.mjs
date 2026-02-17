@@ -27,6 +27,9 @@ const withPWA = withPWAInit({
 /** @type {import('next').NextConfig} */
 const nextConfig = {
     reactStrictMode: true,
+    experimental: {
+        esmExternals: 'loose',
+    },
 };
 
 export default withPWA(nextConfig);

@@ -8,20 +8,23 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import Image from "next/image"
 import dynamic from "next/dynamic"
-import { EstimatePDF } from "@/components/estimate-pdf"
+const EstimatePDF = dynamic(() => import("@/components/estimate-pdf").then(mod => mod.EstimatePDF), { ssr: false })
 import { useRouter } from "next/navigation"
-import { saveEstimate, generateEstimateNumber, getProfile, saveProfile } from "@/lib/estimates-storage"
+import { saveEstimate, generateEstimateNumber, getProfile, saveProfile, updateEstimateStatus } from "@/lib/estimates-storage"
 import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI, getClients, type Client } from "@/lib/db"
 import type { BusinessInfo } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
-import { PaymentOptionModal } from "@/components/payment-option-modal"
+import { trackAnalyticsEvent } from "@/lib/analytics"
+import { withAuthHeaders } from "@/lib/auth-headers"
+import { copyReferralShareUrl, getReferralShareUrl } from "@/lib/referrals"
+const PaymentOptionModal = dynamic(() => import("@/components/payment-option-modal").then(mod => mod.PaymentOptionModal), { ssr: false })
 import { AudioRecorder } from "@/components/audio-recorder"
-import { PDFPreviewModal } from "@/components/pdf-preview-modal"
-import { EmailModal } from "@/components/email-modal"
-import { ExcelImportModal } from "@/components/excel-import-modal"
-import { Mail, FileSpreadsheet, Users, PenTool } from "lucide-react"
+const PDFPreviewModal = dynamic(() => import("@/components/pdf-preview-modal").then(mod => mod.PDFPreviewModal), { ssr: false })
+const EmailModal = dynamic(() => import("@/components/email-modal").then(mod => mod.EmailModal), { ssr: false })
+const ExcelImportModal = dynamic(() => import("@/components/excel-import-modal").then(mod => mod.ExcelImportModal), { ssr: false })
+import { Mail, FileSpreadsheet, Users, PenTool, Sparkles } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { SignaturePad } from "@/components/signature-pad"
+const SignaturePad = dynamic(() => import("@/components/signature-pad").then(mod => mod.SignaturePad), { ssr: false })
 
 const PDFDownloadLink = dynamic(
     () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
@@ -62,7 +65,7 @@ interface Estimate {
     summary_note: string
     clientSignature?: string // NEW
     signedAt?: string // NEW
-    status?: 'draft' | 'sent' // NEW
+    status?: 'draft' | 'sent' | 'paid' // NEW
     warnings?: string[]
     payment_terms?: string
     closing_note?: string
@@ -106,8 +109,33 @@ export default function NewEstimatePage() {
     const [isGeneratingPaymentLink, setIsGeneratingPaymentLink] = useState(false)
     const [includePaymentLink, setIncludePaymentLink] = useState(false)
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
+    const [isCopyingReferral, setIsCopyingReferral] = useState(false)
 
     const fileInputRef = useRef<HTMLInputElement>(null)
+    const draftMetaRef = useRef<{ id: string; estimateNumber: string } | null>(null)
+
+    const getOrCreateDraftMeta = () => {
+        if (!draftMetaRef.current) {
+            draftMetaRef.current = {
+                id: crypto.randomUUID(),
+                estimateNumber: generateEstimateNumber(),
+            }
+        }
+        return draftMetaRef.current
+    }
+
+    const resetDraftMeta = () => {
+        draftMetaRef.current = null
+    }
+
+    const fileToDataUrl = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader()
+            reader.readAsDataURL(file)
+            reader.onload = () => resolve(reader.result as string)
+            reader.onerror = (error) => reject(error)
+        })
+    }
 
     // Load business profile and check for duplicate data
     useEffect(() => {
@@ -122,6 +150,7 @@ export default function NewEstimatePage() {
         if (duplicateData) {
             try {
                 const data = JSON.parse(duplicateData)
+                resetDraftMeta()
                 setEstimate({
                     items: data.items || [],
                     summary_note: data.summary_note || '',
@@ -159,11 +188,18 @@ export default function NewEstimatePage() {
                         try {
                             const formData = new FormData()
                             formData.append("file", audio.blob, "recording.webm")
+                            const headers = await withAuthHeaders()
 
                             const response = await fetch("/api/transcribe", {
                                 method: "POST",
+                                headers,
                                 body: formData,
                             })
+
+                            if (response.status === 402) {
+                                toast("⚠️ Monthly voice quota reached. Upgrade flow will be enabled soon.", "warning")
+                                continue
+                            }
 
                             if (response.ok) {
                                 const data = await response.json()
@@ -245,11 +281,17 @@ export default function NewEstimatePage() {
         try {
             const formData = new FormData()
             formData.append("file", blob, "recording.webm")
+            const headers = await withAuthHeaders()
 
             const response = await fetch("/api/transcribe", {
                 method: "POST",
+                headers,
                 body: formData,
             })
+
+            if (response.status === 402) {
+                throw new Error("Monthly voice quota reached. Upgrade flow will be enabled soon.")
+            }
 
             if (!response.ok) throw new Error("Transcription failed")
 
@@ -272,23 +314,15 @@ export default function NewEstimatePage() {
 
         setStep("generating")
         try {
-            const convertToBase64 = (file: File): Promise<string> => {
-                return new Promise((resolve, reject) => {
-                    const reader = new FileReader()
-                    reader.readAsDataURL(file)
-                    reader.onload = () => resolve(reader.result as string)
-                    reader.onerror = (error) => reject(error)
-                })
-            }
-
-            const base64Images = await Promise.all(images.map(img => convertToBase64(img)))
+            const base64Images = await Promise.all(images.map(fileToDataUrl))
 
             // Load price list for AI
             const priceListForAI = await getPriceListForAI()
+            const headers = await withAuthHeaders({ "Content-Type": "application/json" })
 
             const response = await fetch("/api/generate", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers,
                 body: JSON.stringify({
                     images: base64Images,
                     notes: transcribedText,
@@ -309,6 +343,8 @@ export default function NewEstimatePage() {
 
                 if (status === 429) {
                     throw new Error("Too many requests. Please wait a moment and try again.")
+                } else if (status === 402) {
+                    throw new Error("Monthly AI generation quota reached. Upgrade flow will be enabled soon.")
                 } else if (status === 401 || status === 403) {
                     throw new Error("API key issue. Please check your configuration.")
                 } else if (status >= 500) {
@@ -483,18 +519,19 @@ export default function NewEstimatePage() {
             const subtotal = allItems.reduce((sum, item) => sum + (item.total || item.quantity * item.unit_price), 0)
             const taxAmount = subtotal * (taxRate / 100)
             const totalAmount = subtotal + taxAmount
-            const estimateNumber = generateEstimateNumber()
+            const draftMeta = getOrCreateDraftMeta()
+            const attachmentPhotos = images.length > 0 ? await Promise.all(images.map(fileToDataUrl)) : []
 
             // Build attachments for dispute prevention
             const attachments = {
-                photos: previewUrls,  // Already base64 data URLs
+                photos: attachmentPhotos,
                 originalTranscript: transcribedText || undefined
             }
 
             const localEstimate = {
-                id: crypto.randomUUID(),
-                estimateNumber,
-                items: estimate.items,
+                id: draftMeta.id,
+                estimateNumber: draftMeta.estimateNumber,
+                items: allItems,
                 sections: estimate.sections,  // Include sections
                 summary_note: estimate.summary_note,
                 clientName: clientName || "Walk-in Client",
@@ -504,9 +541,19 @@ export default function NewEstimatePage() {
                 totalAmount,
                 createdAt: new Date().toISOString(),
                 status: 'draft' as const,
-                attachments: (previewUrls.length > 0 || transcribedText) ? attachments : undefined
+                attachments: (attachmentPhotos.length > 0 || transcribedText) ? attachments : undefined
             }
             await saveEstimate(localEstimate)
+            void trackAnalyticsEvent({
+                event: "draft_saved",
+                estimateId: localEstimate.id,
+                estimateNumber: localEstimate.estimateNumber,
+                metadata: {
+                    totalAmount: localEstimate.totalAmount,
+                    itemCount: allItems.length,
+                    hasAttachments: Boolean(localEstimate.attachments),
+                },
+            })
             toast("✅ Estimate saved successfully!", "success")
             setTimeout(() => router.push("/history"), 500)
         } catch (error) {
@@ -521,11 +568,14 @@ export default function NewEstimatePage() {
         if (!estimate) return
         setIsSharing(true)
         try {
+            const allItems = getAllItemsFromEstimate(estimate)
+            const subtotal = allItems.reduce((sum, item) => sum + (item.total || item.quantity * item.unit_price), 0)
+            const total = subtotal * (1 + taxRate / 100)
             const { pdf } = await import("@react-pdf/renderer")
             const pdfDoc = (
                 <EstimatePDF
-                    items={estimate.items}
-                    total={estimate.items.reduce((sum, item) => sum + item.total, 0)}
+                    items={allItems}
+                    total={subtotal}
                     summary={estimate.summary_note}
                     taxRate={taxRate}
                     client={{ name: clientName, address: clientAddress }}
@@ -540,7 +590,7 @@ export default function NewEstimatePage() {
             if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
                 await navigator.share({
                     title: "Estimate",
-                    text: `Estimate Total: $${estimate.items.reduce((sum, item) => sum + item.total, 0).toFixed(2)}`,
+                    text: `Estimate Total: $${total.toFixed(2)}`,
                     files: [file],
                 })
             } else {
@@ -557,6 +607,31 @@ export default function NewEstimatePage() {
             toast("❌ Failed to generate PDF. Please try again.", "error")
         } finally {
             setIsSharing(false)
+        }
+    }
+
+    const handleCopyReferralLink = async () => {
+        setIsCopyingReferral(true)
+        try {
+            const shareUrl = await copyReferralShareUrl({ source: "estimate_result" })
+            if (!shareUrl) {
+                toast("🔐 Log in first to generate your referral link.", "info")
+                return
+            }
+
+            const draftMeta = getOrCreateDraftMeta()
+            void trackAnalyticsEvent({
+                event: "referral_link_copied",
+                estimateId: draftMeta.id,
+                estimateNumber: draftMeta.estimateNumber,
+                channel: "new_estimate_result",
+            })
+            toast("🔗 Referral link copied!", "success")
+        } catch (error) {
+            console.error("Failed to copy referral link:", error)
+            toast("❌ Failed to copy referral link.", "error")
+        } finally {
+            setIsCopyingReferral(false)
         }
     }
 
@@ -581,6 +656,10 @@ export default function NewEstimatePage() {
         }
         toast(`✅ Imported ${importedItems.length} items from Excel`, "success")
     }, [estimate, setEstimate, setStep])
+
+    const resultItems = estimate ? getAllItemsFromEstimate(estimate) : []
+    const resultSubtotal = resultItems.reduce((sum, item) => sum + (item.total || item.quantity * item.unit_price), 0)
+    const resultTotal = resultSubtotal * (1 + taxRate / 100)
 
     return (
         <div className="max-w-md mx-auto space-y-6 pb-20">
@@ -616,15 +695,33 @@ export default function NewEstimatePage() {
                         </Button>
                     </div>
 
+                    {/* CHEAT SHEET (Practice Mode) */}
+                    {/* Only show if no logic (simplified for now: always show or manage via state if needed) */}
+                    <div className="glass-card p-4 relative overflow-hidden group border-blue-500/30 shadow-[0_0_20px_-10px_rgba(59,130,246,0.5)]">
+                        <div className="absolute top-0 left-0 w-1 h-full bg-blue-500 animate-pulse" />
+                        <div className="flex items-start gap-3">
+                            <div className="p-2 bg-blue-500/20 rounded-full shrink-0 mt-1">
+                                <Sparkles className="w-4 h-4 text-blue-400" />
+                            </div>
+                            <div className="space-y-1">
+                                <p className="text-xs font-bold text-blue-300 uppercase tracking-wider">
+                                    Try saying this:
+                                </p>
+                                <p className="text-sm font-medium text-white italic leading-relaxed">
+                                    &quot;Bathroom renovation. <span className="text-blue-400">50 sqft tile</span>. Install new vanity. <span className="text-blue-400">Labor is $400</span>. Client is <span className="text-blue-400">Mike</span>.&quot;
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Voice Input (Primary) */}
-                    <div className="flex flex-col items-center justify-center space-y-4 py-4">
+                    <div className="flex flex-col items-center justify-center space-y-4 py-2">
                         <AudioRecorder
                             onAudioCaptured={handleAudioCaptured}
                             onAudioRemoved={() => setAudioBlob(null)}
                         />
                         <p className="text-sm text-muted-foreground text-center">
-                            Tap to record job details.<br />
-                            &quot;Replace kitchen faucet, $80 labor&quot;
+                            Tap to record job details.
                         </p>
                     </div>
 
@@ -1082,12 +1179,12 @@ export default function NewEstimatePage() {
                                         />
                                         <span className="text-muted-foreground text-xs">%</span>
                                     </div>
-                                    <span>${(estimate.items.reduce((sum, item) => sum + item.total, 0) * taxRate / 100).toFixed(2)}</span>
+                                    <span>${(resultSubtotal * taxRate / 100).toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-between items-center pt-2 border-t">
                                     <p className="font-bold text-lg">Total</p>
                                     <p className="font-bold text-xl text-primary">
-                                        ${(estimate.items.reduce((sum, item) => sum + item.total, 0) * (1 + taxRate / 100)).toFixed(2)}
+                                        ${resultTotal.toFixed(2)}
                                     </p>
                                 </div>
                             </div>
@@ -1123,8 +1220,8 @@ export default function NewEstimatePage() {
                                 <PDFDownloadLink
                                     document={
                                         <EstimatePDF
-                                            items={estimate.items}
-                                            total={estimate.items.reduce((sum, item) => sum + item.total, 0)}
+                                            items={resultItems}
+                                            total={resultSubtotal}
                                             summary={estimate.summary_note}
                                             taxRate={taxRate}
                                             client={{ name: clientName, address: clientAddress }}
@@ -1233,7 +1330,7 @@ export default function NewEstimatePage() {
                                 <PaymentOptionModal
                                     open={isPaymentModalOpen}
                                     onClose={() => setIsPaymentModalOpen(false)}
-                                    totalAmount={estimate.items.reduce((sum, item) => sum + item.total, 0) * (1 + taxRate / 100)}
+                                    totalAmount={resultTotal}
                                     onConfirm={async (amount: number, type: 'full' | 'deposit' | 'custom') => {
                                         setIsPaymentModalOpen(false)
                                         setIncludePaymentLink(true)
@@ -1241,13 +1338,15 @@ export default function NewEstimatePage() {
                                         setIsGeneratingPaymentLink(true)
 
                                         try {
+                                            const headers = await withAuthHeaders({ 'Content-Type': 'application/json' })
                                             const response = await fetch('/api/create-payment-link', {
                                                 method: 'POST',
-                                                headers: { 'Content-Type': 'application/json' },
+                                                headers,
                                                 body: JSON.stringify({
                                                     amount: amount,
                                                     customerName: clientName || 'Customer',
-                                                    estimateNumber: `Draft-${new Date().toISOString().slice(0, 10)}`
+                                                    estimateNumber: getOrCreateDraftMeta().estimateNumber,
+                                                    estimateId: getOrCreateDraftMeta().id,
                                                 })
                                             })
                                             const data = await response.json()
@@ -1255,6 +1354,17 @@ export default function NewEstimatePage() {
                                             if (!response.ok) throw new Error(data.error || "Failed to create link")
 
                                             setPaymentLink(data.url)
+                                            const draftMeta = getOrCreateDraftMeta()
+                                            void trackAnalyticsEvent({
+                                                event: "payment_link_created",
+                                                estimateId: draftMeta.id,
+                                                estimateNumber: draftMeta.estimateNumber,
+                                                channel: "stripe_payment_link",
+                                                metadata: {
+                                                    amount,
+                                                    type,
+                                                },
+                                            })
                                             toast("✅ Payment link generated", "success")
                                         } catch (error) {
                                             console.error(error)
@@ -1291,14 +1401,29 @@ export default function NewEstimatePage() {
                                 <Mail className="h-4 w-4 mr-2" />
                                 📧 Send to Customer
                             </Button>
+                            <Button
+                                variant="ghost"
+                                className="w-full"
+                                onClick={handleCopyReferralLink}
+                                disabled={isCopyingReferral}
+                            >
+                                {isCopyingReferral ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        Preparing link...
+                                    </>
+                                ) : (
+                                    <>🔗 Copy Referral Link</>
+                                )}
+                            </Button>
 
                             <PDFPreviewModal
                                 open={isPreviewOpen}
                                 onClose={() => setIsPreviewOpen(false)}
                                 document={
                                     <EstimatePDF
-                                        items={estimate.items}
-                                        total={estimate.items.reduce((sum, item) => sum + item.total, 0)}
+                                        items={resultItems}
+                                        total={resultSubtotal}
                                         summary={estimate.summary_note}
                                         taxRate={taxRate}
                                         client={{ name: clientName, address: clientAddress }}
@@ -1313,15 +1438,15 @@ export default function NewEstimatePage() {
                             <EmailModal
                                 open={isEmailModalOpen}
                                 onClose={() => setIsEmailModalOpen(false)}
-                                estimateTotal={estimate.items.reduce((sum, item) => sum + item.total, 0) * (1 + taxRate / 100)}
+                                estimateTotal={resultTotal}
                                 onSend={async (email, message) => {
                                     try {
                                         // Generate PDF as base64
                                         const { pdf } = await import("@react-pdf/renderer")
                                         const pdfDoc = (
                                             <EstimatePDF
-                                                items={estimate.items}
-                                                total={estimate.items.reduce((sum, item) => sum + item.total, 0)}
+                                                items={resultItems}
+                                                total={resultSubtotal}
                                                 summary={estimate.summary_note}
                                                 taxRate={taxRate}
                                                 client={{ name: clientName, address: clientAddress }}
@@ -1345,22 +1470,28 @@ export default function NewEstimatePage() {
                                             reader.onerror = reject
                                             reader.readAsDataURL(blob)
                                         })
+                                        const referralUrl = await getReferralShareUrl({ source: "estimate_email" })
+                                        const headers = await withAuthHeaders({ "Content-Type": "application/json" })
 
                                         // Send via API with PDF attachment
                                         const response = await fetch('/api/send-email', {
                                             method: 'POST',
-                                            headers: { 'Content-Type': 'application/json' },
+                                            headers,
                                             body: JSON.stringify({
                                                 email,
                                                 subject: `Estimate from ${businessProfile?.business_name || 'SnapQuote'}`,
                                                 message,
                                                 pdfBase64,
-                                                businessName: businessProfile?.business_name
+                                                businessName: businessProfile?.business_name,
+                                                referralUrl: referralUrl || undefined,
                                             })
                                         })
 
                                         if (!response.ok) {
                                             const errorData = await response.json()
+                                            if (response.status === 402) {
+                                                throw new Error("Monthly email quota reached. Upgrade flow will be enabled soon.")
+                                            }
                                             throw new Error(errorData.error || 'Failed to send email')
                                         }
 
@@ -1371,6 +1502,18 @@ export default function NewEstimatePage() {
                                             window.open(data.mailtoUrl, '_blank')
                                             toast('📧 Email client opened. Please attach the PDF.', 'warning')
                                         } else {
+                                            const draftMeta = getOrCreateDraftMeta()
+                                            void trackAnalyticsEvent({
+                                                event: "quote_sent",
+                                                estimateId: draftMeta.id,
+                                                estimateNumber: draftMeta.estimateNumber,
+                                                channel: "email",
+                                                metadata: {
+                                                    recipient: email,
+                                                    hasPaymentLink: includePaymentLink && Boolean(paymentLink),
+                                                },
+                                            })
+                                            await updateEstimateStatus(draftMeta.id, "sent")
                                             toast('✅ Email sent with PDF attached!', 'success')
                                         }
                                     } catch (error: any) {

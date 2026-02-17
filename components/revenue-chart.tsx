@@ -3,12 +3,12 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { DollarSign, TrendingUp } from "lucide-react"
 import { useEffect, useState } from "react"
-import { getEstimates, type LocalEstimate } from "@/lib/estimates-storage"
+import { getEstimates } from "@/lib/estimates-storage"
 
 export function RevenueChart() {
     const [monthlyRevenue, setMonthlyRevenue] = useState(0)
     const [pendingRevenue, setPendingRevenue] = useState(0)
-    const [wonCount, setWonCount] = useState(0)
+    const [paidCount, setPaidCount] = useState(0)
 
     useEffect(() => {
         const loadStats = async () => {
@@ -23,28 +23,18 @@ export function RevenueChart() {
             estimates.forEach(est => {
                 const date = new Date(est.createdAt)
                 if (date.getMonth() === currentMonth && date.getFullYear() === currentYear) {
-                    // Note: In MVP we don't have a 'won' status explicitly yet, 
-                    // but we can simulate it or check if user marked it.
-                    // For now, let's assume 'sent' estimates are 'pending' 
-                    // and we might need a way to mark as 'won'.
-                    // As per Phase 2 plan: "marked as won". 
-                    // Since we haven't implemented 'mark as won' UI yet, 
-                    // we will treat 'sent' as potential revenue for now, or check for a specific status if we add it.
-                    // Let's stick to 'sent' = pending, and maybe we need to add 'won' status handling.
-                    // For this MVP step, let's just show 'Total Estimated' this month.
-
-                    if (est.status === 'sent') {
+                    if (est.status === 'paid') {
+                        won += est.totalAmount
+                        count += 1
+                    } else if (est.status === 'sent') {
                         pending += est.totalAmount
                     }
-                    // If we had 'won' status:
-                    // if (est.status === 'won') won += est.totalAmount
                 }
             })
 
-            // To make this chart useful immediately without changing data model deeply:
-            // Let's show "Total Estimated This Month"
+            setMonthlyRevenue(won)
             setPendingRevenue(pending)
-            setWonCount(count)
+            setPaidCount(count)
         }
         loadStats()
     }, [])
@@ -58,16 +48,19 @@ export function RevenueChart() {
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-                <div className="text-2xl font-bold">${pendingRevenue.toLocaleString()}</div>
+                <div className="text-2xl font-bold">${monthlyRevenue.toLocaleString()}</div>
                 <p className="text-xs text-muted-foreground">
-                    Estimated across active jobs
+                    Collected this month ({paidCount} paid)
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                    Pending sent quotes: ${pendingRevenue.toLocaleString()}
                 </p>
                 <div className="mt-4 h-[80px] flex items-end gap-2">
                     {/* Simple visualization bar */}
                     <div className="w-full bg-muted rounded-t-sm relative h-full">
                         <div
                             className="bg-primary absolute bottom-0 w-full rounded-t-sm transition-all duration-1000"
-                            style={{ height: `${Math.min((pendingRevenue / 10000) * 100, 100)}%` }} // Scale to 10k goal
+                            style={{ height: `${Math.min((monthlyRevenue / 10000) * 100, 100)}%` }} // Scale to 10k goal
                         />
                     </div>
                 </div>

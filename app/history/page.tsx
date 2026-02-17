@@ -5,15 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle } from "lucide-react"
 import dynamic from "next/dynamic"
-import { EstimatePDF } from "@/components/estimate-pdf"
+const EstimatePDF = dynamic(() => import("@/components/estimate-pdf").then(mod => mod.EstimatePDF), { ssr: false })
 import { useRouter } from "next/navigation"
 import { getEstimates, deleteEstimate, getProfile, updateEstimateStatus, updateEstimate, type LocalEstimate, type EstimateItem, type BusinessInfo } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
 import { generateQuickBooksCSV, downloadCSV } from "@/lib/export-service"
-import { ConfirmDialog } from "@/components/confirm-dialog"
-import { PDFPreviewModal } from "@/components/pdf-preview-modal"
-import { FollowUpModal } from "@/components/follow-up-modal"
+const ConfirmDialog = dynamic(() => import("@/components/confirm-dialog").then(mod => mod.ConfirmDialog), { ssr: false })
+const PDFPreviewModal = dynamic(() => import("@/components/pdf-preview-modal").then(mod => mod.PDFPreviewModal), { ssr: false })
+const FollowUpModal = dynamic(() => import("@/components/follow-up-modal").then(mod => mod.FollowUpModal), { ssr: false })
 import { Badge } from "@/components/ui/badge"
+import { trackAnalyticsEvent } from "@/lib/analytics"
 
 const PDFDownloadLink = dynamic(
     () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
@@ -23,7 +24,7 @@ const PDFDownloadLink = dynamic(
     }
 )
 
-type TabType = 'drafts' | 'sent'
+type TabType = 'drafts' | 'sent' | 'paid'
 
 export default function HistoryPage() {
     const router = useRouter()
@@ -54,12 +55,16 @@ export default function HistoryPage() {
         if (activeTab === 'drafts') {
             return e.status === 'draft' || !e.status  // Include legacy estimates
         }
-        return e.status === 'sent'
+        if (activeTab === 'sent') {
+            return e.status === 'sent'
+        }
+        return e.status === 'paid'
     })
 
     // Count for badges
     const draftsCount = estimates.filter(e => e.status === 'draft' || !e.status).length
     const sentCount = estimates.filter(e => e.status === 'sent').length
+    const paidCount = estimates.filter(e => e.status === 'paid').length
 
     // Count items with price TBD
     const getPriceTBDCount = (estimate: LocalEstimate): number => {
@@ -83,9 +88,33 @@ export default function HistoryPage() {
     }
 
     const handleMarkAsSent = async (estimateId: string) => {
+        const targetEstimate = estimates.find(est => est.id === estimateId)
         await updateEstimateStatus(estimateId, 'sent')
+        if (targetEstimate) {
+            void trackAnalyticsEvent({
+                event: "quote_sent",
+                estimateId: targetEstimate.id,
+                estimateNumber: targetEstimate.estimateNumber,
+                channel: "manual_status",
+            })
+        }
         await loadData()
         toast("✅ Marked as sent!", "success")
+    }
+
+    const handleMarkAsPaid = async (estimateId: string) => {
+        const targetEstimate = estimates.find(est => est.id === estimateId)
+        await updateEstimateStatus(estimateId, 'paid')
+        if (targetEstimate) {
+            void trackAnalyticsEvent({
+                event: "payment_completed",
+                estimateId: targetEstimate.id,
+                estimateNumber: targetEstimate.estimateNumber,
+                channel: "manual_status",
+            })
+        }
+        await loadData()
+        toast("💰 Marked as paid!", "success")
     }
 
     const handleConvertToInvoice = async (estimate: LocalEstimate) => {
@@ -102,7 +131,6 @@ export default function HistoryPage() {
         e.stopPropagation()
         e.preventDefault()
         setEstimateToDelete(estimateId)
-        setDeleteDialogOpen(true)
         setDeleteDialogOpen(true)
     }
 
@@ -163,6 +191,18 @@ export default function HistoryPage() {
                         </Badge>
                     )}
                 </Button>
+                <Button
+                    variant={activeTab === 'paid' ? 'default' : 'ghost'}
+                    className="flex-1 rounded-md h-10"
+                    onClick={() => setActiveTab('paid')}
+                >
+                    💰 Paid
+                    {paidCount > 0 && (
+                        <Badge variant="secondary" className="ml-2">
+                            {paidCount}
+                        </Badge>
+                    )}
+                </Button>
             </div>
 
             {filteredEstimates.length === 0 ? (
@@ -170,12 +210,16 @@ export default function HistoryPage() {
                     <CardContent className="flex flex-col items-center justify-center py-12 text-center">
                         <FileText className="h-12 w-12 text-muted-foreground mb-4" />
                         <h3 className="font-medium text-lg mb-2">
-                            {activeTab === 'drafts' ? 'No drafts yet' : 'No sent estimates'}
+                            {activeTab === 'drafts'
+                                ? 'No drafts yet'
+                                : (activeTab === 'sent' ? 'No sent estimates' : 'No paid estimates')}
                         </h3>
                         <p className="text-muted-foreground text-sm mb-4">
                             {activeTab === 'drafts'
                                 ? 'Create a new estimate to get started'
-                                : 'Drafts will appear here after you send them'}
+                                : (activeTab === 'sent'
+                                    ? 'Drafts will appear here after you send them'
+                                    : 'Paid estimates will appear here after successful payment')}
                         </p>
                         {activeTab === 'drafts' && (
                             <Button onClick={() => router.push("/new-estimate")}>
@@ -214,11 +258,17 @@ export default function HistoryPage() {
                                                 {priceTBDCount} TBD
                                             </Badge>
                                         )}
-                                        <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${estimate.status === 'sent'
-                                            ? 'bg-green-100 text-green-800'
-                                            : 'bg-yellow-100 text-yellow-800'
+                                        <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${estimate.status === 'paid'
+                                            ? 'bg-emerald-100 text-emerald-800'
+                                            : (estimate.status === 'sent'
+                                                ? 'bg-green-100 text-green-800'
+                                                : 'bg-yellow-100 text-yellow-800')
                                             }`}>
-                                            {estimate.type === 'invoice' ? 'INVOICE' : (estimate.status === 'sent' ? 'SENT' : 'DRAFT')}
+                                            {estimate.type === 'invoice'
+                                                ? 'INVOICE'
+                                                : (estimate.status === 'paid'
+                                                    ? 'PAID'
+                                                    : (estimate.status === 'sent' ? 'SENT' : 'DRAFT'))}
                                         </span>
                                     </div>
                                 </div>
@@ -317,6 +367,16 @@ export default function HistoryPage() {
                                         </Button>
                                     )}
 
+                                    {activeTab === 'sent' && estimate.status === 'sent' && (
+                                        <Button
+                                            variant="default"
+                                            size="sm"
+                                            onClick={() => handleMarkAsPaid(estimate.id)}
+                                        >
+                                            💰 Mark Paid
+                                        </Button>
+                                    )}
+
                                     {/* Convert to Invoice - only for sent estimates that aren't already invoices */}
                                     {estimate.status === 'sent' && estimate.type !== 'invoice' && (
                                         <Button
@@ -336,14 +396,16 @@ export default function HistoryPage() {
                                         <Copy className="h-3 w-3 mr-1" />
                                         Duplicate
                                     </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => setFollowUpEstimate(estimate)}
-                                    >
-                                        <Mail className="h-3 w-3 mr-1" />
-                                        Follow-up
-                                    </Button>
+                                    {estimate.status !== 'paid' && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setFollowUpEstimate(estimate)}
+                                        >
+                                            <Mail className="h-3 w-3 mr-1" />
+                                            Follow-up
+                                        </Button>
+                                    )}
                                     <Button
                                         variant="destructive"
                                         size="sm"

@@ -9,13 +9,41 @@ const CRON_SECRET = Deno.env.get('CRON_SECRET') ?? ''
 
 const supabase = createClient(supabaseUrl, supabaseKey)
 
+function getDelayHours(settings: any, stage: 1 | 2): number {
+    if (stage === 1) {
+        const explicit = Number(settings?.first_delay_hours)
+        if (Number.isFinite(explicit) && explicit > 0) return explicit
+
+        const legacyDays = Number(settings?.delay_days)
+        if (Number.isFinite(legacyDays) && legacyDays > 0) return legacyDays * 24
+
+        return 48
+    }
+
+    const explicit = Number(settings?.second_delay_hours)
+    if (Number.isFinite(explicit) && explicit > 0) return explicit
+    return 168
+}
+
+function getThresholdIso(hoursAgo: number): string {
+    const threshold = new Date()
+    threshold.setHours(threshold.getHours() - hoursAgo)
+    return threshold.toISOString()
+}
+
 Deno.serve(async (req: Request) => {
     try {
         // Security: Verify cron secret header to prevent unauthorized access
-        const authHeader = req.headers.get('Authorization')
         if (!CRON_SECRET) {
-            console.warn('CRON_SECRET not set - endpoint is unprotected!')
-        } else if (authHeader !== `Bearer ${CRON_SECRET}`) {
+            return new Response(JSON.stringify({ error: 'CRON_SECRET is not configured' }), {
+                status: 503,
+                headers: { 'Content-Type': 'application/json' }
+            })
+        }
+
+        const authHeader = req.headers.get('Authorization')
+        const cronHeader = req.headers.get('x-cron-secret')
+        if (authHeader !== `Bearer ${CRON_SECRET}` && cronHeader !== CRON_SECRET) {
             return new Response(JSON.stringify({ error: 'Unauthorized' }), {
                 status: 401,
                 headers: { 'Content-Type': 'application/json' }
@@ -36,49 +64,140 @@ Deno.serve(async (req: Request) => {
 
         for (const automation of activeAutomations || []) {
             const { user_id, type, settings } = automation
-            const delayDays = settings?.delay_days ?? 3
 
             if (type === 'quote_chaser') {
-                // Find estimates 'sent' more than X days ago and never followed up
-                const thresholdDate = new Date()
-                thresholdDate.setDate(thresholdDate.getDate() - delayDays)
+                const firstDelayHours = getDelayHours(settings, 1)
+                const secondDelayHours = Math.max(getDelayHours(settings, 2), firstDelayHours + 24)
 
-                const { data: candidates, error: candidateError } = await supabase
+                // Stage 1: first follow-up at ~48h (default)
+                const stage1ThresholdIso = getThresholdIso(firstDelayHours)
+                const { data: stage1Candidates, error: stage1Error } = await supabase
                     .from('estimates')
                     .select('*, profiles(business_name), clients(name, email, phone)')
                     .eq('user_id', user_id)
                     .eq('status', 'sent')
-                    .is('last_followed_up_at', null)
-                    .lt('created_at', thresholdDate.toISOString())
+                    .is('first_followup_queued_at', null)
+                    // Fallback to created_at for legacy rows where sent_at was never set.
+                    .or(`sent_at.lt.${stage1ThresholdIso},and(sent_at.is.null,created_at.lt.${stage1ThresholdIso})`)
 
-                if (candidateError) {
-                    console.error(`Error fetching candidates for user ${user_id}:`, candidateError)
+                if (stage1Error) {
+                    console.error(`Error fetching stage1 candidates for user ${user_id}:`, stage1Error)
                     continue
                 }
 
-                for (const estimate of candidates || []) {
-                    // Insert into job_queue
-                    const { error: jobError } = await supabase
-                        .from('job_queue')
-                        .insert({
-                            user_id,
-                            task_type: 'email_followup',
-                            payload: {
-                                estimate_id: estimate.id,
-                                estimate_number: estimate.estimate_number,
-                                client_name: estimate.clients?.name,
-                                client_email: estimate.clients?.email,
-                                business_name: estimate.profiles?.business_name
-                            },
-                            scheduled_for: new Date().toISOString()
-                        })
+                for (const estimate of stage1Candidates || []) {
+                    if (!estimate.clients?.email) {
+                        await supabase
+                            .from('analytics_events')
+                            .upsert(
+                                {
+                                    user_id,
+                                    event_name: 'followup_skipped_no_email',
+                                    estimate_id: estimate.id,
+                                    estimate_number: estimate.estimate_number,
+                                    channel: 'automation',
+                                    external_id: `followup_skip_no_email:${estimate.id}:stage1`,
+                                    metadata: {
+                                        automation: 'quote_chaser',
+                                        stage: 1,
+                                        reason: 'missing_client_email',
+                                    },
+                                },
+                                { onConflict: 'external_id', ignoreDuplicates: true }
+                            )
+                        continue
+                    }
+
+                    const scheduledAt = new Date().toISOString()
+                    const { error: jobError } = await supabase.from('job_queue').insert({
+                        user_id,
+                        task_type: 'email_followup',
+                        payload: {
+                            estimate_id: estimate.id,
+                            estimate_number: estimate.estimate_number,
+                            client_name: estimate.clients?.name,
+                            client_email: estimate.clients?.email,
+                            business_name: estimate.profiles?.business_name,
+                            followup_stage: 1,
+                        },
+                        scheduled_for: scheduledAt,
+                        max_attempts: 3,
+                    })
 
                     if (!jobError) {
-                        jobsCreated.push(estimate.id)
-                        // Update estimate to prevent re-queueing
+                        jobsCreated.push(`${estimate.id}:stage1`)
                         await supabase
                             .from('estimates')
-                            .update({ last_followed_up_at: new Date().toISOString() })
+                            .update({
+                                first_followup_queued_at: scheduledAt,
+                            })
+                            .eq('id', estimate.id)
+                    }
+                }
+
+                // Stage 2: second follow-up at ~7d (default), only if first follow-up was queued.
+                const stage2ThresholdIso = getThresholdIso(secondDelayHours)
+                const { data: stage2Candidates, error: stage2Error } = await supabase
+                    .from('estimates')
+                    .select('*, profiles(business_name), clients(name, email, phone)')
+                    .eq('user_id', user_id)
+                    .eq('status', 'sent')
+                    .not('first_followed_up_at', 'is', null)
+                    .is('second_followup_queued_at', null)
+                    // Fallback to created_at for legacy rows where sent_at was never set.
+                    .or(`sent_at.lt.${stage2ThresholdIso},and(sent_at.is.null,created_at.lt.${stage2ThresholdIso})`)
+
+                if (stage2Error) {
+                    console.error(`Error fetching stage2 candidates for user ${user_id}:`, stage2Error)
+                    continue
+                }
+
+                for (const estimate of stage2Candidates || []) {
+                    if (!estimate.clients?.email) {
+                        await supabase
+                            .from('analytics_events')
+                            .upsert(
+                                {
+                                    user_id,
+                                    event_name: 'followup_skipped_no_email',
+                                    estimate_id: estimate.id,
+                                    estimate_number: estimate.estimate_number,
+                                    channel: 'automation',
+                                    external_id: `followup_skip_no_email:${estimate.id}:stage2`,
+                                    metadata: {
+                                        automation: 'quote_chaser',
+                                        stage: 2,
+                                        reason: 'missing_client_email',
+                                    },
+                                },
+                                { onConflict: 'external_id', ignoreDuplicates: true }
+                            )
+                        continue
+                    }
+
+                    const scheduledAt = new Date().toISOString()
+                    const { error: jobError } = await supabase.from('job_queue').insert({
+                        user_id,
+                        task_type: 'email_followup',
+                        payload: {
+                            estimate_id: estimate.id,
+                            estimate_number: estimate.estimate_number,
+                            client_name: estimate.clients?.name,
+                            client_email: estimate.clients?.email,
+                            business_name: estimate.profiles?.business_name,
+                            followup_stage: 2,
+                        },
+                        scheduled_for: scheduledAt,
+                        max_attempts: 3,
+                    })
+
+                    if (!jobError) {
+                        jobsCreated.push(`${estimate.id}:stage2`)
+                        await supabase
+                            .from('estimates')
+                            .update({
+                                second_followup_queued_at: scheduledAt,
+                            })
                             .eq('id', estimate.id)
                     }
                 }

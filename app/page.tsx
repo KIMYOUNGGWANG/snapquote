@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Mic, FileText, History, Zap, ArrowRight, Shield, Clock, Send, DollarSign } from "lucide-react"
+import { Mic, FileText, Zap, ArrowRight, Clock, Send, DollarSign, Sparkles } from "lucide-react"
 import { OnboardingModal } from "@/components/onboarding-modal"
 import { QuickQuoteModal } from "@/components/quick-quote-modal"
 import { isFirstVisit, markOnboardingCompleted } from "@/lib/estimates-storage"
@@ -14,6 +14,30 @@ import type { PriceListItem } from "@/types"
 import { getEstimatesNeedingFollowUp, type FollowUpItem, generateFollowUpMessage } from "@/lib/follow-up-service"
 import { toast } from "@/components/toast"
 import { RevenueChart } from "@/components/revenue-chart"
+import { FunnelMetricsCard } from "@/components/funnel-metrics-card"
+import { trackReferralEvent } from "@/lib/referrals"
+import { UsagePlanCard } from "@/components/usage-plan-card"
+
+const REFERRAL_TOKEN_PATTERN = /^[a-z0-9]{8,32}$/
+
+function TypewriterText({ text }: { text: string }) {
+  const [displayText, setDisplayText] = useState("")
+
+  useEffect(() => {
+    let index = 0
+    const timer = setInterval(() => {
+      setDisplayText(text.slice(0, index))
+      index++
+      if (index > text.length) clearInterval(timer)
+    }, 30) // Fast typing speed
+
+    return () => clearInterval(timer)
+  }, [text])
+
+  return (
+    <span className="font-mono text-blue-300">{displayText}<span className="animate-pulse">|</span></span>
+  )
+}
 
 export default function Home() {
   const router = useRouter()
@@ -24,26 +48,19 @@ export default function Home() {
   const [followUps, setFollowUps] = useState<FollowUpItem[]>([])
 
   useEffect(() => {
-    // Check if first visit after component mounts
-    if (isFirstVisit()) {
-      setShowOnboarding(true)
-    }
+    if (isFirstVisit()) setShowOnboarding(true)
 
-    // Load price list for Quick Quote
     const loadPriceList = async () => {
       try {
         const items = await getPriceList()
-        // Sort by usage count (most used first)
         const sorted = items.sort((a, b) => b.usageCount - a.usageCount)
-        setPriceListItems(sorted.slice(0, 6)) // Top 6 items
+        setPriceListItems(sorted.slice(0, 6))
       } catch (err) {
         console.error("Failed to load price list:", err)
       }
     }
     loadPriceList()
-  }, [])
 
-  useEffect(() => {
     const checkFollowUps = async () => {
       const items = await getEstimatesNeedingFollowUp()
       setFollowUps(items)
@@ -51,15 +68,29 @@ export default function Home() {
     checkFollowUps()
   }, [])
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const referralToken = params.get("ref")?.trim().toLowerCase() || ""
+    const sourceParam = params.get("src")?.trim().toLowerCase() || ""
+    if (!REFERRAL_TOKEN_PATTERN.test(referralToken)) return
+
+    const visitKey = `snapquote_ref_visit:${referralToken}`
+    if (sessionStorage.getItem(visitKey)) return
+
+    sessionStorage.setItem(visitKey, "1")
+    localStorage.setItem("snapquote_ref_token", referralToken)
+    void trackReferralEvent({
+      token: referralToken,
+      event: sourceParam ? "quote_share_click" : "landing_visit",
+      source: sourceParam || "home_landing",
+      metadata: { path: window.location.pathname, sourceParam },
+    })
+  }, [])
+
   const handleOnboardingComplete = () => {
     markOnboardingCompleted()
     setShowOnboarding(false)
     router.push("/new-estimate")
-  }
-
-  const handleOnboardingSkip = () => {
-    markOnboardingCompleted()
-    setShowOnboarding(false)
   }
 
   const handleQuickQuote = (item: PriceListItem) => {
@@ -70,14 +101,14 @@ export default function Home() {
   const handleCopyFollowUp = (item: FollowUpItem) => {
     const text = generateFollowUpMessage(item.estimate.clientName, item.estimate.estimateNumber)
     navigator.clipboard.writeText(text)
-    toast("📋 Message copied! Ready to paste.", "success")
+    toast("📋 Message copied!", "success")
   }
 
   return (
     <>
       <OnboardingModal
         open={showOnboarding}
-        onClose={handleOnboardingSkip}
+        onClose={() => setShowOnboarding(false)}
         onComplete={handleOnboardingComplete}
       />
       <QuickQuoteModal
@@ -85,233 +116,122 @@ export default function Home() {
         onClose={() => setShowQuickQuote(false)}
         item={selectedQuickItem}
       />
-      <div className="flex flex-col min-h-[calc(100vh-80px)] pb-20">
 
-        {/* Follow-up Alert (Smart Feature) */}
-        {followUps.length > 0 && (
-          <section className="px-4 pt-4">
-            <Card className="border-amber-200 bg-amber-50">
-              <CardContent className="p-4">
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-amber-100 rounded-full shrink-0">
-                    <Clock className="h-4 w-4 text-amber-700" />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-amber-900 text-sm">Action Required ({followUps.length})</h3>
-                    <p className="text-amber-800 text-xs mt-1 mb-3">
-                      Client hasn&apos;t responded to estimate <b>#{followUps[0].estimate.estimateNumber}</b> sent {followUps[0].daysSinceSent} days ago.
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs bg-white border-amber-200 hover:bg-amber-100 text-amber-900 w-full justify-start gap-2"
-                      onClick={() => handleCopyFollowUp(followUps[0])}
-                    >
-                      <Send className="h-3 w-3" />
-                      Copy Follow-up Text
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </section>
-        )}
-
-        {/* Revenue Dashboard (Smart Feature) */}
-        <section className="px-4 pb-4">
-          <RevenueChart />
-        </section>
+      {/* Main Container - Full Width usage with padding for Floating Nav */}
+      <div className="flex flex-col min-h-screen pb-32 px-4 pt-6 space-y-6">
 
         {/* Hero Section */}
-        <section className="flex flex-col items-center justify-center text-center px-4 py-8 bg-gradient-to-b from-primary/5 to-transparent">
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-primary/10 rounded-full text-primary text-xs font-medium mb-4">
-            <Zap className="h-3 w-3" />
-            For Contractors & Tradespeople
+        <header className="flex flex-col items-center text-center space-y-4 pt-2">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-medium tracking-wide uppercase">
+            <Sparkles className="w-3 h-3" />
+            <span>AI Estimator</span>
           </div>
 
-          <h1 className="text-3xl font-bold tracking-tight text-foreground mb-2">
+          <h1 className="text-3xl font-bold tracking-tight text-white leading-tight">
             SnapQuote
           </h1>
 
-          <p className="text-muted-foreground text-sm max-w-xs mb-6">
-            Speak your job details, get a <span className="text-primary font-semibold">professional estimate PDF</span> in seconds.
-          </p>
-
-          {/* Example Voice Input */}
-          <div className="w-full max-w-sm mb-6">
-            <p className="text-xs text-muted-foreground mb-2">💡 Just say something like:</p>
-            <div className="bg-muted/50 border border-border rounded-xl p-4 text-left">
-              <div className="flex items-start gap-3">
-                <div className="p-2 bg-primary/10 rounded-full shrink-0">
-                  <Mic className="h-4 w-4 text-primary" />
-                </div>
-                <p className="text-sm text-foreground italic">
-                  &quot;Bathroom renovation, 50 sqft tile, toilet replacement, new faucet installation, labor 4 hours&quot;
+          {/* Premium Voice Demo Card */}
+          <div className="w-full max-w-sm glass-card p-4 text-left relative overflow-hidden group">
+            <div className="absolute top-0 left-0 w-1 h-full bg-blue-500/50" />
+            <div className="flex gap-3">
+              <div className="p-2 h-fit bg-blue-500/20 rounded-full shrink-0">
+                <Mic className="w-4 h-4 text-blue-400 animate-pulse" />
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs text-blue-300 font-medium uppercase tracking-wider">Listening...</p>
+                <p className="text-sm text-gray-300 leading-relaxed">
+                  <TypewriterText text="Bathroom reno, 50 sqft tile, new vanity, 4 hours labor..." />
                 </p>
               </div>
             </div>
-            <div className="flex items-center justify-center gap-2 mt-3 text-muted-foreground">
-              <div className="h-px flex-1 bg-border" />
-              <span className="text-xs">↓ 30 seconds later</span>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-            <div className="mt-3 bg-green-500/10 border border-green-500/20 rounded-xl p-3">
-              <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
-                <FileText className="h-4 w-4" />
-                <span className="text-sm font-medium">Professional PDF Ready!</span>
+          </div>
+        </header>
+
+        {/* Primary CTA */}
+        <Link href="/new-estimate" className="w-full max-w-sm mx-auto block">
+          <Button size="lg" className="w-full h-16 text-lg font-bold rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 shadow-[0_0_30px_-5px_rgba(37,99,235,0.4)] border border-blue-400/20 transition-all hover:scale-[1.02] active:scale-[0.98]">
+            <Mic className="mr-2 h-6 w-6" />
+            Create Estimate
+          </Button>
+          <p className="text-center text-xs text-muted-foreground mt-3">
+            Tap to speak •Generates PDF in 30s
+          </p>
+        </Link>
+
+        {/* Action Required / Follow Ups */}
+        {followUps.length > 0 && (
+          <div className="glass-card border-amber-500/20 bg-amber-500/5">
+            <div className="p-4 flex gap-4">
+              <div className="p-2 bg-amber-500/10 rounded-full h-fit">
+                <Clock className="w-5 h-5 text-amber-500" />
               </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                Itemized parts, labor, taxes • Email to client instantly
-              </p>
+              <div className="flex-1 space-y-2">
+                <div className="flex justify-between items-start">
+                  <h3 className="font-semibold text-amber-400 text-sm">Follow Up Needed</h3>
+                  <span className="text-[10px] bg-amber-500/10 text-amber-500 px-2 py-0.5 rounded-full">
+                    {followUps[0].daysSinceSent} days ago
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Estimate <b>#{followUps[0].estimate.estimateNumber}</b> for {followUps[0].estimate.clientName}
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleCopyFollowUp(followUps[0])}
+                  className="w-full h-9 text-xs border-amber-500/20 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300 bg-transparent"
+                >
+                  <Send className="w-3 h-3 mr-2" />
+                  Copy Message
+                </Button>
+              </div>
             </div>
           </div>
+        )}
 
-          <Link href="/new-estimate" className="w-full max-w-xs">
-            <Button size="lg" className="w-full h-14 text-lg font-semibold gap-2 rounded-xl shadow-lg shadow-primary/25 hover:shadow-primary/40 transition-all">
-              <Mic className="h-5 w-5" />
-              Create Estimate
-              <ArrowRight className="h-5 w-5 ml-auto" />
-            </Button>
-          </Link>
-        </section>
+        {/* Dashboard Grid */}
+        <div className="grid gap-4">
+          <h2 className="text-sm font-medium text-gray-400 px-1 uppercase tracking-wider">Overview</h2>
 
-        {/* How It Works - Simplified */}
-        <section className="px-4 py-6">
-          <h2 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wider">How It Works</h2>
-          <div className="grid grid-cols-3 gap-2">
-            <StepCard step="1" icon={<Mic className="h-4 w-4" />} label="Speak" />
-            <StepCard step="2" icon={<Zap className="h-4 w-4" />} label="AI Generates" />
-            <StepCard step="3" icon={<Send className="h-4 w-4" />} label="Send PDF" />
+          {/* Charts & Metrics inside Glass Cards */}
+          <div className="glass-card p-2">
+            <RevenueChart />
           </div>
-        </section>
 
-        {/* Quick Quote Section */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="glass-card p-1 overflow-hidden">
+              <FunnelMetricsCard />
+            </div>
+            <div className="glass-card p-1 overflow-hidden">
+              <UsagePlanCard />
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Quote Scroll */}
         {priceListItems.length > 0 && (
-          <section className="px-4 py-4">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                <Zap className="h-4 w-4 text-amber-500" />
-                Quick Quote
-              </h2>
-              <Link href="/profile" className="text-xs text-primary hover:underline">
-                Edit Prices →
-              </Link>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider">Quick Items</h2>
+              <Link href="/profile" className="text-xs text-blue-400 hover:text-blue-300">Edit</Link>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               {priceListItems.map((item) => (
                 <button
                   key={item.id}
                   onClick={() => handleQuickQuote(item)}
-                  className="flex flex-col items-start p-3 bg-muted/50 hover:bg-muted rounded-lg border border-transparent hover:border-primary/20 transition-all text-left"
+                  className="glass-card p-3 text-left hover:bg-white/10 transition-colors group"
                 >
-                  <span className="text-sm font-medium line-clamp-1">{item.name}</span>
-                  <span className="text-lg font-bold text-primary">${item.price}</span>
+                  <p className="text-sm font-medium text-gray-200 truncate group-hover:text-white">{item.name}</p>
+                  <p className="text-lg font-bold text-blue-400 mt-1">${item.price}</p>
                 </button>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground text-center mt-2">
-              Tap an item for instant SMS-ready quote
-            </p>
-          </section>
+          </div>
         )}
 
-        {/* What You Get */}
-        <section className="px-4 py-4">
-          <h2 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wider">What You Get</h2>
-          <div className="grid grid-cols-1 gap-2">
-            <FeatureCard
-              icon={<DollarSign className="h-5 w-5 text-green-500" />}
-              title="Itemized Estimate"
-              description="Parts, Labor, Service - clearly separated"
-              color="green"
-            />
-            <FeatureCard
-              icon={<FileText className="h-5 w-5 text-blue-500" />}
-              title="Professional PDF"
-              description="Your logo, tax calculation, estimate number"
-              color="blue"
-            />
-            <FeatureCard
-              icon={<Send className="h-5 w-5 text-amber-500" />}
-              title="Instant Email"
-              description="Send to clients with one tap"
-              color="amber"
-            />
-          </div>
-        </section>
-
-        {/* Quick Start */}
-        <section className="px-4 py-4 mt-auto">
-          <Link href="/new-estimate" className="block">
-            <Card className="border-primary/20 bg-primary/5 hover:bg-primary/10 transition-colors cursor-pointer">
-              <CardContent className="flex items-center justify-between p-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-primary rounded-full">
-                    <Mic className="h-5 w-5 text-primary-foreground" />
-                  </div>
-                  <div>
-                    <p className="font-semibold">Ready to create an estimate?</p>
-                    <p className="text-sm text-muted-foreground">Tap here to start</p>
-                  </div>
-                </div>
-                <ArrowRight className="h-5 w-5 text-primary" />
-              </CardContent>
-            </Card>
-          </Link>
-        </section>
       </div>
     </>
-  )
-}
-
-function FeatureCard({
-  icon,
-  title,
-  description,
-  color
-}: {
-  icon: React.ReactNode
-  title: string
-  description: string
-  color: "blue" | "green" | "amber"
-}) {
-  const bgColors = {
-    blue: "bg-blue-500/10",
-    green: "bg-green-500/10",
-    amber: "bg-amber-500/10"
-  }
-
-  return (
-    <Card className="border-0 shadow-none bg-muted/30">
-      <CardContent className="flex items-center gap-4 p-4">
-        <div className={`p-2.5 rounded-lg ${bgColors[color]}`}>
-          {icon}
-        </div>
-        <div>
-          <p className="font-medium text-foreground">{title}</p>
-          <p className="text-sm text-muted-foreground">{description}</p>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function StepCard({
-  step,
-  icon,
-  label
-}: {
-  step: string
-  icon: React.ReactNode
-  label: string
-}) {
-  return (
-    <Card className="border-0 shadow-none bg-muted/30">
-      <CardContent className="flex flex-col items-center justify-center p-3 gap-1">
-        <div className="text-xs text-muted-foreground">Step {step}</div>
-        <div className="p-2 bg-primary/10 rounded-full text-primary">{icon}</div>
-        <span className="text-xs font-medium text-foreground">{label}</span>
-      </CardContent>
-    </Card>
   )
 }

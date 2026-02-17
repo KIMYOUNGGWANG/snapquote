@@ -56,7 +56,7 @@ export function generateQuickBooksCSV(estimates: LocalEstimate[]): string {
             1, // Simplified Qty
             est.totalAmount.toFixed(2),
             est.taxAmount.toFixed(2),
-            (est.totalAmount + est.taxAmount).toFixed(2),
+            est.totalAmount.toFixed(2),
             `"${est.type === 'invoice' ? 'Invoice' : 'Estimate'}"`
         ].join(",");
     });

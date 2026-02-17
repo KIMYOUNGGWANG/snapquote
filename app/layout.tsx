@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import { BottomNav } from "@/components/bottom-nav";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -10,12 +9,15 @@ import { InstallPrompt } from "@/components/install-prompt";
 import { FeedbackModal } from "@/components/feedback-modal";
 import { cn } from "@/lib/utils";
 
-const inter = Inter({ subsets: ["latin"] });
-
 export const metadata: Metadata = {
   title: "SnapQuote",
   description: "Trade-Focused AI Estimator",
   manifest: "/manifest.json",
+  icons: {
+    icon: "/icon-192x192.png",
+    shortcut: "/favicon.ico",
+    apple: "/icon-512x512.png",
+  },
 };
 
 export const viewport: Viewport = {
@@ -33,16 +35,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={cn(inter.className, "min-h-screen bg-background antialiased pb-20")}>
+      <body className={cn("min-h-screen bg-background antialiased pb-24 selection:bg-primary/20 selection:text-primary")}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
-          enableSystem
+          defaultTheme="dark"
+          enableSystem={false}
           disableTransitionOnChange
         >
           <InstallPrompt />
           <OfflineBanner />
-          <main className="container mx-auto px-4 py-4">
+          <main className="w-full min-h-screen relative">
             {children}
           </main>
           <BottomNav />

@@ -4,6 +4,8 @@ import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Loader2, X, Download } from "lucide-react"
+import { withAuthHeaders } from "@/lib/auth-headers"
+import { getReferralShareUrl } from "@/lib/referrals"
 
 interface PDFPreviewModalProps {
     open: boolean
@@ -76,14 +78,16 @@ export function PDFPreviewModal({ open, onClose, document: pdfDocument, fileName
             reader.readAsDataURL(blob);
             reader.onloadend = async () => {
                 const base64data = reader.result?.toString().split(',')[1];
+                const referralUrl = await getReferralShareUrl({ source: "pdf_preview_email" })
 
                 const response = await fetch('/api/send-email', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: await withAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({
                         to: email,
                         pdfBuffer: base64data,
-                        filename: fileName
+                        filename: fileName,
+                        referralUrl: referralUrl || undefined,
                     })
                 });
 
@@ -92,7 +96,11 @@ export function PDFPreviewModal({ open, onClose, document: pdfDocument, fileName
                     setShowEmailInput(false)
                     setEmail("")
                 } else {
-                    alert("Failed to send email.")
+                    if (response.status === 402) {
+                        alert("Monthly email quota reached. Upgrade flow will be enabled soon.")
+                    } else {
+                        alert("Failed to send email.")
+                    }
                 }
                 setSending(false)
             }

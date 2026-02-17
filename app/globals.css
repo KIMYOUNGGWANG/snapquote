@@ -4,64 +4,79 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 220 100% 50%;
-    /* Kobalt Blue */
+    /* Deep Navy Theme - Default */
+    --background: 240 10% 3.9%;
+    /* #0a0a0f */
+    --foreground: 0 0% 98%;
+
+    --card: 240 10% 6%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 217 91% 60%;
+    /* Blue-500 equivalent */
     --primary-foreground: 0 0% 100%;
+
     --secondary: 48 100% 50%;
     /* Safety Yellow */
     --secondary-foreground: 0 0% 0%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 48 100% 50%;
-    /* Safety Yellow */
-    --accent-foreground: 0 0% 0%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 220 100% 50%;
-    --chart-1: 12 76% 61%;
+
+    --muted: 240 10% 12%;
+    /* Darker gray for separation */
+    --muted-foreground: 240 5% 65%;
+
+    --accent: 217 91% 60%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 10% 14%;
+    /* Subtle dark border */
+    --input: 240 10% 14%;
+    --ring: 217 91% 60%;
+
+    --radius: 0.75rem;
+
+    /* Chart Colors */
+    --chart-1: 217 91% 60%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
-    --radius: 0.75rem
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 220 100% 50%;
-    /* Kobalt Blue */
+    /* Same as root because we are enforcing dark mode */
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+
+    --card: 240 10% 6%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 217 91% 60%;
     --primary-foreground: 0 0% 100%;
+
     --secondary: 48 100% 50%;
-    /* Safety Yellow */
     --secondary-foreground: 0 0% 0%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 48 100% 50%;
-    /* Safety Yellow */
-    --accent-foreground: 0 0% 0%;
+
+    --muted: 240 10% 12%;
+    --muted-foreground: 240 5% 65%;
+
+    --accent: 217 91% 60%;
+    --accent-foreground: 0 0% 100%;
+
     --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 220 100% 50%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 10% 14%;
+    --input: 240 10% 14%;
+    --ring: 217 91% 60%;
   }
 }
 
@@ -72,5 +87,19 @@
 
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-white/5 border border-white/10 backdrop-blur-lg;
+  }
+
+  .glass-card {
+    @apply bg-white/5 border border-white/10 backdrop-blur-md rounded-xl hover:bg-white/10 transition-colors;
+  }
+
+  .text-glow {
+    text-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
   }
 }

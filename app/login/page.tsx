@@ -1,15 +1,33 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { trackReferralEvent } from "@/lib/referrals"
+
+const REFERRAL_TOKEN_PATTERN = /^[a-z0-9]{8,32}$/
 
 export default function LoginPage() {
     const [email, setEmail] = useState("")
     const [loading, setLoading] = useState(false)
     const [message, setMessage] = useState("")
+
+    useEffect(() => {
+        const referralToken = localStorage.getItem("snapquote_ref_token")?.trim().toLowerCase() || ""
+        if (!REFERRAL_TOKEN_PATTERN.test(referralToken)) return
+
+        const eventKey = `snapquote_ref_signup:${referralToken}`
+        if (sessionStorage.getItem(eventKey)) return
+        sessionStorage.setItem(eventKey, "1")
+
+        void trackReferralEvent({
+            token: referralToken,
+            event: "signup_start",
+            source: "login_page",
+        })
+    }, [])
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault()

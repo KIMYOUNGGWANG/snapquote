@@ -14,7 +14,9 @@ interface Automation {
     type: string
     is_enabled: boolean
     settings: {
-        delay_days?: number
+        first_delay_hours?: number
+        second_delay_hours?: number
+        delay_days?: number // Legacy support
         review_link?: string
     }
 }
@@ -22,6 +24,8 @@ interface Automation {
 export function AutomationSettings() {
     const [automations, setAutomations] = useState<Automation[]>([])
     const [loading, setLoading] = useState(true)
+    const [firstFollowupDays, setFirstFollowupDays] = useState(2)
+    const [secondFollowupDays, setSecondFollowupDays] = useState(7)
 
     useEffect(() => {
         fetchAutomations()
@@ -59,9 +63,13 @@ export function AutomationSettings() {
             if (error) toast("Update failed", "error")
             else setAutomations(prev => prev.map(a => a.id === existing.id ? { ...a, is_enabled: enabled } : a))
         } else {
+            const defaultSettings = type === 'quote_chaser'
+                ? { first_delay_hours: 48, second_delay_hours: 168 }
+                : {}
+
             const { data, error } = await supabase
                 .from('automations')
-                .insert({ user_id: user.id, type, is_enabled: enabled, settings: { delay_days: 3 } })
+                .insert({ user_id: user.id, type, is_enabled: enabled, settings: defaultSettings })
                 .select()
                 .single()
 
@@ -70,15 +78,24 @@ export function AutomationSettings() {
         }
     }
 
-    const updateDelay = async (id: string, days: number) => {
+    const updateQuoteChaserDelays = async (id: string, firstDelayDays: number, secondDelayDays: number) => {
+        const firstHours = Math.max(24, Math.round(firstDelayDays * 24))
+        const secondHours = Math.max(firstHours + 24, Math.round(secondDelayDays * 24))
+
         const { error } = await supabase
             .from('automations')
-            .update({ settings: { delay_days: days } })
+            .update({ settings: { first_delay_hours: firstHours, second_delay_hours: secondHours } })
             .eq('id', id)
 
         if (error) toast("Update failed", "error")
         else {
-            setAutomations(prev => prev.map(a => a.id === id ? { ...a, settings: { ...a.settings, delay_days: days } } : a))
+            setAutomations(prev =>
+                prev.map(a =>
+                    a.id === id
+                        ? { ...a, settings: { ...a.settings, first_delay_hours: firstHours, second_delay_hours: secondHours } }
+                        : a
+                )
+            )
             toast("Settings updated", "success")
         }
     }
@@ -97,10 +114,27 @@ export function AutomationSettings() {
         }
     }
 
-    if (loading) return <div>Loading settings...</div>
-
     const quoteChaser = automations.find(a => a.type === 'quote_chaser')
     const reviewRequest = automations.find(a => a.type === 'review_request')
+
+    useEffect(() => {
+        if (!quoteChaser) return
+
+        const normalizedFirstDelayDays = Math.max(
+            1,
+            Math.round(((quoteChaser.settings.first_delay_hours
+                ?? (quoteChaser.settings.delay_days ? quoteChaser.settings.delay_days * 24 : 48)) / 24) * 10) / 10
+        )
+        const normalizedSecondDelayDays = Math.max(
+            normalizedFirstDelayDays + 1,
+            Math.round(((quoteChaser.settings.second_delay_hours ?? 168) / 24) * 10) / 10
+        )
+
+        setFirstFollowupDays(normalizedFirstDelayDays)
+        setSecondFollowupDays(normalizedSecondDelayDays)
+    }, [quoteChaser])
+
+    if (loading) return <div>Loading settings...</div>
 
     return (
         <div className="space-y-6">
@@ -109,7 +143,7 @@ export function AutomationSettings() {
                     <div className="flex items-center justify-between">
                         <div>
                             <CardTitle>Quote Chaser</CardTitle>
-                            <CardDescription>Automatically follow up on sent quotes after 3 days.</CardDescription>
+                            <CardDescription>Automatically follow up on sent quotes at 48h and 7 days.</CardDescription>
                         </div>
                         <Switch
                             checked={quoteChaser?.is_enabled || false}
@@ -120,15 +154,42 @@ export function AutomationSettings() {
                 {quoteChaser?.is_enabled && (
                     <CardContent className="space-y-4">
                         <div className="flex items-center gap-4">
-                            <Label htmlFor="chaser-delay">Delay (Days)</Label>
+                            <Label htmlFor="chaser-delay-first">1st Follow-up (Days)</Label>
                             <Input
-                                id="chaser-delay"
+                                id="chaser-delay-first"
                                 type="number"
                                 className="w-20"
-                                value={quoteChaser.settings.delay_days}
-                                onChange={(e) => updateDelay(quoteChaser.id, parseInt(e.target.value))}
+                                value={firstFollowupDays}
+                                min={1}
+                                step={0.5}
+                                onChange={(e) => setFirstFollowupDays(Number(e.target.value))}
+                                onBlur={(e) => {
+                                    const value = Number(e.target.value)
+                                    if (!Number.isFinite(value)) return
+                                    updateQuoteChaserDelays(quoteChaser.id, value, secondFollowupDays)
+                                }}
                             />
                         </div>
+                        <div className="flex items-center gap-4">
+                            <Label htmlFor="chaser-delay-second">2nd Follow-up (Days)</Label>
+                            <Input
+                                id="chaser-delay-second"
+                                type="number"
+                                className="w-20"
+                                value={secondFollowupDays}
+                                min={2}
+                                step={0.5}
+                                onChange={(e) => setSecondFollowupDays(Number(e.target.value))}
+                                onBlur={(e) => {
+                                    const value = Number(e.target.value)
+                                    if (!Number.isFinite(value)) return
+                                    updateQuoteChaserDelays(quoteChaser.id, firstFollowupDays, value)
+                                }}
+                            />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            Recommended: 2 days and 7 days. Second follow-up is sent only if still not paid.
+                        </p>
                     </CardContent>
                 )}
             </Card>
