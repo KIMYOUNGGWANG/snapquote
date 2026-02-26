@@ -1,27 +1,70 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, Sparkles, ArrowRight } from "lucide-react"
-import { getPricingOffer, trackPricingEvent, type PricingOfferResponse } from "@/lib/pricing"
+import {
+    createBillingCheckoutSession,
+    createBillingPortalSession,
+    getBillingSubscriptionStatus,
+    getPricingOffer,
+    trackPricingEvent,
+    type BillingPaidPlanTier,
+    type BillingSubscriptionStatusResponse,
+    type PricingOfferResponse,
+} from "@/lib/pricing"
 import { toast } from "@/components/toast"
+
+const PLAN_OPTIONS: Array<{
+    tier: BillingPaidPlanTier
+    label: string
+    priceLabel: string
+    includes: string[]
+}> = [
+    {
+        tier: "starter",
+        label: "Starter",
+        priceLabel: "CAD $29/mo",
+        includes: ["80 estimates/mo", "60 transcription minutes", "60 emails/mo"],
+    },
+    {
+        tier: "pro",
+        label: "Pro",
+        priceLabel: "CAD $59/mo",
+        includes: ["250 estimates/mo", "180 transcription minutes", "200 emails/mo"],
+    },
+    {
+        tier: "team",
+        label: "Team",
+        priceLabel: "CAD $129/mo",
+        includes: ["800 estimates/mo", "Team workflows", "Automation included"],
+    },
+]
 
 export default function PricingPage() {
     const router = useRouter()
     const [loading, setLoading] = useState(true)
     const [offer, setOffer] = useState<PricingOfferResponse | null>(null)
+    const [subscription, setSubscription] = useState<BillingSubscriptionStatusResponse | null>(null)
+    const [checkoutLoading, setCheckoutLoading] = useState(false)
+    const [portalLoading, setPortalLoading] = useState(false)
+    const [selectedPlanTier, setSelectedPlanTier] = useState<BillingPaidPlanTier>("starter")
 
     useEffect(() => {
         let cancelled = false
 
         const load = async () => {
             setLoading(true)
-            const data = await getPricingOffer()
+            const [offerData, subscriptionData] = await Promise.all([
+                getPricingOffer(),
+                getBillingSubscriptionStatus(),
+            ])
             if (cancelled) return
-            setOffer(data)
+            setOffer(offerData)
+            setSubscription(subscriptionData)
             setLoading(false)
         }
 
@@ -29,6 +72,18 @@ export default function PricingPage() {
 
         return () => {
             cancelled = true
+        }
+    }, [])
+
+    useEffect(() => {
+        if (typeof window === "undefined") return
+        const checkoutState = new URLSearchParams(window.location.search).get("checkout")
+        if (checkoutState === "success") {
+            toast("✅ Subscription checkout completed. Billing status will refresh shortly.", "success")
+            return
+        }
+        if (checkoutState === "cancel") {
+            toast("ℹ️ Subscription checkout was canceled.", "info")
         }
     }, [])
 
@@ -45,32 +100,52 @@ export default function PricingPage() {
     }, [])
 
     const variant = offer?.ok && offer.variant ? offer.variant : null
-    const currency = offer?.ok && offer.experiment ? offer.experiment.currency : "USD"
+    const selectedPlan = PLAN_OPTIONS.find((plan) => plan.tier === selectedPlanTier) || PLAN_OPTIONS[0]
 
-    const monthlyPriceLabel = useMemo(() => {
-        if (!variant?.priceMonthly || typeof variant.priceMonthly !== "number") return null
-        return `${currency} $${variant.priceMonthly}/mo`
-    }, [variant?.priceMonthly, currency])
+    const isSubscribed = Boolean(subscription?.subscribed)
 
     const handleJoinWaitlist = async () => {
         await trackPricingEvent({
             event: "waitlist_joined",
             metadata: {
                 variant: variant?.name || null,
+                selectedPlanTier,
             },
         })
-        toast("Thanks! We recorded your interest in Pro.", "success")
+        toast("Thanks! We recorded your interest.", "success")
         router.push("/profile")
     }
 
     const handleUpgradeClick = async () => {
-        await trackPricingEvent({
-            event: "upgrade_clicked",
-            metadata: {
-                variant: variant?.name || null,
-            },
-        })
-        toast("Upgrade flow is not connected yet. We'll enable it next.", "info")
+        setCheckoutLoading(true)
+        try {
+            await trackPricingEvent({
+                event: "upgrade_clicked",
+                metadata: {
+                    variant: variant?.name || null,
+                    selectedPlanTier,
+                },
+            })
+
+            const checkout = await createBillingCheckoutSession({ planTier: selectedPlanTier })
+            window.location.href = checkout.url
+        } catch (error: any) {
+            toast(`❌ ${error?.message || "Failed to start checkout."}`, "error")
+        } finally {
+            setCheckoutLoading(false)
+        }
+    }
+
+    const handleManageBillingClick = async () => {
+        setPortalLoading(true)
+        try {
+            const portal = await createBillingPortalSession()
+            window.location.href = portal.url
+        } catch (error: any) {
+            toast(`❌ ${error?.message || "Failed to open billing portal."}`, "error")
+        } finally {
+            setPortalLoading(false)
+        }
     }
 
     if (loading && !offer) {
@@ -95,7 +170,7 @@ export default function PricingPage() {
                     </CardHeader>
                     <CardContent className="space-y-3">
                         <p className="text-sm text-muted-foreground">
-                            Log in to see your current Pro offer.
+                            Log in to see your current plan and subscription options.
                         </p>
                         <Link href="/login" className="block">
                             <Button className="w-full">Log in</Button>
@@ -112,18 +187,43 @@ export default function PricingPage() {
                 <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
                         <Sparkles className="h-4 w-4" />
-                        Pro (Early Access)
+                        Starter / Pro / Team
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {PLAN_OPTIONS.map((plan) => (
+                            <Button
+                                key={plan.tier}
+                                type="button"
+                                variant={selectedPlanTier === plan.tier ? "default" : "outline"}
+                                onClick={() => setSelectedPlanTier(plan.tier)}
+                                disabled={checkoutLoading || portalLoading}
+                                className="w-full"
+                            >
+                                {plan.label}
+                            </Button>
+                        ))}
+                    </div>
+
                     <div className="space-y-1">
-                        <p className="text-sm text-muted-foreground">Your offer</p>
+                        <p className="text-sm text-muted-foreground">Selected plan</p>
                         <p className="text-2xl font-semibold">
-                            {monthlyPriceLabel || "Pro pricing preview"}
+                            {selectedPlan.priceLabel}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            Tier: <span className="font-medium uppercase">{selectedPlan.tier}</span>
                         </p>
                         {variant?.name && (
                             <p className="text-xs text-muted-foreground">
                                 Variant: <span className="font-mono">{variant.name}</span>
+                            </p>
+                        )}
+                        {subscription && (
+                            <p className="text-xs text-muted-foreground">
+                                Current plan:{" "}
+                                <span className="font-medium uppercase">{subscription.planTier}</span>
+                                {subscription.status ? ` (${subscription.status})` : ""}
                             </p>
                         )}
                     </div>
@@ -131,16 +231,32 @@ export default function PricingPage() {
                     <div className="rounded-lg border bg-muted/30 p-3 text-sm">
                         <p className="font-medium mb-2">Includes</p>
                         <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
-                            <li>Higher monthly AI and email limits</li>
-                            <li>Priority follow-up automations</li>
-                            <li>Fewer interruptions during on-site quoting</li>
+                            {selectedPlan.includes.map((include) => (
+                                <li key={include}>{include}</li>
+                            ))}
                         </ul>
                     </div>
 
                     <div className="grid grid-cols-1 gap-2">
-                        <Button onClick={handleUpgradeClick} className="w-full justify-between">
-                            {variant?.ctaLabel || "Upgrade to Pro"}
-                            <ArrowRight className="h-4 w-4" />
+                        <Button
+                            onClick={handleUpgradeClick}
+                            disabled={checkoutLoading || isSubscribed}
+                            className="w-full justify-between"
+                        >
+                            {checkoutLoading
+                                ? "Opening checkout..."
+                                : isSubscribed
+                                    ? "Subscription already active"
+                                    : `Upgrade to ${selectedPlan.label}`}
+                            {!isSubscribed && <ArrowRight className="h-4 w-4" />}
+                        </Button>
+                        <Button
+                            variant="outline"
+                            onClick={handleManageBillingClick}
+                            disabled={portalLoading || !subscription?.customerId}
+                            className="w-full"
+                        >
+                            {portalLoading ? "Opening portal..." : "Manage billing"}
                         </Button>
                         <Button variant="outline" onClick={handleJoinWaitlist} className="w-full">
                             Join waitlist
@@ -151,4 +267,3 @@ export default function PricingPage() {
         </div>
     )
 }
-

@@ -4,12 +4,12 @@
     {
       "label": "🚀 Bridge to Codex",
       "type": "shell",
-      "command": "./.agent/scripts/bridge.sh ${input:workflowName}",
+      "command": "./.agent/scripts/bridge.sh ${input:workflowName} ${input:densityMode}",
       "options": {
         "cwd": "${workspaceFolder}"
       },
       "presentation": {
-        "reveal": "silent",
+        "reveal": "always",
         "panel": "shared"
       },
       "problemMatcher": [],
@@ -17,27 +17,47 @@
         "kind": "build",
         "isDefault": true
       },
-      "detail": "Generates context for the selected workflow in the current project."
+      "detail": "Generates optimized/indexed context for Codex."
     }
   ],
   "inputs": [
     {
       "id": "workflowName",
       "type": "pickString",
-      "description": "Select the workflow for Codex:",
+      "description": "Select Workflow:",
       "options": [
         "develop",
+        "stitch",
         "fix",
         "launch",
-        "ship",
-        "micro",
-        "cycle",
-        "ideate",
         "uiux",
+        "studio",
         "optimize",
-        "marketing"
+        "marketing",
+        "ship",
+        "audit",
+        "test",
+        "ideate",
+        "micro",
+        "cycle"
       ],
       "default": "develop"
+    },
+    {
+      "id": "densityMode",
+      "type": "pickString",
+      "description": "Density Mode:",
+      "options": [
+        {
+          "label": "📉 Indexed (Default - Token Saver)",
+          "value": ""
+        },
+        {
+          "label": "🚀 Verbose (Full Content - High Density)",
+          "value": "-v"
+        }
+      ],
+      "default": ""
     }
   ]
 }

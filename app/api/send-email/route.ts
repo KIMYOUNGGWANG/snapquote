@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { enforceUsageQuota, recordUsage } from '@/lib/server/usage-quota';
-import { requireAuthenticatedUser } from '@/lib/server/route-auth';
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024; // 10MB
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -36,14 +35,9 @@ function normalizeHttpUrl(value: unknown, maxLength: number): string | null {
 
 export async function POST(req: Request) {
     try {
-        const auth = await requireAuthenticatedUser(req)
-        if (!auth.ok) {
-            return auth.response
-        }
-
         let quotaContext: Awaited<ReturnType<typeof enforceUsageQuota>>["context"] = null
         if (process.env.RESEND_API_KEY) {
-            const quota = await enforceUsageQuota(req, "send_email", { requireAuth: true })
+            const quota = await enforceUsageQuota(req, "send_email")
             if (!quota.ok) {
                 return NextResponse.json(
                     {

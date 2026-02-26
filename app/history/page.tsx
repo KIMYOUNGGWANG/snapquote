@@ -1,11 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle } from "lucide-react"
 import dynamic from "next/dynamic"
-const EstimatePDF = dynamic(() => import("@/components/estimate-pdf").then(mod => mod.EstimatePDF), { ssr: false })
 import { useRouter } from "next/navigation"
 import { getEstimates, deleteEstimate, getProfile, updateEstimateStatus, updateEstimate, type LocalEstimate, type EstimateItem, type BusinessInfo } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
@@ -15,19 +14,21 @@ const PDFPreviewModal = dynamic(() => import("@/components/pdf-preview-modal").t
 const FollowUpModal = dynamic(() => import("@/components/follow-up-modal").then(mod => mod.FollowUpModal), { ssr: false })
 import { Badge } from "@/components/ui/badge"
 import { trackAnalyticsEvent } from "@/lib/analytics"
-
-const PDFDownloadLink = dynamic(
-    () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
-    {
-        ssr: false,
-        loading: () => <Button variant="outline" size="sm" disabled><Loader2 className="h-3 w-3 animate-spin" /></Button>,
-    }
-)
+import { withAuthHeaders } from "@/lib/auth-headers"
+import { useAuthGuard } from "@/lib/use-auth-guard"
 
 type TabType = 'drafts' | 'sent' | 'paid'
 
+type StripePaymentStatusResponse = {
+    ok: boolean
+    paid: boolean
+    checkoutSessionId?: string
+    paidAt?: string
+}
+
 export default function HistoryPage() {
     const router = useRouter()
+    const { authResolved, isAuthenticated } = useAuthGuard("/history")
     const [estimates, setEstimates] = useState<LocalEstimate[]>([])
     const [loading, setLoading] = useState(true)
     const [activeTab, setActiveTab] = useState<TabType>('drafts')
@@ -37,18 +38,108 @@ export default function HistoryPage() {
     const [previewEstimate, setPreviewEstimate] = useState<LocalEstimate | null>(null)
     const [followUpEstimate, setFollowUpEstimate] = useState<LocalEstimate | null>(null)
     const [businessProfile, setBusinessProfile] = useState<BusinessInfo | undefined>(undefined)
+    const [downloadingEstimateId, setDownloadingEstimateId] = useState<string | null>(null)
+    const paymentStatusSyncInFlightRef = useRef(false)
 
-    useEffect(() => {
-        loadData()
+    const syncSentEstimatePaymentStatuses = useCallback(async (sourceEstimates?: LocalEstimate[]) => {
+        if (paymentStatusSyncInFlightRef.current) return
+
+        const estimatesForSync = sourceEstimates ?? await getEstimates()
+        const sentWithPaymentLinks = estimatesForSync.filter(
+            (estimate) => estimate.status === "sent" && Boolean(estimate.paymentLinkId)
+        )
+
+        if (sentWithPaymentLinks.length === 0) return
+
+        paymentStatusSyncInFlightRef.current = true
+
+        try {
+            let updatedCount = 0
+            const headers = await withAuthHeaders()
+
+            for (const estimate of sentWithPaymentLinks) {
+                const paymentLinkId = estimate.paymentLinkId?.trim()
+                if (!paymentLinkId) continue
+
+                const params = new URLSearchParams({ paymentLinkId })
+                if (estimate.id) params.set("estimateId", estimate.id)
+                if (estimate.estimateNumber) params.set("estimateNumber", estimate.estimateNumber)
+
+                const response = await fetch(`/api/payments/stripe/status?${params.toString()}`, {
+                    method: "GET",
+                    cache: "no-store",
+                    headers,
+                })
+
+                if (!response.ok) continue
+
+                const result = await response.json() as StripePaymentStatusResponse
+                if (!result.ok || !result.paid) continue
+
+                await updateEstimate(estimate.id, {
+                    status: "paid",
+                    paymentCompletedAt: result.paidAt || new Date().toISOString(),
+                    lastPaymentSessionId: result.checkoutSessionId,
+                    synced: false,
+                })
+
+                updatedCount += 1
+                void trackAnalyticsEvent({
+                    event: "payment_completed",
+                    estimateId: estimate.id,
+                    estimateNumber: estimate.estimateNumber,
+                    channel: "stripe_status_poll",
+                    metadata: {
+                        checkoutSessionId: result.checkoutSessionId,
+                    },
+                })
+            }
+
+            if (updatedCount > 0) {
+                const refreshed = await getEstimates()
+                setEstimates(refreshed)
+                toast(`💰 ${updatedCount} payment${updatedCount > 1 ? "s" : ""} synced.`, "success")
+            }
+        } catch (error) {
+            console.error("Failed to sync sent estimate payment statuses:", error)
+        } finally {
+            paymentStatusSyncInFlightRef.current = false
+        }
     }, [])
 
-    const loadData = async () => {
+    const loadData = useCallback(async () => {
         const localEstimates = await getEstimates()
         setEstimates(localEstimates)
         const profile = getProfile()
         if (profile) setBusinessProfile(profile)
         setLoading(false)
-    }
+        void syncSentEstimatePaymentStatuses(localEstimates)
+    }, [syncSentEstimatePaymentStatuses])
+
+    useEffect(() => {
+        if (!authResolved || !isAuthenticated) return
+        void loadData()
+    }, [authResolved, isAuthenticated, loadData])
+
+    useEffect(() => {
+        if (!authResolved || !isAuthenticated) return
+
+        const intervalId = window.setInterval(() => {
+            void syncSentEstimatePaymentStatuses()
+        }, 20_000)
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === "visible") {
+                void syncSentEstimatePaymentStatuses()
+            }
+        }
+
+        document.addEventListener("visibilitychange", handleVisibilityChange)
+        return () => {
+            window.clearInterval(intervalId)
+            document.removeEventListener("visibilitychange", handleVisibilityChange)
+        }
+    }, [authResolved, isAuthenticated, syncSentEstimatePaymentStatuses])
 
     // Filter estimates based on active tab
     const filteredEstimates = estimates.filter(e => {
@@ -154,7 +245,52 @@ export default function HistoryPage() {
         }
     }
 
-    if (loading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>
+    const createEstimatePdfDocument = useCallback(async (estimate: LocalEstimate) => {
+        const { EstimatePDF } = await import("@/components/estimate-pdf")
+        return (
+            <EstimatePDF
+                items={estimate.items || []}
+                total={estimate.totalAmount}
+                summary={estimate.summary_note}
+                taxRate={estimate.taxRate || 0}
+                client={{
+                    name: estimate.clientName,
+                    address: estimate.clientAddress
+                }}
+                business={businessProfile}
+                templateUrl={businessProfile?.estimate_template_url}
+                photos={estimate.attachments?.photos}
+                type={estimate.type}
+                paymentLink={estimate.paymentLink || businessProfile?.payment_link}
+            />
+        )
+    }, [businessProfile])
+
+    const handleDownloadPdf = useCallback(async (estimate: LocalEstimate) => {
+        setDownloadingEstimateId(estimate.id)
+        try {
+            const [{ pdf }, pdfDocument] = await Promise.all([
+                import("@react-pdf/renderer"),
+                createEstimatePdfDocument(estimate),
+            ])
+            const blob = await pdf(pdfDocument).toBlob()
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement("a")
+            a.href = url
+            a.download = `${estimate.estimateNumber || "estimate"}.pdf`
+            a.click()
+            URL.revokeObjectURL(url)
+        } catch (error) {
+            console.error("History PDF download failed:", error)
+            toast("❌ Failed to download PDF.", "error")
+        } finally {
+            setDownloadingEstimateId(null)
+        }
+    }, [createEstimatePdfDocument])
+
+    if (!authResolved || !isAuthenticated || loading) {
+        return <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>
+    }
 
     return (
         <div className="space-y-4 pb-20 max-w-2xl mx-auto px-4">
@@ -423,35 +559,19 @@ export default function HistoryPage() {
                                             >
                                                 👁️
                                             </Button>
-                                            <PDFDownloadLink
-                                                document={
-                                                    <EstimatePDF
-                                                        items={items}
-                                                        total={estimate.totalAmount}
-                                                        summary={estimate.summary_note}
-                                                        taxRate={estimate.taxRate || 0}
-                                                        client={{
-                                                            name: estimate.clientName,
-                                                            address: estimate.clientAddress
-                                                        }}
-                                                        business={businessProfile}
-
-
-                                                        templateUrl={businessProfile?.estimate_template_url}
-                                                        photos={estimate.attachments?.photos}
-                                                        type={estimate.type}
-                                                        paymentLink={businessProfile?.payment_link}
-                                                    />
-                                                }
-                                                fileName={`${estimate.estimateNumber || 'estimate'}.pdf`}
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
+                                                onClick={() => void handleDownloadPdf(estimate)}
+                                                disabled={downloadingEstimateId === estimate.id}
                                             >
-                                                {({ loading }) => (
-                                                    <Button variant="secondary" size="sm" disabled={loading}>
-                                                        <Download className="h-3 w-3 mr-1" />
-                                                        PDF
-                                                    </Button>
+                                                {downloadingEstimateId === estimate.id ? (
+                                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                                ) : (
+                                                    <Download className="h-3 w-3 mr-1" />
                                                 )}
-                                            </PDFDownloadLink>
+                                                PDF
+                                            </Button>
                                         </>
                                     )}
                                 </div>
@@ -474,23 +594,7 @@ export default function HistoryPage() {
                     <PDFPreviewModal
                         open={!!previewEstimate}
                         onClose={() => setPreviewEstimate(null)}
-                        document={
-                            <EstimatePDF
-                                items={previewEstimate.items}
-                                total={previewEstimate.totalAmount}
-                                summary={previewEstimate.summary_note}
-                                taxRate={previewEstimate.taxRate || 0}
-                                client={{
-                                    name: previewEstimate.clientName,
-                                    address: previewEstimate.clientAddress
-                                }}
-                                business={businessProfile}
-                                templateUrl={businessProfile?.estimate_template_url}
-                                photos={previewEstimate.attachments?.photos}
-                                type={previewEstimate.type}
-                                paymentLink={businessProfile?.payment_link}
-                            />
-                        }
+                        createDocument={() => createEstimatePdfDocument(previewEstimate)}
                         fileName={`${previewEstimate.estimateNumber || 'estimate'}.pdf`}
                     />
                 )

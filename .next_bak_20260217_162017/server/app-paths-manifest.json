@@ -1,0 +1,5 @@
+{
+  "/page": "app/page.js",
+  "/new-estimate/page": "app/new-estimate/page.js",
+  "/api/generate/route": "app/api/generate/route.js"
+}

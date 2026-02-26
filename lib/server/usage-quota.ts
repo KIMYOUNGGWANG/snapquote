@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { createAuthedSupabaseClient, parseBearerToken } from "@/lib/server/supabase-auth"
 
 export type UsageMetric = "generate" | "transcribe" | "send_email"
-type PlanTier = "free" | "pro"
+type PlanTier = "free" | "starter" | "pro" | "team"
 
 type QuotaMilestone = "warning" | "limit"
 
@@ -66,10 +66,20 @@ const PLAN_LIMITS: Record<PlanTier, Record<UsageMetric, number>> = {
         transcribe: 80,
         send_email: 40,
     },
+    starter: {
+        generate: 80,
+        transcribe: 60,
+        send_email: 60,
+    },
     pro: {
-        generate: 2000,
-        transcribe: 4000,
-        send_email: 1500,
+        generate: 250,
+        transcribe: 180,
+        send_email: 200,
+    },
+    team: {
+        generate: 800,
+        transcribe: 600,
+        send_email: 600,
     },
 }
 
@@ -78,7 +88,10 @@ const OPENAI_OUTPUT_COST_PER_TOKEN = 15 / 1_000_000
 const DEFAULT_RESEND_COST_USD = 0.001
 
 function toPlanTier(value: unknown): PlanTier {
-    return value === "pro" ? "pro" : "free"
+    if (value === "starter") return "starter"
+    if (value === "pro") return "pro"
+    if (value === "team") return "team"
+    return "free"
 }
 
 function toNumber(value: unknown): number {

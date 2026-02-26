@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js"
 import { Resend } from "resend"
 
-type OpsAlertSource = "stripe_webhook" | "stripe_reconcile"
+type OpsAlertSource = "stripe_webhook" | "stripe_reconcile" | "stripe_billing_webhook"
 type OpsAlertSeverity = "info" | "warning" | "error"
 
 interface RecordOpsAlertInput {

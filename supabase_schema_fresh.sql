@@ -133,6 +133,7 @@ create table ops_alerts (
   last_seen_at timestamp with time zone default timezone('utc'::text, now()) not null,
   resolved_at timestamp with time zone
 );
+-- Note: ops_alerts is intentionally left without RLS policies to restrict read/write access to the Service Role only.
 
 -- Referral Tokens (quote-share attribution)
 create table referral_tokens (
@@ -336,7 +337,7 @@ create policy "Users can insert own analytics events" on analytics_events for in
 create policy "Users can view own referral tokens" on referral_tokens for select using (auth.uid() = user_id);
 create policy "Users can insert own referral tokens" on referral_tokens for insert with check (auth.uid() = user_id);
 create policy "Users can update own referral tokens" on referral_tokens for update using (auth.uid() = user_id);
-create policy "Anyone can insert referral events" on referral_events for insert with check (true);
+-- Note: "Anyone can insert referral events" was removed as a critical security risk. Referral events should be inserted via Edge Functions using Service Role.
 create policy "Users can view own referral events" on referral_events for select using (
   exists (
     select 1
@@ -352,8 +353,8 @@ create policy "Users can insert own usage counters" on usage_counters_monthly fo
 create policy "Users can update own usage counters" on usage_counters_monthly for update using (auth.uid() = user_id);
 
 -- Pricing policies
-create policy "Authenticated can view active pricing experiments" on pricing_experiments
-  for select to authenticated
+create policy "Anyone can view active pricing experiments" on pricing_experiments
+  for select
   using (is_active = true);
 
 create policy "Users can view own pricing assignments" on pricing_assignments
@@ -400,9 +401,14 @@ create index idx_usage_monthly_user_updated on usage_counters_monthly (user_id, 
 create index idx_estimate_sections_estimate on estimate_sections (estimate_id, sort_order);
 create index idx_estimate_section_items_section on estimate_section_items (section_id);
 create index idx_estimate_section_items_estimate on estimate_section_items (estimate_id);
-create index idx_estimate_attachments_estimate on estimate_attachments (estimate_id);
 create unique index idx_pricing_conversions_external_id_unique on pricing_conversions (external_id) where external_id is not null;
 create index idx_pricing_assignments_experiment on pricing_assignments (experiment_id);
 create index idx_pricing_assignments_user on pricing_assignments (user_id);
 create index idx_pricing_conversions_experiment_time on pricing_conversions (experiment_id, occurred_at desc);
 create index idx_pricing_conversions_user_time on pricing_conversions (user_id, occurred_at desc);
+
+-- Foreign Key Missing Indexes (gemini-audit)
+create index idx_estimate_items_estimate on estimate_items (estimate_id);
+create index idx_automations_user on automations (user_id);
+create index idx_job_queue_user on job_queue (user_id);
+create index idx_feedback_user on feedback (user_id);

@@ -48,6 +48,11 @@ export interface LocalEstimate {
     sentAt?: string
     synced?: boolean
     status: 'draft' | 'sent' | 'paid'  // Capture-First status
+    paymentLink?: string
+    paymentLinkId?: string
+    paymentLinkType?: 'full' | 'deposit' | 'custom'
+    paymentCompletedAt?: string
+    lastPaymentSessionId?: string
     attachments?: EstimateAttachments  // Original data preservation
     clientSignature?: string; // base64 image (NEW for Phase 6)
     signedAt?: string; // ISO date (NEW for Phase 6)

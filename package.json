@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node --loader ./tests/loader.mjs --test tests/api/*.test.mjs",
+    "test:watch": "node --loader ./tests/loader.mjs --test --watch tests/api/*.test.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
@@ -16,22 +18,23 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@react-pdf/renderer": "^4.3.1",
     "@supabase/supabase-js": "^2.86.2",
+    "@vercel/analytics": "^1.6.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dotenv": "^17.3.1",
     "idb": "^8.0.3",
     "lucide-react": "^0.555.0",
     "next": "^14.2.35",
-    "next-pwa": "^5.6.0",
     "next-themes": "^0.4.6",
     "openai": "^6.10.0",
+    "pg": "^8.18.0",
     "react": "^18",
     "react-dom": "^18",
     "react-signature-canvas": "^1.1.0-alpha.2",
     "resend": "^6.7.0",
     "stripe": "^20.1.0",
     "tailwind-merge": "^3.4.0",
-    "tailwindcss-animate": "^1.0.7",
-    "xlsx": "^0.18.5"
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@types/node": "^20",

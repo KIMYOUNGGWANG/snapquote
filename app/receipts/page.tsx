@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Camera, Receipt, Trash2, Plus, ArrowLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -21,16 +21,18 @@ export default function ReceiptsPage() {
     })
     const fileInputRef = useRef<HTMLInputElement>(null)
 
-    useEffect(() => {
-        loadReceipts()
-    }, [])
 
-    const loadReceipts = async () => {
+
+    const loadReceipts = useCallback(async () => {
         const data = await getReceipts()
         setReceipts(data.reverse()) // Most recent first
-    }
+    }, [])
 
-    const handlePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+    useEffect(() => {
+        loadReceipts()
+    }, [loadReceipts])
+
+    const handlePhotoCapture = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (!file) return
 
@@ -39,9 +41,9 @@ export default function ReceiptsPage() {
             setNewReceipt(prev => ({ ...prev, photoUrl: event.target?.result as string }))
         }
         reader.readAsDataURL(file)
-    }
+    }, [])
 
-    const handleSaveReceipt = async () => {
+    const handleSaveReceipt = useCallback(async () => {
         if (!newReceipt.photoUrl) {
             toast("📸 Please add a photo first", "error")
             return
@@ -59,13 +61,13 @@ export default function ReceiptsPage() {
         setNewReceipt({ photoUrl: "", amount: "", vendor: "", note: "" })
         setIsAddingNew(false)
         loadReceipts()
-    }
+    }, [newReceipt, loadReceipts])
 
-    const handleDelete = async (id: string) => {
+    const handleDelete = useCallback(async (id: string) => {
         await deleteReceipt(id)
         toast("🗑️ Receipt deleted", "success")
         loadReceipts()
-    }
+    }, [loadReceipts])
 
     return (
         <div className="min-h-screen bg-background p-4 pb-24">

@@ -17,8 +17,10 @@ import { RevenueChart } from "@/components/revenue-chart"
 import { FunnelMetricsCard } from "@/components/funnel-metrics-card"
 import { trackReferralEvent } from "@/lib/referrals"
 import { UsagePlanCard } from "@/components/usage-plan-card"
+import { supabase } from "@/lib/supabase"
 
 const REFERRAL_TOKEN_PATTERN = /^[a-z0-9]{8,32}$/
+const CONNECT_PROMPT_KEY_PREFIX = "snapquote_connect_prompt_seen"
 
 function TypewriterText({ text }: { text: string }) {
   const [displayText, setDisplayText] = useState("")
@@ -46,6 +48,9 @@ export default function Home() {
   const [selectedQuickItem, setSelectedQuickItem] = useState<PriceListItem | null>(null)
   const [showQuickQuote, setShowQuickQuote] = useState(false)
   const [followUps, setFollowUps] = useState<FollowUpItem[]>([])
+  const [showConnectPrompt, setShowConnectPrompt] = useState(false)
+  const [authResolved, setAuthResolved] = useState(false)
+  const [isSignedIn, setIsSignedIn] = useState(false)
 
   useEffect(() => {
     if (isFirstVisit()) setShowOnboarding(true)
@@ -69,6 +74,27 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
+    let active = true
+
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!active) return
+      setIsSignedIn(Boolean(data.session?.user))
+      setAuthResolved(true)
+    })
+
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return
+      setIsSignedIn(Boolean(session?.user))
+      setAuthResolved(true)
+    })
+
+    return () => {
+      active = false
+      data.subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const referralToken = params.get("ref")?.trim().toLowerCase() || ""
     const sourceParam = params.get("src")?.trim().toLowerCase() || ""
@@ -85,6 +111,62 @@ export default function Home() {
       source: sourceParam || "home_landing",
       metadata: { path: window.location.pathname, sourceParam },
     })
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    const checkConnectPrompt = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      if (!active) return
+      if (!session?.user) {
+        setShowConnectPrompt(false)
+        return
+      }
+
+      const promptKey = `${CONNECT_PROMPT_KEY_PREFIX}:${session.user.id}`
+      if (localStorage.getItem(promptKey) === "1") return
+
+      try {
+        const response = await fetch("/api/stripe/connect/status", {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            authorization: `Bearer ${session.access_token}`,
+          },
+        })
+
+        if (!response.ok) return
+
+        const data = await response.json()
+        const ready = Boolean(data?.connected && data?.detailsSubmitted && data?.chargesEnabled)
+        if (!ready) {
+          setShowConnectPrompt(true)
+        }
+        localStorage.setItem(promptKey, "1")
+      } catch (error) {
+        console.error("Failed to load Stripe Connect prompt status:", error)
+      }
+    }
+
+    void checkConnectPrompt()
+
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return
+      if (!session?.user) {
+        setShowConnectPrompt(false)
+        return
+      }
+      void checkConnectPrompt()
+    })
+
+    return () => {
+      active = false
+      data.subscription.unsubscribe()
+    }
   }, [])
 
   const handleOnboardingComplete = () => {
@@ -119,6 +201,41 @@ export default function Home() {
 
       {/* Main Container - Full Width usage with padding for Floating Nav */}
       <div className="flex flex-col min-h-screen pb-32 px-4 pt-6 space-y-6">
+        {authResolved && (
+          <div className="w-full max-w-sm mx-auto flex justify-end">
+            {isSignedIn ? (
+              <Link href="/profile" className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                My Account
+              </Link>
+            ) : (
+              <Link href="/login?next=%2F" className="text-xs text-gray-400 hover:text-white transition-colors">
+                Sign In / Sign Up
+              </Link>
+            )}
+          </div>
+        )}
+
+        {showConnectPrompt && (
+          <Card className="border-blue-500/30 bg-blue-500/5 max-w-sm mx-auto w-full">
+            <CardContent className="pt-5 space-y-3">
+              <p className="text-sm font-semibold text-blue-300">One-time setup: Connect Stripe</p>
+              <p className="text-xs text-muted-foreground">
+                First login is complete. Connect your company Stripe account once to generate card payment links.
+              </p>
+              <div className="flex gap-2">
+                <Button className="flex-1" onClick={() => router.push("/profile")}>
+                  Connect Now
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowConnectPrompt(false)}
+                >
+                  Later
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Hero Section */}
         <header className="flex flex-col items-center text-center space-y-4 pt-2">

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Loader2, X, Download } from "lucide-react"
@@ -10,47 +10,66 @@ import { getReferralShareUrl } from "@/lib/referrals"
 interface PDFPreviewModalProps {
     open: boolean
     onClose: () => void
-    document: React.ReactElement
+    createDocument?: () => Promise<React.ReactElement>
+    document?: React.ReactElement
     fileName?: string
 }
 
-export function PDFPreviewModal({ open, onClose, document: pdfDocument, fileName = "estimate.pdf" }: PDFPreviewModalProps) {
+export function PDFPreviewModal({
+    open,
+    onClose,
+    createDocument,
+    document: pdfDocument,
+    fileName = "estimate.pdf"
+}: PDFPreviewModalProps) {
     const [pdfUrl, setPdfUrl] = useState<string | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
+    const resolveDocument = useCallback(async () => {
+        if (createDocument) return createDocument()
+        if (pdfDocument) return pdfDocument
+        throw new Error("PDF document is unavailable.")
+    }, [createDocument, pdfDocument])
 
     useEffect(() => {
         let currentUrl: string | null = null
+        let cancelled = false
 
-        if (open) {
+        const buildPdf = async () => {
+            if (!open) return
             setLoading(true)
             setPdfUrl(null)
             setError(null)
-
-            // Dynamically import pdf function
-            import("@react-pdf/renderer").then(({ pdf }) => {
-                pdf(pdfDocument).toBlob().then((blob) => {
-                    currentUrl = URL.createObjectURL(blob)
-                    setPdfUrl(currentUrl)
-                    setLoading(false)
-                }).catch((err) => {
-                    console.error("PDF blob error:", err)
-                    setError(err.message || "PDF 생성 실패")
-                    setLoading(false)
-                })
-            }).catch((err) => {
-                console.error("PDF import error:", err)
-                setError("PDF 라이브러리 로드 실패")
+            try {
+                const [{ pdf }, pdfDocument] = await Promise.all([
+                    import("@react-pdf/renderer"),
+                    resolveDocument(),
+                ])
+                const blob = await pdf(pdfDocument).toBlob()
+                if (cancelled) return
+                currentUrl = URL.createObjectURL(blob)
+                setPdfUrl(currentUrl)
                 setLoading(false)
-            })
+            } catch (err) {
+                if (cancelled) return
+                console.error("PDF preview error:", err)
+                const message = err instanceof Error
+                    ? err.message
+                    : "PDF 생성 실패"
+                setError(message)
+                setLoading(false)
+            }
         }
 
+        void buildPdf()
+
         return () => {
+            cancelled = true
             if (currentUrl) {
                 URL.revokeObjectURL(currentUrl)
             }
         }
-    }, [open, pdfDocument])
+    }, [open, resolveDocument])
 
     const handleDownload = () => {
         if (pdfUrl) {
@@ -71,6 +90,7 @@ export function PDFPreviewModal({ open, onClose, document: pdfDocument, fileName
         try {
             setSending(true)
             const { pdf } = await import("@react-pdf/renderer")
+            const pdfDocument = await resolveDocument()
             const blob = await pdf(pdfDocument).toBlob()
 
             // Convert blob to base64

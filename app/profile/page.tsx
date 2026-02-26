@@ -1,12 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import { Loader2, Save, Building2, Upload, X, Plus, Pencil, Trash2, DollarSign } from "lucide-react"
+import { Loader2, Save, Building2, Upload, X, Plus, Pencil, Trash2, DollarSign, Link2, ExternalLink, RefreshCw } from "lucide-react"
 import Image from "next/image"
 import { getProfile, saveProfile, clearAllEstimates, getStorageStats, type BusinessInfo } from "@/lib/estimates-storage"
 import { getPriceList, savePriceListItem, deletePriceListItem } from "@/lib/db"
@@ -16,9 +16,20 @@ import type { PriceListItem, CreatePriceListItem } from "@/types"
 import { generateFullBackupJSON, type SnapQuoteBackup } from "@/lib/export-service"
 import { saveEstimates } from "@/lib/estimates-storage"
 import { savePriceList } from "@/lib/db"
+import { withAuthHeaders } from "@/lib/auth-headers"
+import { useAuthGuard } from "@/lib/use-auth-guard"
+
+type StripeConnectStatus = {
+    connected: boolean
+    accountId?: string
+    detailsSubmitted?: boolean
+    chargesEnabled?: boolean
+    payoutsEnabled?: boolean
+}
 
 export default function ProfilePage() {
     const router = useRouter()
+    const { authResolved, isAuthenticated } = useAuthGuard("/profile")
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [profile, setProfile] = useState<BusinessInfo>({
@@ -39,12 +50,52 @@ export default function ProfilePage() {
     const [priceList, setPriceList] = useState<PriceListItem[]>([])
     const [isPriceModalOpen, setIsPriceModalOpen] = useState(false)
     const [editingPriceItem, setEditingPriceItem] = useState<PriceListItem | null>(null)
+    const [stripeConnectStatus, setStripeConnectStatus] = useState<StripeConnectStatus | null>(null)
+    const [stripeStatusLoading, setStripeStatusLoading] = useState(false)
+    const [stripeConnecting, setStripeConnecting] = useState(false)
+    const [stripeDashboardLoading, setStripeDashboardLoading] = useState(false)
 
-    useEffect(() => {
-        loadProfile()
+    const loadStripeConnectStatus = useCallback(async () => {
+        setStripeStatusLoading(true)
+        try {
+            const headers = await withAuthHeaders()
+            const response = await fetch("/api/stripe/connect/status", {
+                method: "GET",
+                headers,
+                cache: "no-store",
+            })
+
+            if (response.status === 401) {
+                setStripeConnectStatus(null)
+                return
+            }
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}))
+                throw new Error(errorData.error || "Failed to load Stripe Connect status.")
+            }
+
+            const data = await response.json()
+            setStripeConnectStatus(data)
+        } catch (error) {
+            console.error("Failed to load Stripe Connect status:", error)
+        } finally {
+            setStripeStatusLoading(false)
+        }
     }, [])
 
-    const loadProfile = async () => {
+    useEffect(() => {
+        if (typeof window === "undefined") return
+        const stripeState = new URLSearchParams(window.location.search).get("stripe")
+        if (stripeState === "return") {
+            toast("✅ Stripe onboarding returned. Refreshing status...", "success")
+            void loadStripeConnectStatus()
+        } else if (stripeState === "refresh") {
+            toast("ℹ️ Stripe onboarding was interrupted. Continue when ready.", "info")
+        }
+    }, [loadStripeConnectStatus])
+
+    const loadProfile = useCallback(async () => {
         try {
             const savedProfile = getProfile()
             if (savedProfile) {
@@ -59,10 +110,82 @@ export default function ProfilePage() {
             // getStorageStats is now async
             const stats = await getStorageStats()
             setStorageStats(stats)
+            await loadStripeConnectStatus()
         } catch (error) {
             console.error("Error loading profile:", error)
         } finally {
             setLoading(false)
+        }
+    }, [loadStripeConnectStatus])
+
+    useEffect(() => {
+        if (!authResolved || !isAuthenticated) return
+        void loadProfile()
+    }, [authResolved, isAuthenticated, loadProfile])
+
+    const handleConnectStripe = async () => {
+        setStripeConnecting(true)
+        try {
+            const headers = await withAuthHeaders({ "content-type": "application/json" })
+            const response = await fetch("/api/stripe/connect/onboard", {
+                method: "POST",
+                headers,
+            })
+
+            if (response.status === 401) {
+                toast("🔐 Log in first to connect Stripe.", "warning")
+                router.push("/login")
+                return
+            }
+
+            const data = await response.json().catch(() => ({}))
+            if (!response.ok) {
+                throw new Error(data.error || "Failed to start Stripe onboarding.")
+            }
+
+            if (typeof data.url !== "string" || !data.url) {
+                throw new Error("Stripe onboarding URL is missing.")
+            }
+
+            window.location.href = data.url
+        } catch (error: any) {
+            console.error("Stripe connect onboarding failed:", error)
+            toast(`❌ ${error.message || "Failed to connect Stripe."}`, "error")
+        } finally {
+            setStripeConnecting(false)
+        }
+    }
+
+    const handleOpenStripeDashboard = async () => {
+        setStripeDashboardLoading(true)
+        try {
+            const headers = await withAuthHeaders({ "content-type": "application/json" })
+            const response = await fetch("/api/stripe/connect/dashboard-link", {
+                method: "POST",
+                headers,
+            })
+
+            if (response.status === 401) {
+                toast("🔐 Log in first to open Stripe dashboard.", "warning")
+                router.push("/login")
+                return
+            }
+
+            const data = await response.json().catch(() => ({}))
+            if (!response.ok) {
+                throw new Error(data.error || "Failed to open Stripe dashboard.")
+            }
+
+            if (typeof data.url !== "string" || !data.url) {
+                throw new Error("Stripe dashboard URL is missing.")
+            }
+
+            window.open(data.url, "_blank", "noopener,noreferrer")
+        } catch (error: any) {
+            console.error("Stripe dashboard link failed:", error)
+            toast(`❌ ${error.message || "Failed to open Stripe dashboard."}`, "error")
+        } finally {
+            setStripeDashboardLoading(false)
         }
     }
 
@@ -164,7 +287,7 @@ export default function ProfilePage() {
         }
     }
 
-    if (loading) {
+    if (!authResolved || !isAuthenticated || loading) {
         return (
             <div className="flex items-center justify-center min-h-[50vh]">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -286,7 +409,7 @@ export default function ProfilePage() {
                     </div>
 
                     <div className="space-y-2">
-                        <Label htmlFor="payment_link">My Payment Link (Get Paid 💵)</Label>
+                        <Label htmlFor="payment_link">Manual Payment Link (Optional)</Label>
                         <div className="flex gap-2">
                             <Input
                                 id="payment_link"
@@ -296,9 +419,8 @@ export default function ProfilePage() {
                             />
                         </div>
                         <p className="text-xs text-muted-foreground">
-                            Paste your personal payment link here (Venmo, PayPal, CashApp, or Stripe).
-                            <br />
-                            If added, a <b>&quot;PAY NOW&quot;</b> button will appear on your PDF estimates.
+                            Optional fallback for Venmo/PayPal/CashApp links.
+                            Stripe card payment links are now managed through Stripe Connect below.
                         </p>
                     </div>
 
@@ -401,6 +523,94 @@ export default function ProfilePage() {
                     </>
                 )}
             </Button>
+
+            <Card className="border-primary/30">
+                <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                        <Link2 className="h-5 w-5" />
+                        Stripe Connect (Company-Owned Payments)
+                    </CardTitle>
+                    <CardDescription>
+                        Each business manages its own payments, payouts, refunds, and disputes in Stripe.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                    {stripeStatusLoading ? (
+                        <p className="text-sm text-muted-foreground flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Loading Stripe status...
+                        </p>
+                    ) : (
+                        <>
+                            <div className="rounded-lg border p-3 bg-muted/40">
+                                {!stripeConnectStatus ? (
+                                    <p className="text-sm text-muted-foreground">
+                                        Log in to connect your company Stripe account.
+                                    </p>
+                                ) : stripeConnectStatus.connected && stripeConnectStatus.detailsSubmitted && stripeConnectStatus.chargesEnabled ? (
+                                    <div className="space-y-1">
+                                        <p className="text-sm font-medium text-emerald-700">Connected and ready to accept card payments.</p>
+                                        {stripeConnectStatus.accountId && (
+                                            <p className="text-xs text-muted-foreground font-mono">{stripeConnectStatus.accountId}</p>
+                                        )}
+                                    </div>
+                                ) : stripeConnectStatus.connected ? (
+                                    <div className="space-y-1">
+                                        <p className="text-sm font-medium text-amber-700">Connected, but onboarding is incomplete.</p>
+                                        {stripeConnectStatus.accountId && (
+                                            <p className="text-xs text-muted-foreground font-mono">{stripeConnectStatus.accountId}</p>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-muted-foreground">
+                                        Stripe is not connected yet.
+                                    </p>
+                                )}
+                            </div>
+
+                            <div className="flex gap-2">
+                                <Button
+                                    className="flex-1"
+                                    onClick={handleConnectStripe}
+                                    disabled={stripeConnecting}
+                                >
+                                    {stripeConnecting ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Opening...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Link2 className="h-4 w-4 mr-2" />
+                                            {stripeConnectStatus?.connected ? "Resume Onboarding" : "Connect Stripe"}
+                                        </>
+                                    )}
+                                </Button>
+
+                                <Button
+                                    variant="outline"
+                                    onClick={handleOpenStripeDashboard}
+                                    disabled={stripeDashboardLoading || !stripeConnectStatus?.connected}
+                                >
+                                    {stripeDashboardLoading ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <ExternalLink className="h-4 w-4" />
+                                    )}
+                                </Button>
+
+                                <Button
+                                    variant="ghost"
+                                    onClick={loadStripeConnectStatus}
+                                    disabled={stripeStatusLoading}
+                                >
+                                    <RefreshCw className={`h-4 w-4 ${stripeStatusLoading ? "animate-spin" : ""}`} />
+                                </Button>
+                            </div>
+                        </>
+                    )}
+                </CardContent>
+            </Card>
 
             {/* Price List Section */}
             <Card>

@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { supabase } from '@/lib/supabase'
 import { toast } from '@/components/toast'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { AlertCircle, Terminal } from 'lucide-react'
 
 interface Automation {
     id: string
@@ -26,6 +28,7 @@ export function AutomationSettings() {
     const [loading, setLoading] = useState(true)
     const [firstFollowupDays, setFirstFollowupDays] = useState(2)
     const [secondFollowupDays, setSecondFollowupDays] = useState(7)
+    const [missingTable, setMissingTable] = useState(false)
 
     useEffect(() => {
         fetchAutomations()
@@ -33,7 +36,10 @@ export function AutomationSettings() {
 
     const fetchAutomations = async () => {
         const { data: { user } } = await supabase.auth.getUser()
-        if (!user) return
+        if (!user) {
+            setLoading(false)
+            return
+        }
 
         const { data, error } = await supabase
             .from('automations')
@@ -41,9 +47,17 @@ export function AutomationSettings() {
             .eq('user_id', user.id)
 
         if (error) {
-            toast("Failed to load settings", "error")
+            console.error('Error fetching automations:', error)
+            // Determine if error is due to missing table
+            if (error.code === '42P01') { // undefined_table
+                setMissingTable(true)
+                // toast("Setup required: Database migration needed", "error")
+            } else {
+                toast("Failed to load settings", "error")
+            }
         } else {
             setAutomations(data || [])
+            setMissingTable(false)
         }
         setLoading(false)
     }
@@ -118,7 +132,7 @@ export function AutomationSettings() {
     const reviewRequest = automations.find(a => a.type === 'review_request')
 
     useEffect(() => {
-        if (!quoteChaser) return
+        if (!quoteChaser?.settings) return
 
         const normalizedFirstDelayDays = Math.max(
             1,
@@ -132,13 +146,55 @@ export function AutomationSettings() {
 
         setFirstFollowupDays(normalizedFirstDelayDays)
         setSecondFollowupDays(normalizedSecondDelayDays)
-    }, [quoteChaser])
+    }, [quoteChaser?.settings?.first_delay_hours, quoteChaser?.settings?.second_delay_hours, quoteChaser?.settings?.delay_days])
 
     if (loading) return <div>Loading settings...</div>
 
     return (
         <div className="space-y-6">
-            <Card>
+            {missingTable && (
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>설정 필요: 데이터베이스 마이그레이션이 필요합니다</AlertTitle>
+                    <AlertDescription className="mt-2 space-y-2">
+                        <p>데이터베이스에 <strong>automations</strong> 테이블이 없습니다.</p>
+                        <div className="rounded bg-black/10 p-2 font-mono text-xs">
+                            <div className="flex items-center gap-2 border-b border-white/10 pb-1 mb-1">
+                                <Terminal className="h-3 w-3" />
+                                <span>Supabase SQL Editor에서 실행할 SQL:</span>
+                            </div>
+                            <code className="block whitespace-pre-wrap">
+                                {`create table if not exists automations (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references profiles(id) on delete cascade not null,
+  type text not null,
+  is_enabled boolean default false not null,
+  settings jsonb default '{}'::jsonb not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  unique(user_id, type)
+);
+
+alter table automations enable row level security;
+
+create policy "Users can view own automations" on automations for select using (auth.uid() = user_id);
+create policy "Users can insert own automations" on automations for insert with check (auth.uid() = user_id);
+create policy "Users can update own automations" on automations for update using (auth.uid() = user_id);`}
+                            </code>
+                        </div>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-full mt-2"
+                            onClick={fetchAutomations}
+                        >
+                            마이그레이션을 실행했습니다, 다시 확인하기
+                        </Button>
+                    </AlertDescription>
+                </Alert>
+            )}
+
+            <Card className={missingTable ? 'opacity-50 pointer-events-none' : ''}>
                 <CardHeader>
                     <div className="flex items-center justify-between">
                         <div>
@@ -148,10 +204,11 @@ export function AutomationSettings() {
                         <Switch
                             checked={quoteChaser?.is_enabled || false}
                             onCheckedChange={(checked) => toggleAutomation('quote_chaser', checked)}
+                            disabled={missingTable}
                         />
                     </div>
                 </CardHeader>
-                {quoteChaser?.is_enabled && (
+                {quoteChaser?.is_enabled && quoteChaser?.settings && (
                     <CardContent className="space-y-4">
                         <div className="flex items-center gap-4">
                             <Label htmlFor="chaser-delay-first">1st Follow-up (Days)</Label>
@@ -194,7 +251,7 @@ export function AutomationSettings() {
                 )}
             </Card>
 
-            <Card>
+            <Card className={missingTable ? 'opacity-50 pointer-events-none' : ''}>
                 <CardHeader>
                     <div className="flex items-center justify-between">
                         <div>
@@ -204,10 +261,11 @@ export function AutomationSettings() {
                         <Switch
                             checked={reviewRequest?.is_enabled || false}
                             onCheckedChange={(checked) => toggleAutomation('review_request', checked)}
+                            disabled={missingTable}
                         />
                     </div>
                 </CardHeader>
-                {reviewRequest?.is_enabled && (
+                {reviewRequest?.is_enabled && reviewRequest?.settings && (
                     <CardContent className="space-y-4">
                         <p className="text-sm text-muted-foreground">Requests will be sent 24 hours after an estimate is marked as &apos;paid&apos;.</p>
                         <div className="flex items-center gap-4">

@@ -1,0 +1,1167 @@
+=== 🤖 Orchestrator 4.0 Context Bridge ===
+You are an Actentic Worker in the Orchestrator 4.0 Factory.
+Mode: [VERBOSE]
+Your role is defined in the workflow below.
+
+--- [ 1. The Mission ] ---
+# Task Board: Estimate Generation & Delivery Runtime
+
+- Project: SnapQuote
+- Version: v1.1 (Hotfix)
+- Date: 2026-02-20
+- Status: V1 complete; V2 launch planning ready for user sign-off
+
+## Develop Loop Init (Orchestrator 4.1)
+
+- Current mission: Resolve Critic high-priority API/Data issue (duplicate payment link risk) under locked contract.
+- Recommended model: `[LIGHT]` (API handler hardening + test update, bounded scope).
+- Active agents:
+  - Orchestrator (contract check and board control)
+  - Backend Thread A (API Builder)
+  - Critic (post-fix audit)
+  - Secretary (history + daily log updates)
+
+## Mission Resolution
+
+- `Mission` section in `.agent/memory/codex_context.txt` is empty.
+- Fallback applied: execute required Architect workflow artifacts from Rule 3 (task board + locked API spec + critique + daily log).
+
+## Phase Checklist
+
+- [x] 0. Intelligence setup and context scan complete.
+- [x] 1. Goal alignment complete (`conductor/product.md` reviewed).
+- [x] 2. Blueprint drafted for runtime API surface.
+- [x] 3. Runtime API spec generated and locked in `docs/api-spec.md`.
+- [x] 4. Strategic audit documented in `.agent/memory/agent_debate.md`.
+- [x] 5. Presentation package prepared for user sign-off.
+
+## Runtime Tasks
+
+| Task ID | Task | Endpoint(s) | Owner | Status |
+|:--|:--|:--|:--|:--|
+| TB-01 | Public audio transcription for no-login and logged-in flows | `POST /api/transcribe` | Backend | Complete |
+| TB-02 | Public estimate generation from notes/images | `POST /api/generate` | Backend | Complete |
+| TB-03 | Optional-auth estimate delivery by email with PDF support | `POST /api/send-email` | Backend | Complete |
+| TB-04 | Authenticated Stripe payment link creation in tenant connected account | `POST /api/create-payment-link` | Backend | Complete |
+| TB-05 | Payment settlement sync from Stripe to estimate status | `POST /api/webhooks/stripe` | Backend | Complete |
+| TB-06 | Backfill/reconcile paid Stripe sessions | `GET/POST /api/webhooks/stripe/reconcile` | Backend | Complete |
+| TB-07 | Authenticated usage and quota visibility | `GET /api/billing/usage` | Backend | Complete |
+| TB-08 | Tenant Stripe Connect onboarding + status + dashboard management | `POST /api/stripe/connect/onboard`, `GET /api/stripe/connect/status`, `POST /api/stripe/connect/dashboard-link` | Backend + Frontend | Complete |
+| TB-09 | Authenticated local paid status probe for sent estimates | `GET /api/payments/stripe/status` | Backend + Frontend | Complete |
+
+## Cross-Checks
+
+- Every runtime task maps to at least one endpoint in `docs/api-spec.md`.
+- Public contract endpoints (`transcribe`, `generate`, `send-email`, `create-payment-link`, `payments/stripe/status`, `stripe/connect/*`) match the hotfix contract in Context Bridge section [2].
+- Internal payment reliability endpoints (`webhooks/stripe`, `webhooks/stripe/reconcile`) are documented as operational, non-public contract routes.
+
+## Lock Rule
+
+- Spec state: `LOCKED`.
+- Rule: no implementation changes without updating `docs/api-spec.md` first.
+
+## Develop Execution (2026-02-20)
+
+- [x] 0. Orchestrator setup: contract check + board init completed.
+- [x] 1A. Backend Thread: payment-link idempotency hardening implemented.
+- [x] 1B. Frontend Thread: added `/payment-success` route to close Stripe redirect UX gap (no API contract delta).
+- [x] 2. Critic reflexion: issue classified and re-audited in `.agent/memory/agent_debate.md`.
+- [x] 3. Specialist dispatch: API/Data fix applied and verified by lint + test updates.
+- [x] 4. Secretary docs: feature history EN/KR updated.
+- [x] 5A. QA guard: regression suite passes on Node 20 after loader/script compatibility fix.
+- [x] 5B. CISO external scanner: processed user-provided `npm audit` report and executed dependency patch workflow.
+
+## Fix Loop Init (Orchestrator 4.1)
+
+- Bug focus: dependency security vulnerabilities from `npm audit` (34 issues reported, including high severity items).
+- Recommended model: `[HEAVY]` (supply-chain patching across config, dependencies, and client import path).
+- Active agents:
+  - Orchestrator (bug triage + board state)
+  - Lead Dev (reproduction and patch)
+  - Security Specialist Dispatch (`vulnerability-scanner`, `api-security-best-practices` equivalent workflow)
+  - Critic (regression shield)
+  - Secretary (history/findings/daily log)
+
+## Fix Execution (2026-02-20)
+
+- [x] 0. Intelligence setup: audit report classified as Security patch scope.
+- [x] 1. Reproduction: red state confirmed from provided `npm audit report`.
+- [x] 2. Specialist dispatch (Security):
+  - Removed `xlsx` usage from import flow by converting to secure CSV-only parser.
+  - Removed `next-pwa` integration and switched to manual service worker registration.
+  - Added Next image optimizer mitigation in `next.config.mjs` (`images.unoptimized`, empty `remotePatterns`).
+- [x] 3. Critic regression shield: fix reviewed and recorded in `.agent/memory/agent_debate.md`.
+- [x] 4. Secretary docs: feature history EN/KR updated, root cause documented in `findings.md`.
+- [x] 5A. QA final guard: `npm test` and `npm run lint` green (existing lint warning unchanged).
+- [x] 5B. Tracks log: `conductor/tracks.md` updated.
+
+## Develop Execution (2026-02-24) - Guest Paid Reflection Closure
+
+- [x] 0. Contract update first: `docs/api-spec.md` extended with `GET /api/payments/stripe/status`.
+- [x] 1A. Backend Thread: implemented Stripe payment status probe route with validation + rate limit.
+- [x] 1B. Frontend Thread: persisted `paymentLinkId` in local estimate lifecycle and added history auto-sync (`sent -> paid`).
+- [x] 2. Critic reflexion: documented API/Data risk closure in `.agent/memory/agent_debate.md`.
+- [x] 3. Specialist dispatch: tests added for new route (`tests/api/stripe-routes.test.mjs`).
+- [x] 4. Secretary docs: feature history EN/KR + daily log updated.
+- [x] 5A. QA guard: `npm test` and `npm run lint` pass.
+- [ ] 5B. Build guard: blocked by pre-existing filesystem symlink loop (`ELOOP: GEMINI.md`), outside patch scope.
+
+## Develop Execution (2026-02-24) - Stripe Connect Tenant Ownership
+
+- [x] 0. Contract update first: auth/payment model updated in `docs/api-spec.md` (Connect endpoints + auth requirement changes).
+- [x] 1A. Backend Thread: implemented Stripe Connect onboarding/status/dashboard-link routes.
+- [x] 1B. Backend Thread: migrated payment-link route to authenticated tenant connected-account creation (`stripeAccount`).
+- [x] 2. Frontend Thread: added Stripe Connect management UI on profile and linked payment-link UX error guidance.
+- [x] 3. Critic reflexion: recorded architecture correction and risk closure in `.agent/memory/agent_debate.md`.
+- [x] 4. Specialist dispatch: expanded mocks/tests for Connect + payment constraints (`tests/api/stripe-connect-routes.test.mjs`, `tests/api/core-workflow-routes.test.mjs`).
+- [x] 5A. QA guard: `npm test` and `npm run lint` pass (one pre-existing lint warning remains).
+- [x] 5B. Build guard: `ELOOP` blocker resolved on 2026-02-25 (see TB-11 execution).
+
+## Architecture V2 Init (Orchestrator 4.1)
+
+- Project: SnapQuote V2 (The Lazy Capture Expansion & System Hardening)
+- Focus: Gemini Multimodal AI Integration, Sync Resilience, CI/CD Fixes, Comms Monetization.
+- Recommended model: `[HEAVY]` (architecture contract planning + system scope updates).
+- Active agents:
+  - Orchestrator (contract and board control)
+  - Architect (runtime API contract expansion)
+  - Critic (strategic audit and risk screening)
+  - Secretary (history + daily log updates)
+
+### Runtime Tasks (V2)
+
+| Task ID | Task | Endpoint(s) | Owner | Status |
+|:--|:--|:--|:--|:--|
+| TB-10 | Gemini API integration for multimodal "Capture First" parsing | `POST /api/generate` (Switch engine) | Backend | Pending |
+| TB-11 | CI/CD ELOOP build fix (`GEMINI.md` symlink cleanup) | N/A (Build Config) | DevOps | Complete |
+| TB-12 | Conflict-Free Replicated Data Type (CRDT) for offline sync | `POST /api/sync/crdt` (New) | Backend | Pending |
+| TB-13 | SMS monetization strategy shift (Email primary, Twilio Pay-as-you-go) | `POST /api/send-sms` (New/Premium) | Backend | Pending |
+
+## Launch Execution (2026-02-25) - Architecture V2 Planning
+
+- [x] 0. Intelligence setup: architecture complexity classified as `[HEAVY]`.
+- [x] 1. Goal alignment: `conductor/product.md` and `conductor/tech-stack.md` validated for V2 scope.
+- [x] 2. Blueprinting: V2 tasks (`TB-10` to `TB-13`) documented in runtime board.
+- [x] 3. Runtime API spec: `docs/api-spec.md` updated and locked with V2 endpoint surface.
+- [x] 4. Critic audit: strategic risks and constraints documented in `.agent/memory/agent_debate.md`.
+- [ ] 5. Final sign-off: pending user approval on V2 launch plan.
+
+## V2 Cross-Checks
+
+- Every V2 task (`TB-10` to `TB-13`) maps to at least one endpoint or ops scope in `docs/api-spec.md`.
+- V2 additions preserve lock rule: implementation must follow contract updates first.
+
+## Develop Execution (2026-02-25) - TB-11 Build Guard Recovery
+
+- [x] 0. Reproduction: `next build` failed with `ELOOP` on workspace-root `GEMINI.md` symlink.
+- [x] 1. Build Config fix: replaced looping symlink with regular `GEMINI.md` file.
+- [x] 2. Type gate fix: aligned Supabase helper typing in `lib/server/stripe-connect.ts` to restore production type-check path.
+- [x] 3. Scope gate fix: excluded non-runtime skill workspace (`codex`, `.agent`) from `tsconfig.json` build type scope.
+- [x] 4. Frontend SSR gate: removed `useSearchParams` reliance from `/login` and `/new-estimate` to satisfy static prerender constraints.
+- [x] 5A. QA guard: `npm run lint` and `npm test -- --runInBand` pass (single pre-existing lint warning unchanged).
+- [x] 5B. Build guard: `npm run build` passes successfully.
+
+--- [ 1.5 System Architecture & Docs ] ---
+
+--- [ 1.8 Strategic Debate Log ] ---
+# Strategic Audit: Estimate Generation and Delivery Runtime (v1.1)
+
+Date: 2026-02-20
+
+## Critic Findings
+
+1. High risk: no idempotency key is used in `POST /api/create-payment-link`.
+- Impact: repeated client retries can create multiple Stripe payment links for one estimate.
+- Recommendation: add an idempotency strategy keyed by `estimateId + amount + userId`.
+
+2. Medium risk: guest traffic on `transcribe` and `generate` has no durable quota identity.
+- Impact: abuse control is IP-limited, which is weaker behind NAT/proxy clusters.
+- Recommendation: add signed anonymous session IDs or captcha gate for sustained guest usage.
+
+3. Medium risk: webhook success path depends on metadata quality.
+- Impact: missing `estimateId` and `estimateNumber` causes paid sessions that cannot be linked.
+- Recommendation: enforce metadata presence at payment-link creation and add monitoring threshold alerts.
+
+4. Low risk: mixed error payload shapes across runtime endpoints.
+- Impact: frontend error handling must branch for string, structured, and success-flag error forms.
+- Recommendation: standardize on one error envelope in v1.2.
+
+## Debate Conclusion
+
+- The runtime is deployable with current behavior, but payment correctness relies on metadata discipline and reconcile jobs.
+- Contract is acceptable for v1.1 hotfix if operations run reconcile and monitor alerts.
+- Spec is locked, with follow-up improvements deferred to a planned v1.2 normalization pass.
+
+## Develop Loop Reflexion (2026-02-20)
+
+Issue classification:
+- Type: API/Data
+- Priority: High
+- Signal: duplicate payment-link creation risk due missing idempotency handling.
+
+Dispatch:
+- Skill family applied: `api-design-principles` (contract-safe backend hardening).
+- Fix: added Stripe request idempotency support in `POST /api/create-payment-link`.
+  - Use client header `Idempotency-Key` when present.
+  - Otherwise generate deterministic key from `userId + estimate reference + amount`.
+
+Verification:
+- Added test coverage for deterministic idempotency key behavior.
+- Added test coverage for client header override behavior.
+- Contract note added in `docs/api-spec.md`.
+- Node 20 compatibility fix applied to test runner (`tests/loader.mjs`, `package.json`), and `npm test` now passes.
+- `npm run lint` passes (one pre-existing React hook warning outside this fix scope).
+- External vulnerability scanner (`npm audit`) could not reach npm registry due network restriction; local static grep-based scan found no hardcoded secret or obvious dynamic-code risk patterns.
+
+Resolution status:
+- High-priority API/Data issue: Resolved.
+- Remaining medium/low items from prior audit: Open (planned for v1.2).
+
+## Fix Loop Debate: Dependency Security Patch (2026-02-20)
+
+Issue classification:
+- Type: Security / Supply-chain dependency risk.
+- Priority: High (multiple high-severity advisories from `npm audit`).
+
+Root-cause pattern:
+- High-risk/no-fix package in direct runtime dependency (`xlsx`).
+- Vulnerable transitive chain introduced by `next-pwa` (workbox/del/glob/minimatch path).
+- Framework-level advisory on current Next major line.
+
+Implemented patch set:
+- Replaced Excel parser with CSV-only parser in `components/excel-import-modal.tsx` to remove `xlsx` runtime dependency.
+- Removed `next-pwa` wrapper from `next.config.mjs`; switched to app-owned service worker registration and static `public/sw.js`.
+- Added defensive Next image config in `next.config.mjs`:
+  - `images.unoptimized = true`
+  - `images.remotePatterns = []`
+
+Regression check:
+- `npm test`: pass (36/36).
+- `npm run lint`: pass (single pre-existing hook dependency warning remains).
+- `npm prune --no-audit --no-fund`: pass; extraneous `next-pwa`/`xlsx` removed from installed tree.
+- `npm ls next-pwa xlsx --depth=2`: empty after prune.
+
+Critic verdict:
+- Not a band-aid for `xlsx`/`next-pwa` chain; direct attack surface reduced by removing vulnerable direct dependencies.
+- Residual risk remains for Next advisory until major framework upgrade and fresh lockfile re-resolution in network-enabled CI.
+
+## Frontend Thread Closure (2026-02-24)
+
+Issue classification:
+- Type: UX / Runtime reliability.
+- Priority: Medium.
+- Signal: Stripe `after_completion.redirect` points to `/payment-success`, but route was missing and could return 404 after checkout.
+
+Dispatch:
+- Added `app/payment-success/page.tsx` for a dedicated post-checkout confirmation surface.
+- Included immediate user actions (`/history`, `/new-estimate`) and an explicit note about webhook/reconcile eventual consistency.
+- Kept API contract unchanged (`docs/api-spec.md` remains locked with no endpoint delta).
+
+Critic verdict:
+- Checkout completion flow is now closed on frontend and no longer depends on undefined route behavior.
+- Remaining operational dependency: webhook secret correctness and reconcile scheduling still required for paid-state consistency.
+
+## Develop Loop Reflexion (2026-02-24) - Guest Paid Status Sync
+
+Issue classification:
+- Type: API/Data
+- Priority: High
+- Signal: guest/no-login flow could complete Stripe checkout but local history remained `sent` because status updates depended on authenticated cloud sync.
+
+Dispatch:
+- Contract-first update in `docs/api-spec.md`:
+  - Added `GET /api/payments/stripe/status` as optional-auth public endpoint for paid status probing.
+- Backend:
+  - Added `app/api/payments/stripe/status/route.ts`.
+  - Implemented rate limiting, query validation, Stripe checkout session scan by `paymentLinkId`, metadata resolution fallback via payment intent, and Stripe auth error mapping.
+  - Enhanced `POST /api/create-payment-link` redirect URL builder to preserve estimate context (`estimateId`, `estimateNumber`) on `/payment-success`.
+- Frontend/data:
+  - Persisted payment-link tracking metadata in local estimate model (`paymentLink`, `paymentLinkId`, `paymentLinkType`, payment sync markers).
+  - Updated `app/new-estimate/page.tsx` to persist payment link id and ensure email-send success writes/updates local estimate to `sent` even when draft was not manually saved.
+  - Updated `app/history/page.tsx` to poll payment status for sent estimates with `paymentLinkId` and auto-transition to `paid`.
+
+Verification:
+- Added route tests in `tests/api/stripe-routes.test.mjs`:
+  - missing `paymentLinkId` validation
+  - unpaid vs paid status detection
+  - Stripe authentication error path
+- Ran regression: `npm test` pass (41 tests).
+- Ran lint: `npm run lint` pass (one pre-existing hook dependency warning unchanged).
+- Attempted build: blocked by pre-existing filesystem symlink loop (`ELOOP` at `GEMINI.md`), unrelated to this patch scope.
+
+Resolution status:
+- Guest payment completion visibility gap: Resolved.
+- Operational dependencies unchanged: webhook/reconcile remain required for server-of-record consistency.
+
+## Develop Loop Reflexion (2026-02-24) - Multi-Tenant Stripe Connect Pivot
+
+Issue classification:
+- Type: API/Data + Product Architecture
+- Priority: High
+- Signal: platform-level Stripe secret flow made the operator the payment owner, which breaks true SaaS tenant ownership for contractors/company representatives.
+
+Dispatch:
+- Contract-first updates:
+  - `POST /api/create-payment-link` auth requirement restored.
+  - Added Stripe Connect runtime endpoints:
+    - `POST /api/stripe/connect/onboard`
+    - `GET /api/stripe/connect/status`
+    - `POST /api/stripe/connect/dashboard-link`
+  - `GET /api/payments/stripe/status` moved to authenticated payment domain.
+- Backend implementation:
+  - Added Stripe Connect service helper (`lib/server/stripe-connect.ts`) and profile schema migration for connected-account fields.
+  - Updated payment-link creation to require authenticated user + linked Stripe account and to create links under `stripeAccount`.
+  - Added onboarding/status/dashboard-link APIs for each tenant to self-manage payment operations.
+  - Added estimate context params to payment success redirect.
+- Frontend implementation:
+  - Added Stripe Connect status/connect/manage section in `app/profile/page.tsx`.
+  - Updated payment-link generation UX in estimate and quick-quote flows with Connect-specific guidance on 401/403 responses.
+  - Preserved local paid-sync loop while moving payment status probe to authenticated access.
+
+Verification:
+- Extended mocks for Stripe Connect account APIs.
+- Updated payment-link route tests for authenticated connected-account behavior.
+- Added dedicated connect route tests (`tests/api/stripe-connect-routes.test.mjs`).
+- Full regression: `npm test` pass (49 tests).
+- Lint: pass, with one pre-existing warning outside this scope.
+
+Resolution status:
+- Tenant payment ownership model: Resolved (Connect-based).
+- Remaining operational work: rollout migration in deployed Supabase and provision production Connect settings.
+
+## Debate Session: Architecture V2 Launch (2026-02-25)
+
+**Subject**: Upgrading Core Engine to Gemini Multimodal & System Hardening
+**Context**: "Capture-First" UX demands real-time processing of messy field recordings and imagery. Concurrently, offline sync (CRDT) and comms (SMS) need business decoupling to control costs.
+
+### Critic (Strategic Audit)
+1. **Gemini Engine Switch (`POST /api/generate`)**:
+   - **Pro**: Gemini's massive context window and multimodal ingestion natively support the "Dump Bucket" UX (TB-10). It can process photos of job sites alongside audio transcripts without hitting standard token cliffs.
+   - **Risk**: Moving away from the current tested OpenAI Prompt V5 Lite format parsing. We must ensure Gemini outputs strictly matching JSON schema (`EstimateItem[]`, `EstimateSection[]`).
+   - **Verdict**: HIGH VALUE. The competitive advantage of image+audio "lazy capture" heavily outweighs the switch cost. Must use strict structured output mode for Gemini.
+
+2. **Sync Conflict Resolution (`POST /api/sync/crdt`)**:
+   - **Critique**: Moving from Last-Write-Wins to CRDT (TB-12) is historically difficult on standard relational DBs (Supabase Postgres).
+   - **Verdict**: NECESSARY BUT COMPLEX. We should start with a timestamp-based vector clock per record before attempting full operational transformation (OT) or Yjs/CRDT.
+
+3. **SMS Monetization (`POST /api/send-sms`)**:
+   - **Critique**: Current $19 Pro Plan cannot sustain automated Twilio SMS campaigns due to variable per-msg fees and A2P 10DLC registration blockers.
+   - **Verdict**: APPROVED. Refactoring to a credit-based system (Pay-as-you-go) protects margins, while leaving Email fallback as the primary "free" automation channel.
+
+4. **CI/CD Build Blocker (`GEMINI.md` ELOOP)**:
+   - **Verdict**: Banal but critical. TB-11 must be executed immediately to restore continuous deployment pipeline integrity.
+
+## Launch Workflow Closure (2026-02-25)
+
+Issue classification:
+- Type: Architecture / Contract planning.
+- Priority: High.
+- Signal: user requested strict execution of Launch workflow artifacts before V2 implementation.
+
+Dispatch:
+- Re-validated board/spec/debate linkage against lock rule.
+- Hardened `docs/api-spec.md` V2 sections with explicit rate limits, error envelopes, and runtime table requirements for `sync/crdt` and `send-sms`.
+- Corrected task mapping gap by adding `TB-09` to the contract verification matrix.
+
+Critic verdict:
+- Launch-phase artifacts are coherent and internally consistent for V2 sign-off.
+- Implementation should start only after user approves V2 sequence priority (`TB-10` vs `TB-11` first).
+
+## Develop Loop Reflexion (2026-02-25) - TB-11 Build Guard Recovery
+
+Issue classification:
+- Type: Build / CI reliability.
+- Priority: High.
+- Signal: production build blocked by `ELOOP` at workspace root (`GEMINI.md`) and follow-on type/prerender blockers.
+
+Dispatch:
+- Replaced looping `GEMINI.md` symlink with a regular file to remove filesystem recursion.
+- Fixed Supabase helper type contract in `lib/server/stripe-connect.ts` by using explicit `SupabaseClient` typing.
+- Reduced type-check scope by excluding non-runtime workspace folders (`codex`, `.agent`) in `tsconfig.json`.
+- Removed `useSearchParams` dependency from `app/login/page.tsx` and `app/new-estimate/page.tsx` (replaced with `window.location.search` parsing) to satisfy Next static prerender constraints.
+
+Verification:
+- `npm run build`: pass.
+- `npm run lint`: pass (one pre-existing `react-hooks/exhaustive-deps` warning remains in `components/automation/automation-settings.tsx`).
+- `npm test -- --runInBand`: pass (49/49).
+
+Resolution status:
+- TB-11 build blocker: Resolved.
+- Next implementation candidate: TB-10 (Gemini engine switch for `POST /api/generate`).
+
+--- [ 2. The Contract (API Spec) ] ---
+# API Spec: Estimate Generation and Delivery Runtime
+
+- Project: SnapQuote
+- Version: v1.1 (Hotfix + V2 Planning Addendum)
+- Updated: 2026-02-25
+- Base URL: `/api`
+- Status: `LOCKED`
+
+> This file is the binding runtime contract for estimate generation, delivery, and payment-link flow.
+> Implementation changes must update this spec first.
+
+---
+
+## Authentication
+
+- Guest or Auth:
+  - `POST /api/transcribe`
+  - `POST /api/generate`
+  - `POST /api/send-email`
+- Auth required (`Authorization: Bearer <token>`):
+  - `POST /api/create-payment-link`
+  - `GET /api/payments/stripe/status`
+  - `POST /api/stripe/connect/onboard`
+  - `GET /api/stripe/connect/status`
+  - `POST /api/stripe/connect/dashboard-link`
+  - `GET /api/billing/usage`
+- Secret-based internal auth:
+  - `POST /api/webhooks/stripe` (Stripe signature)
+  - `GET/POST /api/webhooks/stripe/reconcile` (`CRON_SECRET`)
+
+Notes:
+- `transcribe` and `generate` accept no-login traffic (`requireAuth: false` quota mode).
+- If a bearer token is present on optional-auth routes, quota usage is tracked per user.
+
+---
+
+## Endpoint Index
+
+| Method | Path | Description | Auth | Contract Scope |
+|:--|:--|:--|:--|:--|
+| `POST` | `/api/transcribe` | Audio to text for estimate drafting | Optional | Public |
+| `POST` | `/api/generate` | Generate structured estimate JSON from notes/images | Optional | Public |
+| `POST` | `/api/send-email` | Send estimate email with optional PDF attachment | Optional | Public |
+| `POST` | `/api/create-payment-link` | Create Stripe payment link in caller connected account | Required | Public |
+| `GET` | `/api/payments/stripe/status` | Check Stripe paid status for a payment link | Required | Public |
+| `POST` | `/api/stripe/connect/onboard` | Create or resume Stripe Connect onboarding | Required | Public |
+| `GET` | `/api/stripe/connect/status` | Read Stripe Connect account status for caller | Required | Public |
+| `POST` | `/api/stripe/connect/dashboard-link` | Create Stripe Express dashboard login link | Required | Public |
+| `GET` | `/api/billing/usage` | Return plan, usage, limits, and estimated costs | Required | Internal app API |
+| `POST` | `/api/webhooks/stripe` | Mark estimate paid from Stripe checkout completion | Stripe signature | Internal ops API |
+| `GET/POST` | `/api/webhooks/stripe/reconcile` | Backfill paid sessions and reconcile estimate status | `CRON_SECRET` | Internal ops API |
+| `POST` | `/api/sync/crdt` | CRDT-based offline state synchronization | Required | Internal app API |
+| `POST` | `/api/send-sms` | Premium SMS delivery via Twilio (Pay-as-you-go) | Required | Internal app API |
+
+---
+
+## Shared Types
+
+```typescript
+interface StructuredError {
+  error: {
+    message: string;
+    code: number;
+  };
+}
+
+interface StringError {
+  error: string;
+}
+
+interface QuotaError {
+  error: string;
+  code: "FREE_PLAN_LIMIT_REACHED" | "UNAUTHORIZED" | "USAGE_CONTEXT_ERROR";
+  metric: "generate" | "transcribe" | "send_email";
+  usage?: number;
+  limit?: number;
+}
+```
+
+---
+
+## 1) POST /api/transcribe
+
+Purpose: transcribe recorded trade field notes to text.
+
+Rate limit: 40 requests / 10 min / IP.
+
+Request (`multipart/form-data`):
+- `file: File` (`audio/*`, max `20MB`)
+
+Response `200`:
+
+```typescript
+interface TranscribeResponse {
+  text: string;
+}
+```
+
+Error responses:
+- `400`: invalid/missing file
+- `402`: free quota limit reached
+- `413`: file too large
+- `429`: rate limited
+- `500`: transcription failure
+
+```typescript
+type TranscribeErrorResponse = StringError | QuotaError;
+```
+
+---
+
+## 2) POST /api/generate
+
+Purpose: generate estimate JSON from notes and optional images.
+
+Rate limit: 20 requests / 10 min / IP.
+
+Request (`application/json`):
+
+```typescript
+interface GenerateEstimateRequest {
+  images?: string[]; // max 8 items, each string <= 2_000_000 chars
+  notes?: string; // max 8000 chars
+  projectType?: "residential" | "commercial";
+  userProfile?: {
+    city?: string;
+    country?: string;
+    taxRate?: number;
+    businessName?: string;
+    priceList?: string;
+  };
+}
+```
+
+Response `200`:
+
+```typescript
+interface EstimateItem {
+  id: string;
+  itemNumber: number;
+  category: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  total: number;
+}
+
+interface EstimateSection {
+  id: string;
+  name: string;
+  divisionCode?: string;
+  items: EstimateItem[];
+}
+
+interface EstimateResponse {
+  items: EstimateItem[];
+  sections?: EstimateSection[];
+  summary_note: string;
+  payment_terms?: string; // runtime may return empty string when not provided
+  closing_note?: string; // runtime may return empty string when not provided
+  warnings?: string[];
+}
+```
+
+Error responses:
+- `400`: invalid notes/images payload
+- `402`: free quota limit reached
+- `429`: rate limited
+- `500`: model/server failure
+
+```typescript
+type GenerateErrorResponse = StringError | QuotaError;
+```
+
+---
+
+## 3) POST /api/send-email
+
+Purpose: deliver estimate email with optional PDF attachment.
+
+Rate limit: 30 requests / 10 min / IP.
+
+Request (`application/json`):
+
+```typescript
+interface SendEmailRequest {
+  email?: string; // alias for "to"
+  to?: string;
+  subject?: string;
+  message?: string;
+  filename?: string;
+  businessName?: string;
+  clientName?: string;
+  referralUrl?: string; // http/https only
+  pdfBase64?: string; // alias for "pdfBuffer"
+  pdfBuffer?: string;
+}
+```
+
+Success `200`:
+
+```typescript
+interface SendEmailSuccessResponse {
+  success: true;
+  data: unknown;
+}
+
+interface SendEmailMailtoFallbackResponse {
+  method: "mailto";
+  mailtoUrl: string;
+  message: string;
+}
+```
+
+Error responses:
+- `400`: invalid email/body or Resend API error
+- `402`: quota reached (`send_email`)
+- `413`: PDF too large (`>10MB`)
+- `429`: rate limited
+- `500`: internal failure
+
+```typescript
+type SendEmailErrorResponse =
+  | StructuredError
+  | StringError
+  | {
+      success: false;
+      error: string;
+    }
+  | (QuotaError & { metric: "send_email" });
+```
+
+---
+
+## 4) POST /api/create-payment-link
+
+Purpose: create Stripe payment link for one estimate payment.
+
+Rate limit: 30 requests / 10 min / IP.
+
+Request (`application/json`):
+
+```typescript
+interface CreatePaymentLinkRequest {
+  amount: number; // > 0 and <= 500000
+  customerName?: string; // max 120 chars
+  estimateNumber?: string; // max 80 chars
+  estimateId?: string; // uuid format when provided
+}
+```
+
+Optional request header:
+- `Idempotency-Key: <string>` (max 255 chars)
+- If omitted, server generates a deterministic key from `userId + estimateId/estimateNumber + amount`.
+
+Operational note:
+- Stripe payment link is created under the caller Stripe connected account (`profiles.stripe_account_id`).
+- Stripe payment link completion redirects to `${NEXT_PUBLIC_APP_URL}/payment-success?estimateId=...&estimateNumber=...`.
+
+Success `200`:
+
+```typescript
+interface CreatePaymentLinkResponse {
+  url: string; // Stripe hosted URL
+  id: string; // Stripe payment link id
+}
+```
+
+Error responses:
+- `400`: invalid amount/estimateId
+- `401`: unauthorized or Stripe authentication error
+- `403`: Stripe Connect not linked or onboarding incomplete
+- `429`: rate limited
+- `500`: Stripe not configured/internal failure
+
+```typescript
+type CreatePaymentLinkErrorResponse = StructuredError | StringError;
+```
+
+---
+
+## 5) GET /api/payments/stripe/status
+
+Purpose: check Stripe payment completion for a payment link to sync local estimate status for authenticated users.
+
+Rate limit: 60 requests / 10 min / IP.
+
+Query:
+
+```typescript
+interface StripePaymentStatusQuery {
+  paymentLinkId: string; // required, Stripe payment link id (e.g. plink_xxx)
+  estimateId?: string; // optional uuid to enforce estimate match
+  estimateNumber?: string; // optional estimate number to enforce estimate match
+}
+```
+
+Response `200`:
+
+```typescript
+interface StripePaymentStatusResponse {
+  ok: true;
+  paid: boolean;
+  checkoutSessionId?: string;
+  paidAt?: string; // ISO datetime
+  estimateId?: string;
+  estimateNumber?: string;
+}
+```
+
+Error responses:
+- `400`: invalid/missing query values
+- `401`: Stripe authentication error
+- `429`: rate limited
+- `500`: Stripe not configured/internal failure
+
+```typescript
+type StripePaymentStatusErrorResponse = StructuredError | StringError;
+```
+
+---
+
+## 6) POST /api/stripe/connect/onboard
+
+Purpose: create or resume Stripe Connect Express onboarding for the authenticated business owner.
+
+Rate limit: 20 requests / 10 min / IP.
+
+Request: no body.
+
+Response `200`:
+
+```typescript
+interface StripeConnectOnboardResponse {
+  url: string; // Stripe onboarding URL
+  accountId: string; // Stripe connected account id (acct_*)
+}
+```
+
+Error responses:
+- `401`: unauthorized
+- `500`: Stripe/Supabase configuration or provider failure
+
+```typescript
+type StripeConnectOnboardErrorResponse = StructuredError | StringError;
+```
+
+---
+
+## 7) GET /api/stripe/connect/status
+
+Purpose: retrieve Stripe connected account status for the authenticated business owner.
+
+Rate limit: 60 requests / 10 min / IP.
+
+Request: no body.
+
+Response `200`:
+
+```typescript
+interface StripeConnectStatusResponse {
+  connected: boolean;
+  accountId?: string;
+  detailsSubmitted?: boolean;
+  chargesEnabled?: boolean;
+  payoutsEnabled?: boolean;
+}
+```
+
+Error responses:
+- `401`: unauthorized
+- `500`: Stripe/Supabase configuration or provider failure
+
+```typescript
+type StripeConnectStatusErrorResponse = StructuredError | StringError;
+```
+
+---
+
+## 8) POST /api/stripe/connect/dashboard-link
+
+Purpose: create a Stripe Express dashboard login link for the authenticated business owner.
+
+Rate limit: 20 requests / 10 min / IP.
+
+Request: no body.
+
+Response `200`:
+
+```typescript
+interface StripeConnectDashboardLinkResponse {
+  url: string; // Stripe Express dashboard login URL
+}
+```
+
+Error responses:
+- `401`: unauthorized
+- `403`: Stripe Connect not linked yet
+- `500`: Stripe/Supabase configuration or provider failure
+
+```typescript
+type StripeConnectDashboardLinkErrorResponse = StructuredError | StringError;
+```
+
+---
+
+## 9) GET /api/billing/usage
+
+Purpose: return current monthly quota usage and estimated cost data.
+
+Request: no body.
+
+Response `200`:
+
+```typescript
+interface BillingUsageResponse {
+  planTier: "free" | "pro";
+  periodStart: string; // YYYY-MM-DD (UTC month start)
+  usage: {
+    generate: number;
+    transcribe: number;
+    send_email: number;
+  };
+  limits: {
+    generate: number;
+    transcribe: number;
+    send_email: number;
+  };
+  remaining: {
+    generate: number;
+    transcribe: number;
+    send_email: number;
+  };
+  usageRatePct: {
+    generate: number;
+    transcribe: number;
+    send_email: number;
+  };
+  openaiPromptTokens: number;
+  openaiCompletionTokens: number;
+  estimatedCosts: {
+    openai: number;
+    resend: number;
+    total: number;
+  };
+}
+```
+
+Error responses:
+- `401`: unauthorized
+- `429`: rate limited
+- `500`: usage context/configuration failure
+
+```typescript
+type BillingUsageErrorResponse = {
+  error: {
+    message: string;
+    code: number;
+  };
+};
+```
+
+---
+
+## 10) POST /api/webhooks/stripe (Operational)
+
+Purpose: apply Stripe payment success events to estimate status.
+
+Auth: Stripe signature (`stripe-signature` header + webhook secret).
+
+Accepted event types:
+- `checkout.session.completed`
+- `checkout.session.async_payment_succeeded`
+
+Behavior:
+- Resolve `estimateId` and fallback by `estimateNumber` metadata.
+- Update `estimates.status` to `paid`.
+- Emit `analytics_events` with `event_name = payment_completed`.
+
+Success:
+- `200` plain text: `Received`
+
+Errors:
+- `400`: signature/malformed event
+- `500`: server configuration or DB update failure
+
+---
+
+## 11) GET/POST /api/webhooks/stripe/reconcile (Operational)
+
+Purpose: reconcile missed Stripe webhook updates for recent paid sessions.
+
+Auth:
+- `Authorization: Bearer <CRON_SECRET>` or `x-cron-secret: <CRON_SECRET>`
+
+Query:
+- `lookbackHours?: number` (default `72`, max `720`)
+
+Response `200`:
+
+```typescript
+interface StripeReconcileResponse {
+  ok: true;
+  lookbackHours: number;
+  capped: boolean;
+  scanned: number;
+  paidSessions: number;
+  matched: number;
+  updated: number;
+  alreadyPaid: number;
+  missingMetadata: number;
+  missingEstimate: number;
+  errors: number;
+}
+```
+
+Errors:
+- `401`: unauthorized
+- `500`: missing config/internal failure
+
+---
+
+## 12) POST /api/sync/crdt (Architecture V2)
+
+Purpose: Handle Conflict-Free Replicated Data Type synchronization to prevent data loss on concurrent offline edits.
+
+Auth: Required.
+Rate limit: 30 requests / 10 min / IP.
+
+Request (`application/json`):
+```typescript
+interface SyncCRDTRequest {
+  clientId: string;
+  changes: Array<{
+    table: string;
+    recordId: string;
+    timestamp: number;
+    mutations: Record<string, any>;
+  }>;
+}
+```
+
+Response `200`:
+```typescript
+interface SyncCRDTResponse {
+  ok: true;
+  mergedCount: number;
+  serverTimestamp: number;
+}
+```
+
+Error responses:
+- `400`: invalid clientId/change payload
+- `401`: unauthorized
+- `429`: rate limited
+- `500`: sync engine/storage failure
+
+```typescript
+type SyncCRDTErrorResponse = StructuredError | StringError;
+```
+
+---
+
+## 13) POST /api/send-sms (Architecture V2 Premium)
+
+Purpose: Send SMS updates (e.g., Follow-ups) using pay-as-you-go credits via Twilio.
+
+Auth: Required (Must have SMS credits > 0).
+Rate limit: 20 requests / 10 min / IP.
+
+Request (`application/json`):
+```typescript
+interface SendSMSRequest {
+  toPhoneNumber: string;
+  message: string;
+  estimateId: string;
+}
+```
+
+Response `200`:
+```typescript
+interface SendSMSResponse {
+  ok: true;
+  messageId: string;
+  creditsRemaining: number;
+}
+```
+
+Error responses:
+- `400`: invalid phone/message payload
+- `401`: unauthorized
+- `402`: insufficient SMS credits
+- `429`: rate limited
+- `500`: provider/configuration failure
+
+```typescript
+type SendSMSErrorResponse = StructuredError | StringError;
+```
+
+---
+
+## Error Code Matrix
+
+| Code | Meaning | Common Endpoints |
+|:--|:--|:--|
+| `400` | bad request payload or validation failure | transcribe, generate, send-email, create-payment-link, payments/stripe/status, webhook, sync/crdt, send-sms |
+| `401` | missing/invalid auth or provider auth issue | create-payment-link, payments/stripe/status, stripe/connect/*, billing/usage, reconcile, sync/crdt, send-sms |
+| `402` | plan quota exceeded or insufficient credits | transcribe, generate, send-email, send-sms |
+| `403` | authenticated but action not allowed (connect not linked/incomplete) | create-payment-link, stripe/connect/dashboard-link |
+| `413` | payload too large | transcribe, send-email |
+| `429` | rate limit exceeded | public runtime endpoints + billing/usage + sync/crdt + send-sms |
+| `500` | server/config/provider failure | all endpoints |
+
+---
+
+## Database Tables (Runtime Relevant)
+
+| Table | Key Columns | Used By | RLS |
+|:--|:--|:--|:--|
+| `profiles` | `id`, `plan_tier`, `stripe_account_id`, `stripe_*_enabled` | quota plan resolution + Stripe Connect mapping | Yes |
+| `usage_counters_monthly` | `user_id`, `period_start`, usage/cost counters | quota enforcement and usage API | Yes |
+| `estimates` | `id`, `user_id`, `estimate_number`, `status` | payment link metadata target and paid transition | Yes (service role bypass for webhook) |
+| `analytics_events` | `user_id`, `event_name`, `estimate_id`, `external_id` | quota milestones and payment conversion events | Yes (service role bypass for webhook) |
+| `ops_alerts` | `source`, `severity`, `alert_key`, `context` | operational alerts for webhook/reconcile failures | Yes |
+| `sync_change_log` | `user_id`, `client_id`, `table_name`, `record_id`, `logical_ts`, `payload` | CRDT/vector-clock change merge journal | Yes |
+| `sms_credit_ledger` | `user_id`, `delta_credits`, `reason`, `ref_id` | SMS pay-as-you-go credit balance accounting | Yes |
+| `sms_messages` | `user_id`, `estimate_id`, `to_phone_e164`, `provider_id`, `status` | outbound SMS delivery and audit trail | Yes |
+
+---
+
+## Task Mapping Verification
+
+| Task Board ID | Endpoint Mapping | Verification |
+|:--|:--|:--|
+| `TB-01` | `POST /api/transcribe` | mapped |
+| `TB-02` | `POST /api/generate` | mapped |
+| `TB-03` | `POST /api/send-email` | mapped |
+| `TB-04` | `POST /api/create-payment-link` | mapped |
+| `TB-05` | `POST /api/webhooks/stripe` | mapped |
+| `TB-06` | `GET/POST /api/webhooks/stripe/reconcile` | mapped |
+| `TB-07` | `GET /api/billing/usage` | mapped |
+| `TB-08` | `POST /api/stripe/connect/onboard`, `GET /api/stripe/connect/status`, `POST /api/stripe/connect/dashboard-link` | mapped |
+| `TB-09` | `GET /api/payments/stripe/status` | mapped |
+| `TB-10` | `POST /api/generate` (Switching to Gemini) | mapped |
+| `TB-11` | N/A (Build config) | mapped |
+| `TB-12` | `POST /api/sync/crdt` | mapped |
+| `TB-13` | `POST /api/send-sms` | mapped |
+
+All tasks in `.agent/memory/task_board.md` map to at least one endpoint in this document.
+
+---
+
+## Operational Notes
+
+- Client PDF generation uses direct module import and `pdf(...).toBlob()` to avoid runtime interop crashes.
+- Preview/download and send-email flows share one document-creation pattern to minimize divergence.
+- Payment link metadata contract for downstream settlement:
+  - `estimateId`
+  - `estimateNumber`
+  - `userId` (required)
+- Stripe Connect account mapping is stored in `profiles.stripe_account_id` and must be linked before payment-link creation.
+- V2 endpoints (`/api/sync/crdt`, `/api/send-sms`) are contract-locked for implementation sequencing and are currently planning-stage until runtime rollout.
+
+--- [ 2.1 Project Context (Conductor) ] ---
+CONTEXT: conductor/product.md
+# 📦 Product Strategy: Project Conductor
+
+Define the core vision and product requirements here.
+
+## Overview
+This project is an AI-orchestrated development environment.
+
+## Target Audience
+AI Engineers and Developers using Agentic Workflows.
+
+## Core Features
+1. Orchestrator 4.0 Engine.
+2. Parallel Implementation Threads.
+3. Multi-Model Routing.
+
+CONTEXT: conductor/tech-stack.md
+# 💻 Technology Stack
+
+## Frontend
+- React / Next.js
+- Tailwind CSS / Vanilla CSS
+
+## Backend
+- Supabase (PostgreSQL, Edge Functions)
+- Node.js
+
+## Infrastructure
+- Vercel (Deployment)
+- Git (Version Control)
+
+CONTEXT: conductor/tracks.md
+# Engineering Tracks
+
+## 2026-02-20 - Fix Loop: Dependency Security Patch
+
+- Scope: `npm audit` vulnerability remediation for high-risk dependency paths.
+- Actions:
+  - Replaced `xlsx` import path with CSV parser.
+  - Removed `next-pwa` wrapper and moved to manual service worker registration.
+  - Added Next image optimizer hardening.
+- QA:
+  - `npm test`: pass (36/36)
+  - `npm run lint`: pass (1 pre-existing warning)
+  - `npm prune`: pass (`next-pwa`/`xlsx` removed from installed tree)
+- Status: In progress for full lockfile re-resolution and Next major upgrade planning.
+
+
+--- [ 2.5 Multi-Skill Library ] ---
+
+--- [ 3. The Rules (Workflow) ] ---
+---
+description: Autonomous Strategic Planning (Orchestrator 4.1)
+---
+
+# 🚀 Launch (Agentic Factory v4.1)
+
+Strategic inception with **Runtime API Spec Generation** (The Contract).
+
+## 0. [AGENT] Orchestrator: Intelligence Setup
+- [ ] **Model Router**: Architecture tasks are `[HEAVY]` → Recommend Pro/Sonnet.
+- [ ] **Skill Discovery**: Scan `conductor/tech-stack.md` and auto-load architecture skills.
+- [ ] **Skills**: `startup-business-analyst-market-opportunity`, `micro-saas-launcher`, `openapi-spec-generation`
+- [ ] **Board Init**: Initialize `.agent/memory/task_board.md`.
+
+## 1. [AGENT] Orchestrator: Goal Alignment
+- [ ] **Context Sync**: Read `conductor/product.md`.
+- [ ] **Strategy**: Load `startup-business-analyst-market-opportunity` + `micro-saas-launcher` for value verification.
+
+## 2. [AGENT] Architect: Blueprinting
+- [ ] **Design**: Draft technical plan including `fsd-lite` structure and DB schema.
+- [ ] **Boarding**: Generate task breakdown in `task_board.md`.
+
+## 3. [AGENT] Architect: Runtime API Spec (P3.5) ⚡
+- [ ] **Load Template**: Read `.agent/skills/engineering/api-spec-template.md` + `openapi-spec-generation`.
+- [ ] **Generate**: Create `docs/api-spec.md` using the template format.
+    - Fill in ALL endpoints required by `task_board.md`.
+    - Define TypeScript interfaces for every Request/Response.
+    - Specify Auth requirements per endpoint.
+    - List all Error Codes.
+    - Include DB table schema if applicable.
+- [ ] **Verify**: Cross-check every task in `task_board.md` → every task MUST map to at least one endpoint.
+- [ ] **Lock**: Mark spec as LOCKED. No code changes without spec update.
+
+> [!CAUTION]
+> **Output Rule**: `docs/api-spec.md` MUST exist before proceeding to Phase 4.
+> If the Architect skips this step, the Orchestrator MUST halt and return an error.
+
+## 4. [AGENT] Critic: Strategic Audit
+- [ ] **Critique**: Audit plan and API Spec for loopholes.
+- [ ] **Debate**: Record critique in `.agent/memory/agent_debate.md` (IN ENGLISH).
+
+## 5. [USER] Final Sign-off
+- [ ] **Present**: Show `task_board.md` and `api-spec.md` to user.
+
+---
+> [!IMPORTANT]
+> **Orchestrator 4.1 Rule**: Implementation CANNOT start without `docs/api-spec.md`.
+
+## [AGENT] Secretary: Daily Log
+- [ ] **Log**: Append summary to `.agent/memory/daily/YYYY-MM-DD.md`.
+  - Workflow name, timestamp, files changed count.
+  - Key decision (1-2 sentences).
+  - Tomorrow's TODO (if applicable).
+
+
+--- [ 4. Instructions ] ---
+Please execute the current step marked in [ 1. The Mission ].
+Follow the rules in [ 3. The Rules ] strictly.
+If writing code, adhere to [ 2. The Contract ].

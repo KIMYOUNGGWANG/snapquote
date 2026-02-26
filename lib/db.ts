@@ -17,6 +17,11 @@ interface SnapQuoteDB extends DBSchema {
             createdAt: string;
             synced: boolean;
             status: 'draft' | 'sent' | 'paid';  // NEW: Capture-First status
+            paymentLink?: string;
+            paymentLinkId?: string;
+            paymentLinkType?: 'full' | 'deposit' | 'custom';
+            paymentCompletedAt?: string;
+            lastPaymentSessionId?: string;
         };
         indexes: { 'by-date': string; 'by-status': string };  // Added by-status
     };

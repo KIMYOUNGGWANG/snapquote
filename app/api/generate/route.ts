@@ -3,9 +3,115 @@ import { NextResponse } from "next/server"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { enforceUsageQuota, recordUsage } from "@/lib/server/usage-quota"
 
+type UserMessageContentPart =
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } }
+
+type NormalizedEstimate = {
+    items: Array<ReturnType<typeof normalizeItem>>
+    sections?: Array<{
+        id: string
+        name: string
+        divisionCode?: string
+        items: Array<ReturnType<typeof normalizeItem>>
+    }>
+    summary_note: string
+    payment_terms: string
+    closing_note: string
+    warnings: string[]
+}
+
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 })
+
+const OPENAI_GENERATE_MODEL = process.env.OPENAI_GENERATE_MODEL?.trim() || "gpt-4o"
+
+function toFiniteNumber(value: unknown, fallback = 0): number {
+    if (typeof value === "number" && Number.isFinite(value)) return value
+    if (typeof value === "string") {
+        const parsed = Number(value)
+        if (Number.isFinite(parsed)) return parsed
+    }
+    return fallback
+}
+
+function normalizeItem(item: any, index: number) {
+    const quantity = toFiniteNumber(item?.quantity, 1)
+    const unitPrice = toFiniteNumber(item?.unit_price, 0)
+    const total = toFiniteNumber(item?.total, quantity * unitPrice)
+
+    return {
+        id: typeof item?.id === "string" && item.id.trim() ? item.id : `item-${index + 1}`,
+        itemNumber: Math.max(1, Math.floor(toFiniteNumber(item?.itemNumber, index + 1))),
+        category: typeof item?.category === "string" && item.category.trim() ? item.category : "PARTS",
+        description: typeof item?.description === "string" ? item.description.trim() : "",
+        quantity,
+        unit: typeof item?.unit === "string" && item.unit.trim() ? item.unit : "ea",
+        unit_price: unitPrice,
+        total,
+    }
+}
+
+function parsePotentialJsonContent(input: string): any {
+    const trimmed = input.trim()
+    if (!trimmed) throw new Error("Model response is empty")
+
+    try {
+        return JSON.parse(trimmed)
+    } catch {
+        const unwrapped = trimmed
+            .replace(/^```(?:json)?\s*/i, "")
+            .replace(/\s*```$/i, "")
+            .trim()
+        return JSON.parse(unwrapped)
+    }
+}
+
+function normalizeEstimate(rawEstimate: any): NormalizedEstimate {
+    const normalizedItems = (Array.isArray(rawEstimate?.items) ? rawEstimate.items : [])
+        .map((item: any, index: number) => normalizeItem(item, index))
+        .filter((item: any) => item.description !== "")
+
+    const normalizedSections = (Array.isArray(rawEstimate?.sections) ? rawEstimate.sections : [])
+        .map((section: any, sectionIndex: number) => {
+            const sectionItems = (Array.isArray(section?.items) ? section.items : [])
+                .map((item: any, itemIndex: number) => normalizeItem(item, itemIndex))
+                .filter((item: any) => item.description !== "")
+
+            return {
+                id:
+                    typeof section?.id === "string" && section.id.trim()
+                        ? section.id
+                        : `section-${sectionIndex + 1}`,
+                name:
+                    typeof section?.name === "string" && section.name.trim()
+                        ? section.name.trim()
+                        : `Section ${sectionIndex + 1}`,
+                divisionCode:
+                    typeof section?.divisionCode === "string" && section.divisionCode.trim()
+                        ? section.divisionCode.trim()
+                        : undefined,
+                items: sectionItems,
+            }
+        })
+        .filter((section: any) => section.items.length > 0)
+
+    const warnings = Array.isArray(rawEstimate?.warnings)
+        ? rawEstimate.warnings
+            .filter((warning: any) => typeof warning === "string" && warning.trim())
+            .map((warning: string) => warning.trim())
+        : []
+
+    return {
+        items: normalizedItems,
+        ...(normalizedSections.length > 0 ? { sections: normalizedSections } : {}),
+        summary_note: typeof rawEstimate?.summary_note === "string" ? rawEstimate.summary_note : "",
+        payment_terms: typeof rawEstimate?.payment_terms === "string" ? rawEstimate.payment_terms : "",
+        closing_note: typeof rawEstimate?.closing_note === "string" ? rawEstimate.closing_note : "",
+        warnings,
+    }
+}
 
 // V5 LITE - Optimized System Prompt (650 tokens, 100/100 score)
 function getSystemPromptV5(userProfile: {
@@ -154,7 +260,7 @@ TONE: Professional, confident, sales-oriented. Sound like a trusted expert.
 
 export async function POST(req: Request) {
     try {
-        const quota = await enforceUsageQuota(req, "generate", { requireAuth: true })
+        const quota = await enforceUsageQuota(req, "generate", { requireAuth: false })
         if (!quota.ok) {
             return NextResponse.json(
                 {
@@ -214,7 +320,7 @@ export async function POST(req: Request) {
         const profile = userProfile || {}
         const systemPrompt = getSystemPromptV5(profile, projectType)
 
-        const userMessageContent: any[] = []
+        const userMessageContent: UserMessageContentPart[] = []
 
         if (notes) {
             userMessageContent.push({ type: "text", text: `Field Notes:\n${notes}` })
@@ -234,7 +340,7 @@ export async function POST(req: Request) {
         }
 
         const response = await openai.chat.completions.create({
-            model: "gpt-4o",
+            model: OPENAI_GENERATE_MODEL,
             messages: [
                 { role: "system", content: systemPrompt },
                 {
@@ -252,27 +358,8 @@ export async function POST(req: Request) {
             throw new Error("No content generated")
         }
 
-        const estimate = JSON.parse(content)
-
-        // Process items
-        if (estimate.items) {
-            // Filter out items with empty descriptions
-            estimate.items = estimate.items.filter((item: any) =>
-                item.description && item.description.trim() !== ''
-            )
-
-            // Calculate totals
-            estimate.items.forEach((item: any) => {
-                if (item.total === undefined) {
-                    item.total = item.quantity * item.unit_price
-                }
-            })
-        }
-
-        // Ensure warnings array exists
-        if (!estimate.warnings) {
-            estimate.warnings = []
-        }
+        const rawEstimate = parsePotentialJsonContent(content)
+        const estimate = normalizeEstimate(rawEstimate)
 
         await recordUsage(quota.context, "generate", {
             promptTokens: response.usage?.prompt_tokens || 0,

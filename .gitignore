@@ -31,7 +31,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
-.env*
+*.env
 
 # vercel
 .vercel
@@ -44,4 +44,9 @@ snapquote_plan_v2.md
 # snapquote_v3_final.md
 prompt_v5_lite_analysis.md
 
+*.md
+
+.env
+.env.local
+.env.production
 # All markdown files

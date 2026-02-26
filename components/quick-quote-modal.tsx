@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { X, Loader2, Copy, CreditCard, FileText, Check, Minus, Plus } from "lucide-react"
 import { toast } from "@/components/toast"
+import { useRouter } from "next/navigation"
 import { getProfile } from "@/lib/estimates-storage"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
@@ -17,6 +18,7 @@ interface QuickQuoteModalProps {
 }
 
 export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
+    const router = useRouter()
     const [quantity, setQuantity] = useState(1)
     const [price, setPrice] = useState(0)
     const [taxRate, setTaxRate] = useState(13)
@@ -94,6 +96,16 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
         setIsGeneratingLink(true)
         try {
             const headers = await withAuthHeaders({ 'Content-Type': 'application/json' })
+            if (!headers.authorization) {
+                toast("🔐 Sign in first to generate a card payment link.", "warning")
+                const params = new URLSearchParams({
+                    next: "/",
+                    intent: "payment-link",
+                })
+                router.push(`/login?${params.toString()}`)
+                return
+            }
+
             const response = await fetch('/api/create-payment-link', {
                 method: 'POST',
                 headers,
@@ -104,8 +116,32 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
             })
 
             if (!response.ok) {
-                const error = await response.json()
-                throw new Error(error.error || 'Failed to create payment link')
+                const error = await response.json().catch(() => ({}))
+                const errorMessage =
+                    typeof error?.error === "string"
+                        ? error.error
+                        : typeof error?.error?.message === "string"
+                            ? error.error.message
+                            : 'Failed to create payment link'
+
+                if (response.status === 401) {
+                    toast("🔐 Session expired. Please sign in again.", "warning")
+                    const params = new URLSearchParams({
+                        next: "/",
+                        intent: "payment-link",
+                    })
+                    router.push(`/login?${params.toString()}`)
+                    return
+                }
+
+                if (response.status === 403) {
+                    if (error?.code === "STRIPE_CONNECT_REQUIRED" || error?.code === "STRIPE_CONNECT_INCOMPLETE") {
+                        throw new Error("Connect Stripe in Profile first, then generate a payment link.")
+                    }
+                    throw new Error(errorMessage)
+                }
+
+                throw new Error(errorMessage)
             }
 
             const data = await response.json()

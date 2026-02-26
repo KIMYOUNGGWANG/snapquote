@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { Camera, Upload, X, Loader2, Save, Share2, Download, Plus, Trash2, ArrowRight, Edit2, CheckCircle2, CreditCard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -8,9 +8,8 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import Image from "next/image"
 import dynamic from "next/dynamic"
-const EstimatePDF = dynamic(() => import("@/components/estimate-pdf").then(mod => mod.EstimatePDF), { ssr: false })
 import { useRouter } from "next/navigation"
-import { saveEstimate, generateEstimateNumber, getProfile, saveProfile, updateEstimateStatus } from "@/lib/estimates-storage"
+import { saveEstimate, generateEstimateNumber, getProfile, saveProfile, getEstimates, updateEstimate } from "@/lib/estimates-storage"
 import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI, getClients, type Client } from "@/lib/db"
 import type { BusinessInfo } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
@@ -25,14 +24,6 @@ const ExcelImportModal = dynamic(() => import("@/components/excel-import-modal")
 import { Mail, FileSpreadsheet, Users, PenTool, Sparkles } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 const SignaturePad = dynamic(() => import("@/components/signature-pad").then(mod => mod.SignaturePad), { ssr: false })
-
-const PDFDownloadLink = dynamic(
-    () => import("@react-pdf/renderer").then((mod) => mod.PDFDownloadLink),
-    {
-        ssr: false,
-        loading: () => <Button variant="outline" disabled>Loading PDF...</Button>,
-    }
-)
 
 // Unit and Category types for professional estimating
 type EstimateUnit = 'ea' | 'LS' | 'hr' | 'day' | 'SF' | 'LF' | '%' | 'other'
@@ -73,6 +64,127 @@ interface Estimate {
 
 type Step = "input" | "transcribing" | "verifying" | "generating" | "result"
 
+const ESTIMATE_CATEGORIES: EstimateCategory[] = ["PARTS", "LABOR", "SERVICE", "OTHER"]
+const ESTIMATE_UNITS: EstimateUnit[] = ["ea", "LS", "hr", "day", "SF", "LF", "%", "other"]
+
+function isRecord(value: unknown): value is Record<string, any> {
+    return value !== null && typeof value === "object"
+}
+
+function toSafeNumber(value: unknown, fallback = 0): number {
+    if (typeof value === "number" && Number.isFinite(value)) return value
+    if (typeof value === "string") {
+        const parsed = Number(value)
+        if (Number.isFinite(parsed)) return parsed
+    }
+    return fallback
+}
+
+function toSafeString(value: unknown, fallback = ""): string {
+    return typeof value === "string" ? value : fallback
+}
+
+function normalizeCategory(value: unknown): EstimateCategory {
+    if (typeof value !== "string") return "PARTS"
+    const normalized = value.trim().toUpperCase()
+    return ESTIMATE_CATEGORIES.includes(normalized as EstimateCategory)
+        ? (normalized as EstimateCategory)
+        : "PARTS"
+}
+
+function normalizeUnit(value: unknown): EstimateUnit {
+    if (typeof value !== "string") return "ea"
+    const normalized = value.trim()
+    return ESTIMATE_UNITS.includes(normalized as EstimateUnit)
+        ? (normalized as EstimateUnit)
+        : "ea"
+}
+
+function normalizeEstimateItem(input: unknown, index: number): EstimateItem {
+    const item = isRecord(input) ? input : {}
+    const quantity = Math.max(0, toSafeNumber(item.quantity, 1))
+    const unitPrice = Math.max(0, toSafeNumber(item.unit_price, 0))
+    const total = toSafeNumber(item.total, quantity * unitPrice)
+    const id = toSafeString(item.id).trim()
+    const description = toSafeString(item.description).trim()
+
+    return {
+        id: id || `item-${index + 1}`,
+        itemNumber: Math.max(1, Math.floor(toSafeNumber(item.itemNumber, index + 1))),
+        category: normalizeCategory(item.category),
+        description,
+        quantity,
+        unit: normalizeUnit(item.unit),
+        unit_price: unitPrice,
+        total,
+        is_value_add: typeof item.is_value_add === "boolean" ? item.is_value_add : undefined,
+        notes: typeof item.notes === "string" ? item.notes : undefined,
+    }
+}
+
+function normalizeEstimateSection(input: unknown, sectionIndex: number): EstimateSection {
+    const section = isRecord(input) ? input : {}
+    const rawItems = Array.isArray(section.items) ? section.items : []
+    const items = rawItems
+        .map((item, itemIndex) => normalizeEstimateItem(item, itemIndex))
+        .filter((item) => item.description !== "")
+    const id = toSafeString(section.id).trim()
+    const name = toSafeString(section.name).trim()
+    const divisionCode = toSafeString(section.divisionCode).trim()
+
+    return {
+        id: id || `section-${sectionIndex + 1}`,
+        name: name || `Section ${sectionIndex + 1}`,
+        divisionCode: divisionCode || undefined,
+        items,
+    }
+}
+
+function normalizeEstimatePayload(input: unknown): Estimate {
+    const estimate = isRecord(input) ? input : {}
+    const rawItems = Array.isArray(estimate.items) ? estimate.items : []
+    const rawSections = Array.isArray(estimate.sections) ? estimate.sections : []
+    const rawWarnings = Array.isArray(estimate.warnings) ? estimate.warnings : []
+
+    const items = rawItems
+        .map((item, index) => normalizeEstimateItem(item, index))
+        .filter((item) => item.description !== "")
+
+    const sections = rawSections
+        .map((section, sectionIndex) => normalizeEstimateSection(section, sectionIndex))
+        .filter((section) => section.items.length > 0)
+
+    const warnings = rawWarnings
+        .filter((warning): warning is string => typeof warning === "string")
+        .map((warning) => warning.trim())
+        .filter(Boolean)
+
+    return {
+        items,
+        ...(sections.length > 0 ? { sections } : {}),
+        summary_note: toSafeString(estimate.summary_note),
+        payment_terms: toSafeString(estimate.payment_terms),
+        closing_note: toSafeString(estimate.closing_note),
+        warnings,
+    }
+}
+
+function lineTotal(item: EstimateItem | null | undefined): number {
+    if (!item) return 0
+    const quantity = toSafeNumber(item.quantity, 0)
+    const unitPrice = toSafeNumber(item.unit_price, 0)
+    return toSafeNumber(item.total, quantity * unitPrice)
+}
+
+function getAllItemsFromEstimate(est: Estimate): EstimateItem[] {
+    const flatItems = Array.isArray(est.items) ? est.items : []
+    const sectionItems = Array.isArray(est.sections)
+        ? est.sections.flatMap((section) => (Array.isArray(section?.items) ? section.items : []))
+        : []
+
+    return [...flatItems, ...sectionItems].map((item, index) => normalizeEstimateItem(item, index))
+}
+
 export default function NewEstimatePage() {
     const router = useRouter()
     const [step, setStep] = useState<Step>("input")
@@ -105,14 +217,17 @@ export default function NewEstimatePage() {
     const [pendingAudioId, setPendingAudioId] = useState<string | null>(null)
     const [projectType, setProjectType] = useState<'residential' | 'commercial'>('residential')
     const [paymentLink, setPaymentLink] = useState<string | null>(null)
+    const [paymentLinkId, setPaymentLinkId] = useState<string | null>(null)
     const [paymentLinkType, setPaymentLinkType] = useState<'full' | 'deposit' | 'custom' | null>('full')
     const [isGeneratingPaymentLink, setIsGeneratingPaymentLink] = useState(false)
     const [includePaymentLink, setIncludePaymentLink] = useState(false)
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
     const [isCopyingReferral, setIsCopyingReferral] = useState(false)
+    const [isDownloadingPdf, setIsDownloadingPdf] = useState(false)
 
     const fileInputRef = useRef<HTMLInputElement>(null)
     const draftMetaRef = useRef<{ id: string; estimateNumber: string } | null>(null)
+    const handledPaymentIntentRef = useRef(false)
 
     const getOrCreateDraftMeta = () => {
         if (!draftMetaRef.current) {
@@ -127,6 +242,21 @@ export default function NewEstimatePage() {
     const resetDraftMeta = () => {
         draftMetaRef.current = null
     }
+
+    const resetPaymentLinkState = useCallback(() => {
+        setIncludePaymentLink(false)
+        setPaymentLink(null)
+        setPaymentLinkId(null)
+        setPaymentLinkType(null)
+    }, [])
+
+    const redirectToLoginForPaymentLink = useCallback(() => {
+        const params = new URLSearchParams({
+            next: "/new-estimate",
+            intent: "payment-link",
+        })
+        router.push(`/login?${params.toString()}`)
+    }, [router])
 
     const fileToDataUrl = (file: File): Promise<string> => {
         return new Promise((resolve, reject) => {
@@ -151,13 +281,7 @@ export default function NewEstimatePage() {
             try {
                 const data = JSON.parse(duplicateData)
                 resetDraftMeta()
-                setEstimate({
-                    items: data.items || [],
-                    summary_note: data.summary_note || '',
-                    warnings: [],
-                    payment_terms: '',
-                    closing_note: ''
-                })
+                setEstimate(normalizeEstimatePayload(data))
                 setClientName(data.clientName || '')
                 setClientAddress(data.clientAddress || '')
                 if (data.taxRate) setTaxRate(data.taxRate)
@@ -182,13 +306,13 @@ export default function NewEstimatePage() {
             try {
                 const pending = await getUnprocessedAudio()
                 if (pending.length > 0) {
+                    const headers = await withAuthHeaders()
                     toast(`🔄 Processing ${pending.length} saved recording(s)...`, "info")
 
                     for (const audio of pending) {
                         try {
                             const formData = new FormData()
                             formData.append("file", audio.blob, "recording.webm")
-                            const headers = await withAuthHeaders()
 
                             const response = await fetch("/api/transcribe", {
                                 method: "POST",
@@ -232,6 +356,27 @@ export default function NewEstimatePage() {
             window.removeEventListener('offline', handleOffline)
         }
     }, [pendingAudioId])
+
+    useEffect(() => {
+        if (handledPaymentIntentRef.current) return
+        if (typeof window === "undefined") return
+        const intent = new URLSearchParams(window.location.search).get("intent")
+        if (intent !== "payment-link") return
+        handledPaymentIntentRef.current = true
+
+        void (async () => {
+            const headers = await withAuthHeaders()
+            if (!headers.authorization) {
+                toast("🔐 Sign in to continue with payment link setup.", "warning")
+                return
+            }
+
+            toast("✅ Login confirmed. Continue payment link setup.", "success")
+            setIsPaymentModalOpen(true)
+        })()
+
+        router.replace("/new-estimate")
+    }, [router])
 
     const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || [])
@@ -300,7 +445,10 @@ export default function NewEstimatePage() {
             setStep("verifying")
         } catch (error) {
             console.error(error)
-            toast("❌ Transcription failed. Please try again or type manually.", "error")
+            const message = error instanceof Error
+                ? error.message
+                : "Transcription failed. Please try again or type manually."
+            toast(`❌ ${message}`, "error")
             setStep("verifying") // Go to verify anyway so user can type
         }
     }
@@ -355,7 +503,7 @@ export default function NewEstimatePage() {
             }
 
             const data = await response.json()
-            setEstimate(data)
+            setEstimate(normalizeEstimatePayload(data))
             setStep("result")
             toast("✅ Estimate generated successfully!", "success")
         } catch (error: any) {
@@ -468,7 +616,7 @@ export default function NewEstimatePage() {
             total: 0
         }
         const updated = estimate.sections.map(s =>
-            s.id === sectionId ? { ...s, items: [...s.items, newItem] } : s
+            s.id === sectionId ? { ...s, items: [...(s.items || []), newItem] } : s
         )
         setEstimate({ ...estimate, sections: updated })
     }
@@ -477,8 +625,9 @@ export default function NewEstimatePage() {
         if (!estimate || !estimate.sections) return
         const updated = estimate.sections.map(section => {
             if (section.id !== sectionId) return section
-            const newItems = [...section.items]
+            const newItems = [...(section.items || [])]
             const item = { ...newItems[itemIndex] }
+            if (!newItems[itemIndex]) return section
             if (field === "description" || field === "notes" || field === "id") {
                 (item as any)[field] = value as string
             } else if (field === "category") {
@@ -499,50 +648,141 @@ export default function NewEstimatePage() {
         if (!estimate || !estimate.sections) return
         const updated = estimate.sections.map(section => {
             if (section.id !== sectionId) return section
-            return { ...section, items: section.items.filter((_, i) => i !== itemIndex) }
+            return { ...section, items: (section.items || []).filter((_, i) => i !== itemIndex) }
         })
         setEstimate({ ...estimate, sections: updated })
     }
 
-    // Helper: Get all items from both flat items and sections
-    const getAllItemsFromEstimate = (est: Estimate): EstimateItem[] => {
-        const flatItems = est.items || []
-        const sectionItems = (est.sections || []).flatMap(s => s.items)
-        return [...flatItems, ...sectionItems]
-    }
+    const resultItems = useMemo(
+        () => (estimate ? getAllItemsFromEstimate(estimate) : []),
+        [estimate]
+    )
+    const resultSubtotal = useMemo(
+        () => resultItems.reduce((sum, item) => sum + lineTotal(item), 0),
+        [resultItems]
+    )
+    const resultTotal = useMemo(
+        () => resultSubtotal * (1 + taxRate / 100),
+        [resultSubtotal, taxRate]
+    )
+
+    const createEstimatePdfDocument = useCallback(async (
+        options: { includePhotos?: boolean; includeSignature?: boolean } = {}
+    ) => {
+        if (!estimate) {
+            throw new Error("Estimate data is unavailable.")
+        }
+
+        const { includePhotos = false, includeSignature = false } = options
+        const { EstimatePDF } = await import("@/components/estimate-pdf")
+
+        return (
+            <EstimatePDF
+                items={resultItems}
+                total={resultSubtotal}
+                summary={estimate.summary_note}
+                taxRate={taxRate}
+                client={{ name: clientName, address: clientAddress }}
+                business={businessProfile ?? undefined}
+                paymentLink={includePaymentLink && paymentLink ? paymentLink : undefined}
+                signature={includeSignature ? estimate.clientSignature : undefined}
+                signedAt={includeSignature ? estimate.signedAt : undefined}
+                templateUrl={businessProfile?.estimate_template_url}
+                paymentLabel={paymentLinkType === 'deposit' ? 'PAY DEPOSIT' : (paymentLinkType === 'custom' ? 'PAY AMOUNT' : 'PAY ONLINE')}
+                photos={includePhotos ? previewUrls : undefined}
+            />
+        )
+    }, [
+        estimate,
+        resultItems,
+        resultSubtotal,
+        taxRate,
+        clientName,
+        clientAddress,
+        businessProfile,
+        includePaymentLink,
+        paymentLink,
+        paymentLinkType,
+        previewUrls,
+    ])
+
+    const buildLocalEstimatePayload = useCallback(async (status: 'draft' | 'sent') => {
+        if (!estimate) {
+            throw new Error("Estimate data is unavailable.")
+        }
+
+        const allItems = getAllItemsFromEstimate(estimate)
+        const subtotal = allItems.reduce((sum, item) => sum + lineTotal(item), 0)
+        const taxAmount = subtotal * (taxRate / 100)
+        const totalAmount = subtotal + taxAmount
+        const draftMeta = getOrCreateDraftMeta()
+        const attachmentPhotos = images.length > 0 ? await Promise.all(images.map(fileToDataUrl)) : []
+
+        const attachments = {
+            photos: attachmentPhotos,
+            originalTranscript: transcribedText || undefined,
+        }
+
+        return {
+            id: draftMeta.id,
+            estimateNumber: draftMeta.estimateNumber,
+            items: allItems,
+            sections: estimate.sections,
+            summary_note: estimate.summary_note,
+            clientName: clientName || "Walk-in Client",
+            clientAddress: clientAddress || "N/A",
+            taxRate,
+            taxAmount,
+            totalAmount,
+            createdAt: new Date().toISOString(),
+            sentAt: status === "sent" ? new Date().toISOString() : undefined,
+            status,
+            paymentLink: includePaymentLink && paymentLink ? paymentLink : undefined,
+            paymentLinkId: includePaymentLink && paymentLinkId ? paymentLinkId : undefined,
+            paymentLinkType: includePaymentLink && paymentLinkType ? paymentLinkType : undefined,
+            attachments: (attachmentPhotos.length > 0 || transcribedText) ? attachments : undefined,
+            synced: false,
+        }
+    }, [
+        estimate,
+        taxRate,
+        images,
+        transcribedText,
+        clientName,
+        clientAddress,
+        includePaymentLink,
+        paymentLink,
+        paymentLinkId,
+        paymentLinkType,
+    ])
+
+    const persistCurrentEstimateAsSent = useCallback(async () => {
+        const nextEstimate = await buildLocalEstimatePayload("sent")
+        const existing = (await getEstimates()).find((entry) => entry.id === nextEstimate.id)
+
+        if (!existing) {
+            await saveEstimate(nextEstimate)
+            return nextEstimate
+        }
+
+        const sentAt = existing.sentAt || nextEstimate.sentAt || new Date().toISOString()
+        await updateEstimate(existing.id, {
+            ...nextEstimate,
+            createdAt: existing.createdAt,
+            sentAt,
+            status: "sent",
+            synced: false,
+        })
+
+        return { ...existing, ...nextEstimate, createdAt: existing.createdAt, sentAt, status: "sent" as const }
+    }, [buildLocalEstimatePayload])
 
     const handleSave = async () => {
         if (!estimate) return
         setIsSaving(true)
         try {
-            const allItems = getAllItemsFromEstimate(estimate)
-            const subtotal = allItems.reduce((sum, item) => sum + (item.total || item.quantity * item.unit_price), 0)
-            const taxAmount = subtotal * (taxRate / 100)
-            const totalAmount = subtotal + taxAmount
-            const draftMeta = getOrCreateDraftMeta()
-            const attachmentPhotos = images.length > 0 ? await Promise.all(images.map(fileToDataUrl)) : []
-
-            // Build attachments for dispute prevention
-            const attachments = {
-                photos: attachmentPhotos,
-                originalTranscript: transcribedText || undefined
-            }
-
-            const localEstimate = {
-                id: draftMeta.id,
-                estimateNumber: draftMeta.estimateNumber,
-                items: allItems,
-                sections: estimate.sections,  // Include sections
-                summary_note: estimate.summary_note,
-                clientName: clientName || "Walk-in Client",
-                clientAddress: clientAddress || "N/A",
-                taxRate,
-                taxAmount,
-                totalAmount,
-                createdAt: new Date().toISOString(),
-                status: 'draft' as const,
-                attachments: (attachmentPhotos.length > 0 || transcribedText) ? attachments : undefined
-            }
+            const localEstimate = await buildLocalEstimatePayload("draft")
+            const allItems = localEstimate.items || []
             await saveEstimate(localEstimate)
             void trackAnalyticsEvent({
                 event: "draft_saved",
@@ -569,22 +809,10 @@ export default function NewEstimatePage() {
         setIsSharing(true)
         try {
             const allItems = getAllItemsFromEstimate(estimate)
-            const subtotal = allItems.reduce((sum, item) => sum + (item.total || item.quantity * item.unit_price), 0)
+            const subtotal = allItems.reduce((sum, item) => sum + lineTotal(item), 0)
             const total = subtotal * (1 + taxRate / 100)
             const { pdf } = await import("@react-pdf/renderer")
-            const pdfDoc = (
-                <EstimatePDF
-                    items={allItems}
-                    total={subtotal}
-                    summary={estimate.summary_note}
-                    taxRate={taxRate}
-                    client={{ name: clientName, address: clientAddress }}
-                    business={businessProfile ?? undefined}
-                    templateUrl={businessProfile?.estimate_template_url}
-                    paymentLabel={paymentLinkType === 'deposit' ? 'PAY DEPOSIT' : (paymentLinkType === 'custom' ? 'PAY AMOUNT' : 'PAY ONLINE')}
-                    photos={previewUrls}
-                />
-            )
+            const pdfDoc = await createEstimatePdfDocument({ includePhotos: true, includeSignature: true })
             const blob = await pdf(pdfDoc).toBlob()
             const file = new File([blob], "estimate.pdf", { type: "application/pdf" })
             if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -607,6 +835,29 @@ export default function NewEstimatePage() {
             toast("❌ Failed to generate PDF. Please try again.", "error")
         } finally {
             setIsSharing(false)
+        }
+    }
+
+    const handleDownloadPdf = async () => {
+        if (!estimate) return
+        setIsDownloadingPdf(true)
+        try {
+            const { pdf } = await import("@react-pdf/renderer")
+            const pdfDoc = await createEstimatePdfDocument({ includeSignature: true })
+
+            const blob = await pdf(pdfDoc).toBlob()
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement("a")
+            a.href = url
+            a.download = "estimate.pdf"
+            a.click()
+            URL.revokeObjectURL(url)
+            toast("📥 PDF downloaded", "success")
+        } catch (error) {
+            console.error("Download PDF failed:", error)
+            toast("❌ Failed to create PDF.", "error")
+        } finally {
+            setIsDownloadingPdf(false)
         }
     }
 
@@ -636,30 +887,28 @@ export default function NewEstimatePage() {
     }
 
     const handleExcelImport = useCallback((importedItems: EstimateItem[]) => {
+        const normalizedImportedItems = (importedItems || []).map((item, index) => normalizeEstimateItem(item, index))
+
         if (!estimate) {
             // Create new estimate with imported items
             setEstimate({
-                items: importedItems,
-                summary_note: "Imported from Excel",
+                items: normalizedImportedItems,
+                summary_note: "Imported from CSV",
             })
             setStep("verifying")
         } else {
             // Merge with existing items
             const updatedItems = [
-                ...estimate.items,
-                ...importedItems.map((item, idx) => ({
+                ...(estimate.items || []),
+                ...normalizedImportedItems.map((item, idx) => ({
                     ...item,
-                    itemNumber: estimate.items.length + idx + 1
+                    itemNumber: (estimate.items?.length || 0) + idx + 1
                 }))
             ]
-            setEstimate({ ...estimate, items: updatedItems })
+            setEstimate(normalizeEstimatePayload({ ...estimate, items: updatedItems }))
         }
-        toast(`✅ Imported ${importedItems.length} items from Excel`, "success")
+        toast(`✅ Imported ${normalizedImportedItems.length} items from CSV`, "success")
     }, [estimate, setEstimate, setStep])
-
-    const resultItems = estimate ? getAllItemsFromEstimate(estimate) : []
-    const resultSubtotal = resultItems.reduce((sum, item) => sum + (item.total || item.quantity * item.unit_price), 0)
-    const resultTotal = resultSubtotal * (1 + taxRate / 100)
 
     return (
         <div className="max-w-md mx-auto space-y-6 pb-20">
@@ -927,7 +1176,7 @@ export default function NewEstimatePage() {
                             </div>
 
                             <div className="space-y-4">
-                                {estimate.items.map((item, index) => {
+                                {(estimate.items || []).map((item, index) => {
                                     // Use the new category field directly (with fallback for old data)
                                     const currentCategory = item.category || 'PARTS'
                                     const currentUnit = item.unit || 'ea'
@@ -1006,7 +1255,7 @@ export default function NewEstimatePage() {
                                                 <div className="w-24 text-right">
                                                     <label className="text-[10px] text-muted-foreground">Total</label>
                                                     <p className="font-bold py-1">
-                                                        ${(item.total || item.quantity * item.unit_price).toFixed(2)}
+                                                        ${lineTotal(item).toFixed(2)}
                                                     </p>
                                                 </div>
                                             </div>
@@ -1015,7 +1264,7 @@ export default function NewEstimatePage() {
                                 })}
                             </div>
 
-                            {/* Action Buttons: Add Item / Add Section / Upload Excel */}
+                            {/* Action Buttons: Add Item / Add Section / Upload CSV */}
                             <div className="flex gap-2 flex-wrap">
                                 <Button
                                     variant="outline"
@@ -1039,7 +1288,7 @@ export default function NewEstimatePage() {
                                     onClick={() => setIsExcelModalOpen(true)}
                                 >
                                     <FileSpreadsheet className="h-4 w-4 mr-2" />
-                                    📊 Excel
+                                    📊 CSV
                                 </Button>
                             </div>
 
@@ -1047,7 +1296,8 @@ export default function NewEstimatePage() {
                             {estimate.sections && estimate.sections.length > 0 && (
                                 <div className="space-y-4 mt-4">
                                     {estimate.sections.map((section) => {
-                                        const sectionSubtotal = section.items.reduce((sum, item) => sum + (item.total || item.quantity * item.unit_price), 0)
+                                        const sectionItems = section.items || []
+                                        const sectionSubtotal = sectionItems.reduce((sum, item) => sum + lineTotal(item), 0)
                                         return (
                                             <div key={section.id} className="border-2 border-primary/30 rounded-lg p-3 bg-primary/5">
                                                 {/* Section Header */}
@@ -1073,7 +1323,7 @@ export default function NewEstimatePage() {
 
                                                 {/* Section Items */}
                                                 <div className="space-y-2">
-                                                    {section.items.map((item, itemIdx) => {
+                                                    {sectionItems.map((item, itemIdx) => {
                                                         const currentCategory = item.category || 'PARTS'
                                                         const currentUnit = item.unit || 'ea'
                                                         return (
@@ -1133,7 +1383,7 @@ export default function NewEstimatePage() {
                                                                         placeholder="$"
                                                                     />
                                                                     <span className="text-sm font-semibold w-20 text-right">
-                                                                        ${(item.total || item.quantity * item.unit_price).toFixed(2)}
+                                                                        ${lineTotal(item).toFixed(2)}
                                                                     </span>
                                                                 </div>
                                                             </div>
@@ -1166,7 +1416,7 @@ export default function NewEstimatePage() {
                             <div className="space-y-2 pt-4 border-t">
                                 <div className="flex justify-between items-center text-sm">
                                     <span className="text-muted-foreground">Subtotal</span>
-                                    <span>${getAllItemsFromEstimate(estimate).reduce((sum, item) => sum + (item.total || item.quantity * item.unit_price), 0).toFixed(2)}</span>
+                                    <span>${getAllItemsFromEstimate(estimate).reduce((sum, item) => sum + lineTotal(item), 0).toFixed(2)}</span>
                                 </div>
                                 <div className="flex justify-between items-center text-sm">
                                     <div className="flex items-center gap-2">
@@ -1217,40 +1467,25 @@ export default function NewEstimatePage() {
                                 >
                                     👁️ Preview
                                 </Button>
-                                <PDFDownloadLink
-                                    document={
-                                        <EstimatePDF
-                                            items={resultItems}
-                                            total={resultSubtotal}
-                                            summary={estimate.summary_note}
-                                            taxRate={taxRate}
-                                            client={{ name: clientName, address: clientAddress }}
-                                            business={businessProfile ?? undefined}
-                                            paymentLink={includePaymentLink && paymentLink ? paymentLink : undefined}
-                                            signature={estimate?.clientSignature}
-                                            signedAt={estimate?.signedAt}
-                                            templateUrl={businessProfile?.estimate_template_url}
-                                            paymentLabel={paymentLinkType === 'deposit' ? 'PAY DEPOSIT' : (paymentLinkType === 'custom' ? 'PAY AMOUNT' : 'PAY ONLINE')}
-                                        />
-                                    }
-                                    fileName="estimate.pdf"
+                                <Button
+                                    variant="outline"
+                                    size="lg"
+                                    className="w-full h-12"
+                                    onClick={handleDownloadPdf}
+                                    disabled={isDownloadingPdf}
                                 >
-                                    {({ loading }) => (
-                                        <Button variant="outline" disabled={loading} size="lg" className="w-full h-12">
-                                            {loading ? (
-                                                <>
-                                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                                    Creating...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Download className="h-4 w-4 mr-2" />
-                                                    Download PDF
-                                                </>
-                                            )}
-                                        </Button>
+                                    {isDownloadingPdf ? (
+                                        <>
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                            Creating...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Download className="h-4 w-4 mr-2" />
+                                            Download PDF
+                                        </>
                                     )}
-                                </PDFDownloadLink>
+                                </Button>
                                 <Button
                                     variant={estimate.clientSignature ? "default" : "secondary"}
                                     size="lg"
@@ -1301,17 +1536,22 @@ export default function NewEstimatePage() {
                                     type="button"
                                     role="switch"
                                     aria-checked={includePaymentLink}
-                                    onClick={() => {
+                                    onClick={async () => {
                                         if (!includePaymentLink) {
                                             if (!navigator.onLine) {
                                                 toast('📴 Payment links require internet connection.', 'warning')
                                                 return
                                             }
+
+                                            const headers = await withAuthHeaders()
+                                            if (!headers.authorization) {
+                                                toast("🔐 Sign in first to generate a card payment link.", "warning")
+                                                redirectToLoginForPaymentLink()
+                                                return
+                                            }
                                             setIsPaymentModalOpen(true)
                                         } else {
-                                            setIncludePaymentLink(false)
-                                            setPaymentLink(null)
-                                            setPaymentLinkType(null)
+                                            resetPaymentLinkState()
                                         }
                                     }}
                                     disabled={isGeneratingPaymentLink || isOffline}
@@ -1349,11 +1589,35 @@ export default function NewEstimatePage() {
                                                     estimateId: getOrCreateDraftMeta().id,
                                                 })
                                             })
-                                            const data = await response.json()
+                                            const data = await response.json().catch(() => ({}))
 
-                                            if (!response.ok) throw new Error(data.error || "Failed to create link")
+                                            if (!response.ok) {
+                                                const errorMessage =
+                                                    typeof data?.error === "string"
+                                                        ? data.error
+                                                        : typeof data?.error?.message === "string"
+                                                            ? data.error.message
+                                                            : "Failed to create link"
+
+                                                if (response.status === 401) {
+                                                    toast("🔐 Session expired. Please sign in again.", "warning")
+                                                    resetPaymentLinkState()
+                                                    redirectToLoginForPaymentLink()
+                                                    return
+                                                }
+
+                                                if (response.status === 403) {
+                                                    if (data?.code === "STRIPE_CONNECT_REQUIRED" || data?.code === "STRIPE_CONNECT_INCOMPLETE") {
+                                                        throw new Error("Connect Stripe in Profile first, then generate a payment link.")
+                                                    }
+                                                    throw new Error(errorMessage)
+                                                }
+
+                                                throw new Error(errorMessage)
+                                            }
 
                                             setPaymentLink(data.url)
+                                            setPaymentLinkId(data.id)
                                             const draftMeta = getOrCreateDraftMeta()
                                             void trackAnalyticsEvent({
                                                 event: "payment_link_created",
@@ -1368,8 +1632,9 @@ export default function NewEstimatePage() {
                                             toast("✅ Payment link generated", "success")
                                         } catch (error) {
                                             console.error(error)
-                                            toast("❌ Failed to generate payment link", "error")
-                                            setIncludePaymentLink(false)
+                                            const message = error instanceof Error ? error.message : "Failed to generate payment link"
+                                            toast(`❌ ${message}`, "error")
+                                            resetPaymentLinkState()
                                         } finally {
                                             setIsGeneratingPaymentLink(false)
                                         }
@@ -1420,19 +1685,7 @@ export default function NewEstimatePage() {
                             <PDFPreviewModal
                                 open={isPreviewOpen}
                                 onClose={() => setIsPreviewOpen(false)}
-                                document={
-                                    <EstimatePDF
-                                        items={resultItems}
-                                        total={resultSubtotal}
-                                        summary={estimate.summary_note}
-                                        taxRate={taxRate}
-                                        client={{ name: clientName, address: clientAddress }}
-                                        business={businessProfile ?? undefined}
-                                        paymentLink={includePaymentLink && paymentLink ? paymentLink : undefined}
-                                        templateUrl={businessProfile?.estimate_template_url}
-                                        paymentLabel={paymentLinkType === 'deposit' ? 'PAY DEPOSIT' : (paymentLinkType === 'custom' ? 'PAY AMOUNT' : 'PAY ONLINE')}
-                                    />
-                                }
+                                createDocument={() => createEstimatePdfDocument({ includeSignature: true })}
                             />
 
                             <EmailModal
@@ -1443,19 +1696,7 @@ export default function NewEstimatePage() {
                                     try {
                                         // Generate PDF as base64
                                         const { pdf } = await import("@react-pdf/renderer")
-                                        const pdfDoc = (
-                                            <EstimatePDF
-                                                items={resultItems}
-                                                total={resultSubtotal}
-                                                summary={estimate.summary_note}
-                                                taxRate={taxRate}
-                                                client={{ name: clientName, address: clientAddress }}
-                                                business={businessProfile ?? undefined}
-                                                paymentLink={includePaymentLink && paymentLink ? paymentLink : undefined}
-                                                templateUrl={businessProfile?.estimate_template_url}
-                                                paymentLabel={paymentLinkType === 'deposit' ? 'PAY DEPOSIT' : (paymentLinkType === 'custom' ? 'PAY AMOUNT' : 'PAY ONLINE')}
-                                            />
-                                        )
+                                        const pdfDoc = await createEstimatePdfDocument({ includeSignature: true })
                                         const blob = await pdf(pdfDoc).toBlob()
 
                                         // Convert blob to base64
@@ -1513,7 +1754,7 @@ export default function NewEstimatePage() {
                                                     hasPaymentLink: includePaymentLink && Boolean(paymentLink),
                                                 },
                                             })
-                                            await updateEstimateStatus(draftMeta.id, "sent")
+                                            await persistCurrentEstimateAsSent()
                                             toast('✅ Email sent with PDF attached!', 'success')
                                         }
                                     } catch (error: any) {

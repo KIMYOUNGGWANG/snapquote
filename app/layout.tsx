@@ -7,6 +7,8 @@ import { SyncManager } from "@/components/sync-manager";
 import { OfflineBanner } from "@/components/offline-banner";
 import { InstallPrompt } from "@/components/install-prompt";
 import { FeedbackModal } from "@/components/feedback-modal";
+import { ServiceWorkerRegister } from "@/components/service-worker-register";
+import { Analytics } from "@vercel/analytics/next";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
@@ -42,6 +44,7 @@ export default function RootLayout({
           enableSystem={false}
           disableTransitionOnChange
         >
+          <ServiceWorkerRegister />
           <InstallPrompt />
           <OfflineBanner />
           <main className="w-full min-h-screen relative">
@@ -51,6 +54,7 @@ export default function RootLayout({
           <SyncManager />
           <FeedbackModal />
           <Toaster />
+          <Analytics />
         </ThemeProvider>
       </body>
     </html>

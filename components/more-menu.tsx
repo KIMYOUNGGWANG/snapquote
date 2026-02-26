@@ -2,17 +2,18 @@
 
 import Link from "next/link"
 import { useTheme } from "next-themes"
-import { History, Users, Settings, Moon, Sun, LogOut, X, FileText, LifeBuoy } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { usePathname } from "next/navigation"
+import { History, Users, Settings, Moon, Sun, LogOut, FileText, LifeBuoy, LogIn, Loader2 } from "lucide-react"
 import {
     Dialog,
     DialogContent,
     DialogHeader,
     DialogTitle,
-    DialogTrigger,
-    DialogClose
+    DialogTrigger
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { supabase } from "@/lib/supabase"
 
 interface MoreMenuProps {
     children: React.ReactNode
@@ -20,6 +21,9 @@ interface MoreMenuProps {
 
 export function MoreMenu({ children }: MoreMenuProps) {
     const { theme, setTheme } = useTheme()
+    const pathname = usePathname()
+    const [authLoading, setAuthLoading] = useState(true)
+    const [userEmail, setUserEmail] = useState<string | null>(null)
 
     const menuItems = [
         { href: "/clients", label: "Clients", icon: Users, description: "Manage your customer list" },
@@ -27,6 +31,37 @@ export function MoreMenu({ children }: MoreMenuProps) {
         { href: "/drafts", label: "Drafts", icon: FileText, description: "WIP estimates" },
         { href: "/profile", label: "Settings", icon: Settings, description: "App preferences" },
     ]
+
+    const loginHref = useMemo(() => {
+        const params = new URLSearchParams({ next: pathname || "/" })
+        return `/login?${params.toString()}`
+    }, [pathname])
+
+    useEffect(() => {
+        let active = true
+
+        void supabase.auth.getSession().then(({ data }) => {
+            if (!active) return
+            setUserEmail(data.session?.user?.email ?? null)
+            setAuthLoading(false)
+        })
+
+        const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (!active) return
+            setUserEmail(session?.user?.email ?? null)
+            setAuthLoading(false)
+        })
+
+        return () => {
+            active = false
+            data.subscription.unsubscribe()
+        }
+    }, [])
+
+    const handleSignOut = async () => {
+        await supabase.auth.signOut()
+        window.location.href = "/"
+    }
 
     const handleRestartTutorial = () => {
         // Clear onboarding flag to trigger modal on reload
@@ -43,10 +78,44 @@ export function MoreMenu({ children }: MoreMenuProps) {
                 <div className="p-4 pb-0">
                     <DialogHeader className="flex flex-row items-center justify-between mb-4">
                         <DialogTitle className="text-lg font-semibold">Menu</DialogTitle>
-                        <DialogClose className="opacity-70 hover:opacity-100">
-                            <X className="h-5 w-5" />
-                        </DialogClose>
+
                     </DialogHeader>
+
+                    <div className="rounded-xl border bg-muted/30 p-3 mb-3">
+                        {authLoading ? (
+                            <p className="text-xs text-muted-foreground flex items-center gap-2">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                Checking account...
+                            </p>
+                        ) : userEmail ? (
+                            <div className="space-y-2">
+                                <p className="text-xs text-muted-foreground">
+                                    Signed in as <span className="font-medium text-foreground">{userEmail}</span>
+                                </p>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="w-full justify-start"
+                                    onClick={handleSignOut}
+                                >
+                                    <LogOut className="h-4 w-4 mr-2" />
+                                    Sign Out
+                                </Button>
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                <p className="text-xs text-muted-foreground">
+                                    Not signed in yet. First login email automatically creates your account.
+                                </p>
+                                <Button asChild className="w-full justify-start">
+                                    <Link href={loginHref}>
+                                        <LogIn className="h-4 w-4 mr-2" />
+                                        Sign In / Sign Up
+                                    </Link>
+                                </Button>
+                            </div>
+                        )}
+                    </div>
 
                     <div className="grid gap-2">
                         {menuItems.map((item) => (

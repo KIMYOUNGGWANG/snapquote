@@ -1,0 +1,54 @@
+{
+  "app/new-estimate/page.tsx -> @/components/email-modal": {
+    "id": "app/new-estimate/page.tsx -> @/components/email-modal",
+    "files": [
+      "static/chunks/_app-pages-browser_components_email-modal_tsx.js"
+    ]
+  },
+  "app/new-estimate/page.tsx -> @/components/estimate-pdf": {
+    "id": "app/new-estimate/page.tsx -> @/components/estimate-pdf",
+    "files": [
+      "static/chunks/_app-pages-browser_components_estimate-pdf_tsx.js"
+    ]
+  },
+  "app/new-estimate/page.tsx -> @/components/excel-import-modal": {
+    "id": "app/new-estimate/page.tsx -> @/components/excel-import-modal",
+    "files": [
+      "static/chunks/_app-pages-browser_components_excel-import-modal_tsx.js"
+    ]
+  },
+  "app/new-estimate/page.tsx -> @/components/payment-option-modal": {
+    "id": "app/new-estimate/page.tsx -> @/components/payment-option-modal",
+    "files": [
+      "static/chunks/_app-pages-browser_components_payment-option-modal_tsx.js"
+    ]
+  },
+  "app/new-estimate/page.tsx -> @/components/pdf-preview-modal": {
+    "id": "app/new-estimate/page.tsx -> @/components/pdf-preview-modal",
+    "files": [
+      "static/chunks/_app-pages-browser_components_pdf-preview-modal_tsx.js"
+    ]
+  },
+  "app/new-estimate/page.tsx -> @/components/signature-pad": {
+    "id": "app/new-estimate/page.tsx -> @/components/signature-pad",
+    "files": [
+      "static/chunks/_app-pages-browser_components_signature-pad_tsx.js"
+    ]
+  },
+  "app/new-estimate/page.tsx -> @react-pdf/renderer": {
+    "id": "app/new-estimate/page.tsx -> @react-pdf/renderer",
+    "files": [
+      "static/chunks/_app-pages-browser_node_modules_react-pdf_renderer_lib_react-pdf_browser_js.js"
+    ]
+  },
+  "components/audio-recorder.tsx -> @/components/toast": {
+    "id": "components/audio-recorder.tsx -> @/components/toast",
+    "files": []
+  },
+  "components/pdf-preview-modal.tsx -> @react-pdf/renderer": {
+    "id": "components/pdf-preview-modal.tsx -> @react-pdf/renderer",
+    "files": [
+      "static/chunks/_app-pages-browser_node_modules_react-pdf_renderer_lib_react-pdf_browser_js.js"
+    ]
+  }
+}

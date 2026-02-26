@@ -38,6 +38,9 @@
   ],
   "exclude": [
     "node_modules",
-    "supabase"
+    "supabase",
+    "codex",
+    ".agent",
+    ".agent_backup_*"
   ]
 }

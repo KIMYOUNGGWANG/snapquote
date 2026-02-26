@@ -49,6 +49,8 @@ export function FunnelMetricsCard() {
                     send_rate: data.send_rate || 0,
                     payment_rate: data.payment_rate || 0,
                 })
+            } catch (error) {
+                console.error("Failed to load funnel metrics:", error)
             } finally {
                 setLoading(false)
             }

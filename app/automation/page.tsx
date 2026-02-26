@@ -5,11 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useAuthGuard } from '@/lib/use-auth-guard'
+import { Loader2 } from 'lucide-react'
 
 export default function AutomationPage() {
+    const { authResolved, isAuthenticated } = useAuthGuard('/automation')
     const [logs, setLogs] = useState<any[]>([])
 
     useEffect(() => {
+        if (!authResolved || !isAuthenticated) return
+
         const fetchLogs = async () => {
             const { data } = await supabase
                 .from('job_queue')
@@ -20,7 +25,15 @@ export default function AutomationPage() {
             if (data) setLogs(data)
         }
         fetchLogs()
-    }, [])
+    }, [authResolved, isAuthenticated])
+
+    if (!authResolved || !isAuthenticated) {
+        return (
+            <div className="flex min-h-[50vh] items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+        )
+    }
 
     return (
         <div className="max-w-4xl mx-auto p-6 space-y-10">
@@ -50,8 +63,8 @@ export default function AutomationPage() {
                                     logs.map(log => (
                                         <div key={log.id} className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0">
                                             <div className="space-y-1">
-                                                <p className="text-sm font-medium">{log.task_type.replace('_', ' ')}</p>
-                                                <p className="text-xs text-muted-foreground">{new Date(log.created_at).toLocaleString()}</p>
+                                                <p className="text-sm font-medium">{(log.task_type || 'Unknown').replace('_', ' ')}</p>
+                                                <p className="text-xs text-muted-foreground">{log.created_at ? new Date(log.created_at).toLocaleString() : ''}</p>
                                             </div>
                                             <Badge variant={log.status === 'completed' ? 'default' : 'outline'}>
                                                 {log.status}

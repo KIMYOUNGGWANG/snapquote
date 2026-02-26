@@ -5,17 +5,19 @@ import { enforceUsageQuota, recordUsage } from "@/lib/server/usage-quota";
 
 export async function POST(req: Request) {
     try {
-        const quota = await enforceUsageQuota(req, "transcribe", { requireAuth: true })
+        const quota = await enforceUsageQuota(req, "transcribe", { requireAuth: false })
         if (!quota.ok) {
+            const status = quota.status || 402
+            const isQuotaLimit = status === 402
+
             return NextResponse.json(
                 {
-                    error: quota.error || "Free plan limit reached",
-                    code: "FREE_PLAN_LIMIT_REACHED",
+                    error: quota.error || (isQuotaLimit ? "Free plan limit reached" : "Request rejected"),
+                    code: isQuotaLimit ? "FREE_PLAN_LIMIT_REACHED" : status === 401 ? "UNAUTHORIZED" : "USAGE_CONTEXT_ERROR",
                     metric: "transcribe",
-                    usage: quota.used,
-                    limit: quota.limit,
+                    ...(isQuotaLimit ? { usage: quota.used, limit: quota.limit } : {}),
                 },
-                { status: quota.status || 402 }
+                { status }
             )
         }
 
