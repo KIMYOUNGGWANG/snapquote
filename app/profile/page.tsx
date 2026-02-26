@@ -611,7 +611,7 @@ export default function ProfilePage() {
                             {!stripeConnectStatus?.connected && (
                                 <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
                                     <p className="text-xs text-blue-200 leading-relaxed text-center">
-                                        💡 SnapQuote에서 신용카드/Apple Pay로 바로 결제 대금을 받으시려면, 안전한 파트너사인 Stripe에 은행 계좌를 1회만 연결해 주세요. (소요 시간: 3분)
+                                        💡 Connect your bank account with Stripe, our secure payment partner, to start receiving Credit Card and Apple Pay payments directly through SnapQuote. (Takes ~3 minutes)
                                     </p>
                                 </div>
                             )}
