@@ -184,7 +184,7 @@ export default function LandingPage() {
                             </div>
 
                             <p className="text-xs text-gray-500 mt-4">
-                                ✓ No credit card required &nbsp;·&nbsp; ✓ Works offline &nbsp;·&nbsp; ✓ 3 free estimates
+                                ✓ No credit card required &nbsp;·&nbsp; ✓ Works offline &nbsp;·&nbsp; ✓ 10 free estimates
                             </p>
                         </div>
 
@@ -470,7 +470,7 @@ export default function LandingPage() {
                             <ul className="space-y-3 text-sm text-gray-300">
                                 <li className="flex items-center gap-2">
                                     <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    3 free estimates
+                                    10 free estimates
                                 </li>
                                 <li className="flex items-center gap-2">
                                     <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
@@ -641,7 +641,7 @@ export default function LandingPage() {
                         <span className="bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">30 seconds, not 30 minutes.</span>
                     </h2>
                     <p className="text-lg text-gray-400 mb-10 max-w-2xl mx-auto">
-                        Join thousands of contractors who stopped taking work home. Your first 3 estimates are free.
+                        Join thousands of contractors who stopped taking work home. Your first 10 estimates are free.
                     </p>
                     <Link href="/new-estimate" className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-10 py-5 rounded-2xl text-lg font-semibold transition-all hover:shadow-2xl hover:shadow-blue-500/30 hover:-translate-y-1">
                         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">

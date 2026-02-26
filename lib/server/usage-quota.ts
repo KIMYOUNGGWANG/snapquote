@@ -62,9 +62,9 @@ export interface UsageRecordInput {
 
 const PLAN_LIMITS: Record<PlanTier, Record<UsageMetric, number>> = {
     free: {
-        generate: 3,
-        transcribe: 5,
-        send_email: 3,
+        generate: 10,
+        transcribe: 15,
+        send_email: 10,
     },
     starter: {
         generate: 80,
