@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, Sparkles, ArrowRight } from "lucide-react"
 import {
@@ -17,6 +17,7 @@ import {
     type PricingOfferResponse,
 } from "@/lib/pricing"
 import { toast } from "@/components/toast"
+import { supabase } from "@/lib/supabase"
 
 const PLAN_OPTIONS: Array<{
     tier: BillingPaidPlanTier
@@ -24,25 +25,25 @@ const PLAN_OPTIONS: Array<{
     priceLabel: string
     includes: string[]
 }> = [
-    {
-        tier: "starter",
-        label: "Starter",
-        priceLabel: "CAD $29/mo",
-        includes: ["80 estimates/mo", "60 transcription minutes", "60 emails/mo"],
-    },
-    {
-        tier: "pro",
-        label: "Pro",
-        priceLabel: "CAD $59/mo",
-        includes: ["250 estimates/mo", "180 transcription minutes", "200 emails/mo"],
-    },
-    {
-        tier: "team",
-        label: "Team",
-        priceLabel: "CAD $129/mo",
-        includes: ["800 estimates/mo", "Team workflows", "Automation included"],
-    },
-]
+        {
+            tier: "starter",
+            label: "Starter",
+            priceLabel: "CAD $29/mo",
+            includes: ["80 estimates/mo", "60 transcription minutes", "60 emails/mo"],
+        },
+        {
+            tier: "pro",
+            label: "Pro",
+            priceLabel: "CAD $59/mo",
+            includes: ["250 estimates/mo", "180 transcription minutes", "200 emails/mo"],
+        },
+        {
+            tier: "team",
+            label: "Team",
+            priceLabel: "CAD $129/mo",
+            includes: ["800 estimates/mo", "Team workflows", "Automation included"],
+        },
+    ]
 
 export default function PricingPage() {
     const router = useRouter()
@@ -52,6 +53,7 @@ export default function PricingPage() {
     const [checkoutLoading, setCheckoutLoading] = useState(false)
     const [portalLoading, setPortalLoading] = useState(false)
     const [selectedPlanTier, setSelectedPlanTier] = useState<BillingPaidPlanTier>("starter")
+    const [isAuthed, setIsAuthed] = useState(false)
 
     useEffect(() => {
         let cancelled = false
@@ -65,13 +67,23 @@ export default function PricingPage() {
             if (cancelled) return
             setOffer(offerData)
             setSubscription(subscriptionData)
+
+            const { data: authData } = await supabase.auth.getSession()
+            if (cancelled) return
+            setIsAuthed(Boolean(authData.session?.user))
+
             setLoading(false)
         }
 
         void load()
 
+        const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+            setIsAuthed(Boolean(session?.user))
+        })
+
         return () => {
             cancelled = true
+            authListener.subscription.unsubscribe()
         }
     }, [])
 
@@ -117,6 +129,13 @@ export default function PricingPage() {
     }
 
     const handleUpgradeClick = async () => {
+        if (!isAuthed) {
+            toast("Please log in to start your subscription.", "info")
+            const params = new URLSearchParams({ next: "/pricing" })
+            router.push(`/login?${params.toString()}`)
+            return
+        }
+
         setCheckoutLoading(true)
         try {
             await trackPricingEvent({
@@ -148,7 +167,7 @@ export default function PricingPage() {
         }
     }
 
-    if (loading && !offer) {
+    if (loading && !offer && !isAuthed) {
         return (
             <div className="space-y-4">
                 <Card>
@@ -161,25 +180,7 @@ export default function PricingPage() {
         )
     }
 
-    if (!offer) {
-        return (
-            <div className="space-y-4">
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="text-base">Pricing</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                        <p className="text-sm text-muted-foreground">
-                            Log in to see your current plan and subscription options.
-                        </p>
-                        <Link href="/login" className="block">
-                            <Button className="w-full">Log in</Button>
-                        </Link>
-                    </CardContent>
-                </Card>
-            </div>
-        )
-    }
+    // Removed the early return that blocked the UI when!offer was true.
 
     return (
         <div className="space-y-4">
@@ -247,17 +248,19 @@ export default function PricingPage() {
                                 ? "Opening checkout..."
                                 : isSubscribed
                                     ? "Subscription already active"
-                                    : `Upgrade to ${selectedPlan.label}`}
+                                    : !isAuthed ? "Log in to Subscribe" : `Upgrade to ${selectedPlan.label}`}
                             {!isSubscribed && <ArrowRight className="h-4 w-4" />}
                         </Button>
-                        <Button
-                            variant="outline"
-                            onClick={handleManageBillingClick}
-                            disabled={portalLoading || !subscription?.customerId}
-                            className="w-full"
-                        >
-                            {portalLoading ? "Opening portal..." : "Manage billing"}
-                        </Button>
+                        {isAuthed && (
+                            <Button
+                                variant="outline"
+                                onClick={handleManageBillingClick}
+                                disabled={portalLoading || !subscription?.customerId}
+                                className="w-full"
+                            >
+                                {portalLoading ? "Opening portal..." : "Manage billing"}
+                            </Button>
+                        )}
                         <Button variant="outline" onClick={handleJoinWaitlist} className="w-full">
                             Join waitlist
                         </Button>
