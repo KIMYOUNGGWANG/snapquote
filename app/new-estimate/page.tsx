@@ -1607,9 +1607,6 @@ export default function NewEstimatePage() {
                                                 }
 
                                                 if (response.status === 403) {
-                                                    if (data?.code === "STRIPE_CONNECT_REQUIRED" || data?.code === "STRIPE_CONNECT_INCOMPLETE") {
-                                                        throw new Error("Connect Stripe in Profile first, then generate a payment link.")
-                                                    }
                                                     throw new Error(errorMessage)
                                                 }
 

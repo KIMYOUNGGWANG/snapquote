@@ -135,9 +135,6 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
                 }
 
                 if (response.status === 403) {
-                    if (error?.code === "STRIPE_CONNECT_REQUIRED" || error?.code === "STRIPE_CONNECT_INCOMPLETE") {
-                        throw new Error("Connect Stripe in Profile first, then generate a payment link.")
-                    }
                     throw new Error(errorMessage)
                 }
 
