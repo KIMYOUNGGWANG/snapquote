@@ -128,7 +128,17 @@ export function UsagePlanCard() {
                     <>
                         <div className="flex items-center justify-between text-sm">
                             <span className="text-muted-foreground">Current Plan</span>
-                            <span className="font-semibold uppercase">{snapshot.planTier}</span>
+                            <div className="flex items-center gap-2">
+                                <span className="font-semibold uppercase">{snapshot.planTier}</span>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-6 px-2 text-xs"
+                                    onClick={() => router.push("/pricing")}
+                                >
+                                    Upgrade
+                                </Button>
+                            </div>
                         </div>
 
                         <div className="space-y-3">

@@ -4,7 +4,7 @@ import Link from "next/link"
 import { useTheme } from "next-themes"
 import { useEffect, useMemo, useState } from "react"
 import { usePathname } from "next/navigation"
-import { History, Users, Settings, Moon, Sun, LogOut, FileText, LifeBuoy, LogIn, Loader2 } from "lucide-react"
+import { History, Users, Settings, Moon, Sun, LogOut, FileText, LifeBuoy, LogIn, Loader2, Sparkles } from "lucide-react"
 import {
     Dialog,
     DialogContent,
@@ -29,6 +29,7 @@ export function MoreMenu({ children }: MoreMenuProps) {
         { href: "/clients", label: "Clients", icon: Users, description: "Manage your customer list" },
         { href: "/history", label: "History", icon: History, description: "View past estimates" },
         { href: "/drafts", label: "Drafts", icon: FileText, description: "WIP estimates" },
+        { href: "/pricing", label: "Upgrade / Billing", icon: Sparkles, description: "Manage your subscription" },
         { href: "/profile", label: "Settings", icon: Settings, description: "App preferences" },
     ]
 
