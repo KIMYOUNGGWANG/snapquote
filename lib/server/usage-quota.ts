@@ -62,9 +62,9 @@ export interface UsageRecordInput {
 
 const PLAN_LIMITS: Record<PlanTier, Record<UsageMetric, number>> = {
     free: {
-        generate: 50,
-        transcribe: 80,
-        send_email: 40,
+        generate: 3,
+        transcribe: 5,
+        send_email: 3,
     },
     starter: {
         generate: 80,
@@ -416,7 +416,7 @@ export async function getUsageSnapshot(req: Request): Promise<
                 total: number
             }
         }
-      }
+    }
     | { ok: false; status: number; error: string }
 > {
     const resolved = await resolveUsageContext(req, { requireAuth: true })
