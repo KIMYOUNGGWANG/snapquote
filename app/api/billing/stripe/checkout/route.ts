@@ -62,12 +62,16 @@ export async function POST(req: Request) {
     }
 
     const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim()
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim()
+    let appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim()
     if (!stripeSecretKey || !appUrl) {
         return NextResponse.json(
             { error: { message: "Billing is not configured", code: 500 } },
             { status: 500 }
         )
+    }
+
+    if (!appUrl.startsWith("http://") && !appUrl.startsWith("https://")) {
+        appUrl = `https://${appUrl}`
     }
 
     const supabase = createServiceSupabaseClient()

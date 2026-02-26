@@ -113,9 +113,9 @@ $$;
 -- Deterministic assignment helper (prevents clients from selecting their own variants).
 create or replace function public.get_or_create_pricing_assignment(experiment_name text)
 returns table (
-  experiment_id uuid,
-  variant text,
-  created boolean
+  out_experiment_id uuid,
+  out_variant text,
+  out_created boolean
 )
 language plpgsql
 security definer
@@ -158,9 +158,9 @@ begin
   limit 1;
 
   if v_existing_variant is not null then
-    experiment_id := v_experiment_id;
-    variant := v_existing_variant;
-    created := false;
+    out_experiment_id := v_experiment_id;
+    out_variant := v_existing_variant;
+    out_created := false;
     return next;
     return;
   end if;
@@ -195,9 +195,9 @@ begin
   values (v_experiment_id, v_user_id, v_variant)
   on conflict (experiment_id, user_id) do nothing;
 
-  experiment_id := v_experiment_id;
-  variant := v_variant;
-  created := true;
+  out_experiment_id := v_experiment_id;
+  out_variant := v_variant;
+  out_created := true;
   return next;
 end;
 $$;
