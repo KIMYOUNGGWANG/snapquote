@@ -45,6 +45,7 @@ snapquote_plan_v2.md
 prompt_v5_lite_analysis.md
 
 *.md
+!GEMINI.md
 
 .env
 .env.local
