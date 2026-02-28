@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "test": "node --loader ./tests/loader.mjs --test tests/api/*.test.mjs",
     "test:watch": "node --loader ./tests/loader.mjs --test --watch tests/api/*.test.mjs"
   },
@@ -24,7 +24,7 @@
     "dotenv": "^17.3.1",
     "idb": "^8.0.3",
     "lucide-react": "^0.555.0",
-    "next": "^14.2.35",
+    "next": "^16.1.6",
     "next-themes": "^0.4.6",
     "openai": "^6.10.0",
     "pg": "^8.18.0",
@@ -41,10 +41,25 @@
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10.4.19",
-    "eslint": "^8",
-    "eslint-config-next": "^14.2.35",
+    "eslint": "^9.39.3",
+    "eslint-config-next": "^16.1.6",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.3",
     "typescript": "^5"
+  },
+  "overrides": {
+    "@next/eslint-plugin-next": {
+      "glob": "^10.4.6",
+      "minimatch": "^9.0.7"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^9.0.7"
+    },
+    "eslint": {
+      "minimatch": "^3.1.4"
+    },
+    "stripe": {
+      "qs": "^6.14.2"
+    }
   }
 }
