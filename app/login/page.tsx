@@ -6,20 +6,14 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { trackReferralEvent } from "@/lib/referrals"
+import { buildPostAuthRedirectPath, normalizeIntent, normalizeNextPath } from "@/lib/auth/oauth-callback"
 
 const REFERRAL_TOKEN_PATTERN = /^[a-z0-9]{8,32}$/
-
-function normalizeNextPath(raw: string | null): string {
-    if (!raw) return "/"
-    const trimmed = raw.trim()
-    if (!trimmed.startsWith("/")) return "/"
-    if (trimmed.startsWith("//")) return "/"
-    return trimmed
-}
 
 export default function LoginPage() {
     const [email, setEmail] = useState("")
     const [loading, setLoading] = useState(false)
+    const [oauthLoading, setOauthLoading] = useState(false)
     const [message, setMessage] = useState("")
     const [nextPath, setNextPath] = useState("/")
     const [intent, setIntent] = useState("")
@@ -43,12 +37,25 @@ export default function LoginPage() {
         if (typeof window === "undefined") return
         const params = new URLSearchParams(window.location.search)
         setNextPath(normalizeNextPath(params.get("next")))
-        setIntent(params.get("intent")?.trim() || "")
+        setIntent(normalizeIntent(params.get("intent")))
+        const oauthError = params.get("oauth_error")?.trim()
+        if (oauthError) {
+            setMessage(oauthError)
+        }
+
+        // Check if user is already signed in
+        void supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session?.user) {
+                const target = buildPostAuthRedirectPath(normalizeNextPath(params.get("next")), normalizeIntent(params.get("intent")))
+                window.location.href = target
+            }
+        })
     }, [])
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault()
         setLoading(true)
+        setMessage("")
         const redirectUrl = new URL(nextPath, window.location.origin)
         if (intent) {
             redirectUrl.searchParams.set("intent", intent)
@@ -73,6 +80,30 @@ export default function LoginPage() {
         setLoading(false)
     }
 
+    const handleGoogleLogin = async () => {
+        setMessage("")
+        setOauthLoading(true)
+
+        const callbackPath = buildPostAuthRedirectPath("/auth/callback", intent)
+        const callbackUrl = new URL(callbackPath, window.location.origin)
+        callbackUrl.searchParams.set("next", nextPath)
+
+        const { error } = await supabase.auth.signInWithOAuth({
+            provider: "google",
+            options: {
+                redirectTo: callbackUrl.toString(),
+                queryParams: { prompt: "select_account" },
+            },
+        })
+
+        if (error) {
+            setMessage(error.message)
+            setOauthLoading(false)
+        }
+    }
+
+    const oauthBusy = oauthLoading
+
     return (
         <div className="flex items-center justify-center min-h-[80vh]">
             <Card className="w-full max-w-md">
@@ -85,6 +116,25 @@ export default function LoginPage() {
                             Sign in to generate Stripe payment links for your estimate.
                         </p>
                     )}
+                    <div className="space-y-3 mb-6">
+                        <Button
+                            type="button"
+                            variant="default"
+                            className="w-full"
+                            onClick={() => void handleGoogleLogin()}
+                            disabled={loading || oauthBusy}
+                        >
+                            {oauthLoading ? "Redirecting..." : "Continue with Google"}
+                        </Button>
+                        <div className="relative py-2">
+                            <div className="absolute inset-0 flex items-center">
+                                <span className="w-full border-t" />
+                            </div>
+                            <div className="relative flex justify-center text-xs uppercase">
+                                <span className="bg-card px-2 text-muted-foreground">Or continue with magic link</span>
+                            </div>
+                        </div>
+                    </div>
                     <form onSubmit={handleLogin} className="space-y-4">
                         <Input
                             type="email"
@@ -93,7 +143,7 @@ export default function LoginPage() {
                             onChange={(e) => setEmail(e.target.value)}
                             required
                         />
-                        <Button type="submit" className="w-full" disabled={loading}>
+                        <Button type="submit" variant="outline" className="w-full" disabled={loading || oauthBusy}>
                             {loading ? "Sending link..." : "Send Magic Link"}
                         </Button>
                         <p className="text-xs text-center text-muted-foreground">

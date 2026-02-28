@@ -23,18 +23,38 @@ export function FeedbackModal() {
 
         setLoading(true)
 
-
         try {
-            const { data: { user } } = await supabase.auth.getUser()
+            const {
+                data: { session },
+            } = await supabase.auth.getSession()
 
-            const { error } = await supabase.from('feedback').insert({
-                user_id: user?.id,
-                rating,
-                category,
-                description,
+            const response = await fetch("/api/feedback", {
+                method: "POST",
+                headers: {
+                    "content-type": "application/json",
+                    ...(session?.access_token
+                        ? { authorization: `Bearer ${session.access_token}` }
+                        : {}),
+                },
+                body: JSON.stringify({
+                    type: category,
+                    message: description,
+                    metadata: {
+                        rating,
+                        path: typeof window !== "undefined" ? window.location.pathname : "",
+                        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+                    },
+                }),
             })
 
-            if (error) throw error
+            if (!response.ok) {
+                const payload = await response.json().catch(() => null)
+                const message =
+                    typeof payload?.error === "string"
+                        ? payload.error
+                        : "Failed to submit feedback"
+                throw new Error(message)
+            }
 
             toast("✅ Feedback submitted! Thank you.", "success")
             setOpen(false)
@@ -93,7 +113,7 @@ export function FeedbackModal() {
                             <SelectContent>
                                 <SelectItem value="feature">Feature Request</SelectItem>
                                 <SelectItem value="bug">Bug Report</SelectItem>
-                                <SelectItem value="other">Other</SelectItem>
+                                <SelectItem value="general">General</SelectItem>
                             </SelectContent>
                         </Select>
                     </div>

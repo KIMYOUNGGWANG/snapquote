@@ -10,7 +10,8 @@ import {
     DialogContent,
     DialogHeader,
     DialogTitle,
-    DialogTrigger
+    DialogTrigger,
+    DialogClose
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { supabase } from "@/lib/supabase"
@@ -79,7 +80,6 @@ export function MoreMenu({ children }: MoreMenuProps) {
                 <div className="p-4 pb-0">
                     <DialogHeader className="flex flex-row items-center justify-between mb-4">
                         <DialogTitle className="text-lg font-semibold">Menu</DialogTitle>
-
                     </DialogHeader>
 
                     <div className="rounded-xl border bg-muted/30 p-3 mb-3">
@@ -93,46 +93,51 @@ export function MoreMenu({ children }: MoreMenuProps) {
                                 <p className="text-xs text-muted-foreground">
                                     Signed in as <span className="font-medium text-foreground">{userEmail}</span>
                                 </p>
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="w-full justify-start"
-                                    onClick={handleSignOut}
-                                >
-                                    <LogOut className="h-4 w-4 mr-2" />
-                                    Sign Out
-                                </Button>
+                                <DialogClose asChild>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="w-full justify-start"
+                                        onClick={handleSignOut}
+                                    >
+                                        <LogOut className="h-4 w-4 mr-2" />
+                                        Sign Out
+                                    </Button>
+                                </DialogClose>
                             </div>
                         ) : (
                             <div className="space-y-2">
                                 <p className="text-xs text-muted-foreground">
                                     Not signed in yet. First login email automatically creates your account.
                                 </p>
-                                <Button asChild className="w-full justify-start">
-                                    <Link href={loginHref}>
-                                        <LogIn className="h-4 w-4 mr-2" />
-                                        Sign In / Sign Up
-                                    </Link>
-                                </Button>
+                                <DialogClose asChild>
+                                    <Button className="w-full justify-start">
+                                        <Link href={loginHref} className="flex items-center w-full">
+                                            <LogIn className="h-4 w-4 mr-2" />
+                                            Sign In / Sign Up
+                                        </Link>
+                                    </Button>
+                                </DialogClose>
                             </div>
                         )}
                     </div>
 
                     <div className="grid gap-2">
                         {menuItems.map((item) => (
-                            <Link
-                                key={item.href}
-                                href={item.href}
-                                className="flex items-center p-3 rounded-xl hover:bg-muted transition-colors"
-                            >
-                                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary mr-4">
-                                    <item.icon className="h-5 w-5" />
-                                </div>
-                                <div className="flex-1">
-                                    <div className="font-medium">{item.label}</div>
-                                    <div className="text-xs text-muted-foreground">{item.description}</div>
-                                </div>
-                            </Link>
+                            <DialogClose asChild key={item.href}>
+                                <Link
+                                    href={item.href}
+                                    className="flex items-center p-3 rounded-xl hover:bg-muted transition-colors"
+                                >
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary mr-4">
+                                        <item.icon className="h-5 w-5" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="font-medium">{item.label}</div>
+                                        <div className="text-xs text-muted-foreground">{item.description}</div>
+                                    </div>
+                                </Link>
+                            </DialogClose>
                         ))}
                     </div>
                 </div>
@@ -141,16 +146,18 @@ export function MoreMenu({ children }: MoreMenuProps) {
                     <div className="flex items-center justify-between">
                         <div className="text-sm font-medium text-muted-foreground">Appearance</div>
                         <div className="flex gap-2">
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 px-0"
-                                onClick={handleRestartTutorial}
-                                title="Restart Tutorial"
-                            >
-                                <LifeBuoy className="h-4 w-4" />
-                                <span className="sr-only">Restart Tutorial</span>
-                            </Button>
+                            <DialogClose asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 px-0"
+                                    onClick={handleRestartTutorial}
+                                    title="Restart Tutorial"
+                                >
+                                    <LifeBuoy className="h-4 w-4" />
+                                    <span className="sr-only">Restart Tutorial</span>
+                                </Button>
+                            </DialogClose>
                             <Button
                                 variant="ghost"
                                 size="sm"

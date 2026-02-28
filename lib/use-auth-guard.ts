@@ -39,7 +39,7 @@ export function useAuthGuard(nextPath: string): AuthGuardState {
                     userId: null,
                     email: null,
                 })
-                router.replace(buildLoginUrl(nextPath))
+                window.location.href = buildLoginUrl(nextPath)
                 return
             }
 
@@ -62,16 +62,11 @@ export function useAuthGuard(nextPath: string): AuthGuardState {
                     userId: null,
                     email: null,
                 })
-                router.replace(buildLoginUrl(nextPath))
+                window.location.href = buildLoginUrl(nextPath)
             })
-
-        const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-            syncState(session)
-        })
 
         return () => {
             active = false
-            data.subscription.unsubscribe()
         }
     }, [nextPath, router])
 

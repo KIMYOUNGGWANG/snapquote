@@ -32,12 +32,20 @@ export interface EstimateSection {
     items: EstimateItem[]      // Items within this section (Parts + Labor mixed)
 }
 
+export interface UpsellOption {
+    tier: 'better' | 'best'
+    title: string
+    description: string
+    addedItems: EstimateItem[]
+}
+
 export interface LocalEstimate {
     id: string
     estimateNumber: string
     type?: 'estimate' | 'invoice' // Default is 'estimate'
     items: EstimateItem[]      // Legacy: flat items (for backward compatibility)
     sections?: EstimateSection[] // NEW: Division-based grouping
+    upsellOptions?: UpsellOption[]
     summary_note: string
     clientName: string
     clientAddress: string
@@ -56,6 +64,7 @@ export interface LocalEstimate {
     attachments?: EstimateAttachments  // Original data preservation
     clientSignature?: string; // base64 image (NEW for Phase 6)
     signedAt?: string; // ISO date (NEW for Phase 6)
+    updatedAt: string; // ISO date for sync resolution
 }
 
 export interface BusinessInfo {
@@ -90,16 +99,22 @@ export async function saveEstimates(estimates: LocalEstimate[]): Promise<void> {
 }
 
 export async function saveEstimate(estimate: LocalEstimate): Promise<void> {
+    const now = new Date().toISOString()
     await saveEstimateToDB({
         ...estimate,
+        updatedAt: estimate.updatedAt || now,
         synced: estimate.synced ?? false
     })
 }
 
 export async function getEstimates(): Promise<LocalEstimate[]> {
-    const estimates = await getEstimatesFromDB()
-    // Sort by date desc
-    return estimates.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    const estimates = await getEstimatesFromDB() as LocalEstimate[]
+    // Sort by updatedAt if available, else createdAt, desc
+    return estimates.sort((a, b) => {
+        const timeA = new Date(a.updatedAt || a.createdAt).getTime()
+        const timeB = new Date(b.updatedAt || b.createdAt).getTime()
+        return timeB - timeA
+    })
 }
 
 export async function deleteEstimate(id: string) {
@@ -134,6 +149,7 @@ export async function updateEstimateStatus(id: string, status: 'draft' | 'sent' 
         const next: any = {
             ...estimate,
             status,
+            updatedAt: nowIso,
             // Ensure cloud sync picks up status changes.
             synced: false,
         }
@@ -151,7 +167,13 @@ export async function updateEstimate(id: string, updates: Partial<LocalEstimate>
     const db = await initDB()
     const estimate = await db.get('estimates', id)
     if (estimate) {
-        await db.put('estimates', { ...estimate, ...updates })
+        const now = new Date().toISOString()
+        await db.put('estimates', {
+            ...estimate,
+            ...updates,
+            updatedAt: now,
+            synced: updates.synced ?? false // Usually false if we update content
+        })
     }
 }
 

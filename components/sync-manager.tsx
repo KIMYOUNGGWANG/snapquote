@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { syncEstimates } from "@/lib/sync"
 import { toast } from "@/components/toast"
+import { supabase } from "@/lib/supabase"
 import { Cloud, CloudOff, RefreshCw, CheckCircle2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 

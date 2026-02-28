@@ -146,7 +146,7 @@ export function AutomationSettings() {
 
         setFirstFollowupDays(normalizedFirstDelayDays)
         setSecondFollowupDays(normalizedSecondDelayDays)
-    }, [quoteChaser?.settings?.first_delay_hours, quoteChaser?.settings?.second_delay_hours, quoteChaser?.settings?.delay_days])
+    }, [quoteChaser?.settings, quoteChaser?.settings?.first_delay_hours, quoteChaser?.settings?.second_delay_hours, quoteChaser?.settings?.delay_days])
 
     if (loading) return <div>Loading settings...</div>
 

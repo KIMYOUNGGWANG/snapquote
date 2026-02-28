@@ -17,6 +17,7 @@ interface SnapQuoteDB extends DBSchema {
             createdAt: string;
             synced: boolean;
             status: 'draft' | 'sent' | 'paid';  // NEW: Capture-First status
+            updatedAt: string; // NEW: for sync resolution
             paymentLink?: string;
             paymentLinkId?: string;
             paymentLinkType?: 'full' | 'deposit' | 'custom';
@@ -163,10 +164,12 @@ export async function initDB() {
 export async function saveEstimateToDB(estimate: any) {
     const db = await initDB();
     // Default status to 'draft' if not set
+    const now = new Date().toISOString();
     const estimateWithStatus = {
         ...estimate,
         synced: false,
         status: estimate.status || 'draft',
+        updatedAt: estimate.updatedAt || estimate.createdAt || now,
     };
     return db.put('estimates', estimateWithStatus);
 }

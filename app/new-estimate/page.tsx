@@ -50,6 +50,13 @@ interface EstimateSection {
     items: EstimateItem[]
 }
 
+interface UpsellOption {
+    tier: "better" | "best"
+    title: string
+    description: string
+    addedItems: EstimateItem[]
+}
+
 interface Estimate {
     items: EstimateItem[]          // Legacy flat items (for backward compat)
     sections?: EstimateSection[]   // NEW: Division-based grouping
@@ -60,6 +67,7 @@ interface Estimate {
     warnings?: string[]
     payment_terms?: string
     closing_note?: string
+    upsellOptions?: UpsellOption[]
 }
 
 type Step = "input" | "transcribing" | "verifying" | "generating" | "result"
@@ -140,11 +148,44 @@ function normalizeEstimateSection(input: unknown, sectionIndex: number): Estimat
     }
 }
 
+function normalizeUpsellTier(value: unknown, fallback: "better" | "best"): "better" | "best" {
+    if (typeof value !== "string") return fallback
+    const normalized = value.trim().toLowerCase()
+    if (normalized === "better" || normalized === "best") return normalized
+    return fallback
+}
+
+function normalizeUpsellOption(input: unknown, optionIndex: number): UpsellOption | null {
+    const option = isRecord(input) ? input : {}
+    const fallbackTier = optionIndex === 0 ? "better" : "best"
+    const tier = normalizeUpsellTier(option.tier, fallbackTier)
+    const addedItems = (Array.isArray(option.addedItems) ? option.addedItems : [])
+        .map((item, itemIndex) => normalizeEstimateItem(item, itemIndex))
+        .filter((item) => item.description !== "")
+
+    if (addedItems.length === 0) return null
+
+    return {
+        tier,
+        title: toSafeString(option.title).trim() || (tier === "better" ? "Better Option" : "Best Option"),
+        description: toSafeString(option.description).trim(),
+        addedItems,
+    }
+}
+
+function normalizeUpsellOptions(input: unknown): UpsellOption[] {
+    if (!Array.isArray(input)) return []
+    return input
+        .map((option, optionIndex) => normalizeUpsellOption(option, optionIndex))
+        .filter((option): option is UpsellOption => option !== null)
+}
+
 function normalizeEstimatePayload(input: unknown): Estimate {
     const estimate = isRecord(input) ? input : {}
     const rawItems = Array.isArray(estimate.items) ? estimate.items : []
     const rawSections = Array.isArray(estimate.sections) ? estimate.sections : []
     const rawWarnings = Array.isArray(estimate.warnings) ? estimate.warnings : []
+    const rawUpsellOptions = Array.isArray(estimate.upsellOptions) ? estimate.upsellOptions : []
 
     const items = rawItems
         .map((item, index) => normalizeEstimateItem(item, index))
@@ -158,6 +199,7 @@ function normalizeEstimatePayload(input: unknown): Estimate {
         .filter((warning): warning is string => typeof warning === "string")
         .map((warning) => warning.trim())
         .filter(Boolean)
+    const upsellOptions = normalizeUpsellOptions(rawUpsellOptions)
 
     return {
         items,
@@ -166,6 +208,7 @@ function normalizeEstimatePayload(input: unknown): Estimate {
         payment_terms: toSafeString(estimate.payment_terms),
         closing_note: toSafeString(estimate.closing_note),
         warnings,
+        ...(upsellOptions.length > 0 ? { upsellOptions } : {}),
     }
 }
 
@@ -653,6 +696,41 @@ export default function NewEstimatePage() {
         setEstimate({ ...estimate, sections: updated })
     }
 
+    const handleApplyUpsellOption = (tier: "better" | "best") => {
+        if (!estimate || !estimate.upsellOptions?.length) return
+
+        const selectedOption = estimate.upsellOptions.find((option) => option.tier === tier)
+        if (!selectedOption) return
+
+        const allItems = getAllItemsFromEstimate(estimate)
+        const baseCount = allItems.length
+
+        const addedItems = selectedOption.addedItems.map((item, index) =>
+            normalizeEstimateItem(
+                {
+                    ...item,
+                    id: `upsell-${tier}-${crypto.randomUUID().slice(0, 8)}`,
+                    itemNumber: baseCount + index + 1,
+                },
+                baseCount + index
+            )
+        )
+
+        const nextEstimate = normalizeEstimatePayload({
+            ...estimate,
+            items: [...(estimate.items || []), ...addedItems],
+            upsellOptions: estimate.upsellOptions.filter((option) => option.tier !== tier),
+        })
+
+        setEstimate(nextEstimate)
+        toast(
+            `✅ ${selectedOption.tier === "better" ? "Better" : "Best"} package added (+$${addedItems
+                .reduce((sum, item) => sum + lineTotal(item), 0)
+                .toFixed(2)})`,
+            "success"
+        )
+    }
+
     const resultItems = useMemo(
         () => (estimate ? getAllItemsFromEstimate(estimate) : []),
         [estimate]
@@ -729,12 +807,14 @@ export default function NewEstimatePage() {
             items: allItems,
             sections: estimate.sections,
             summary_note: estimate.summary_note,
+            upsellOptions: estimate.upsellOptions && estimate.upsellOptions.length > 0 ? estimate.upsellOptions : undefined,
             clientName: clientName || "Walk-in Client",
             clientAddress: clientAddress || "N/A",
             taxRate,
             taxAmount,
             totalAmount,
             createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
             sentAt: status === "sent" ? new Date().toISOString() : undefined,
             status,
             paymentLink: includePaymentLink && paymentLink ? paymentLink : undefined,
@@ -1128,6 +1208,53 @@ export default function NewEstimatePage() {
                                             <li key={i}>{warning}</li>
                                         ))}
                                     </ul>
+                                </div>
+                            )}
+                            {estimate.upsellOptions && estimate.upsellOptions.length > 0 && (
+                                <div className="space-y-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+                                    <p className="text-sm font-semibold text-primary">
+                                        ✨ Auto-Upsell Packages
+                                    </p>
+                                    <div className="space-y-3">
+                                        {estimate.upsellOptions.map((option, index) => {
+                                            const addedTotal = option.addedItems.reduce((sum, item) => sum + lineTotal(item), 0)
+                                            return (
+                                                <div key={`${option.tier}-${index}`} className="rounded-md border bg-background p-3 space-y-2">
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div>
+                                                            <p className="text-sm font-semibold">
+                                                                {option.tier === "better" ? "Better" : "Best"}: {option.title}
+                                                            </p>
+                                                            {option.description && (
+                                                                <p className="text-xs text-muted-foreground mt-1">{option.description}</p>
+                                                            )}
+                                                        </div>
+                                                        <p className="text-sm font-bold text-primary">+${addedTotal.toFixed(2)}</p>
+                                                    </div>
+                                                    <ul className="space-y-1">
+                                                        {option.addedItems.map((item, itemIndex) => (
+                                                            <li
+                                                                key={`${item.id}-${itemIndex}`}
+                                                                className="text-xs text-muted-foreground flex justify-between gap-2"
+                                                            >
+                                                                <span>{item.description}</span>
+                                                                <span className="font-medium text-foreground">+${lineTotal(item).toFixed(2)}</span>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="w-full"
+                                                        onClick={() => handleApplyUpsellOption(option.tier)}
+                                                    >
+                                                        <Plus className="h-3 w-3 mr-2" />
+                                                        Add {option.tier === "better" ? "Better" : "Best"} Package
+                                                    </Button>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
                                 </div>
                             )}
                             {/* Client Info */}
