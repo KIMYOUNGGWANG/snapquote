@@ -21,7 +21,8 @@ import { AudioRecorder } from "@/components/audio-recorder"
 const PDFPreviewModal = dynamic(() => import("@/components/pdf-preview-modal").then(mod => mod.PDFPreviewModal), { ssr: false })
 const EmailModal = dynamic(() => import("@/components/email-modal").then(mod => mod.EmailModal), { ssr: false })
 const ExcelImportModal = dynamic(() => import("@/components/excel-import-modal").then(mod => mod.ExcelImportModal), { ssr: false })
-import { Mail, FileSpreadsheet, Users, PenTool, Sparkles } from "lucide-react"
+const ReceiptScanner = dynamic(() => import("@/components/receipt-scanner").then(mod => mod.ReceiptScanner), { ssr: false })
+import { Mail, FileSpreadsheet, Users, PenTool, Sparkles, Receipt } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 const SignaturePad = dynamic(() => import("@/components/signature-pad").then(mod => mod.SignaturePad), { ssr: false })
 
@@ -267,6 +268,7 @@ export default function NewEstimatePage() {
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
     const [isCopyingReferral, setIsCopyingReferral] = useState(false)
     const [isDownloadingPdf, setIsDownloadingPdf] = useState(false)
+    const [isReceiptScannerOpen, setIsReceiptScannerOpen] = useState(false)
 
     const fileInputRef = useRef<HTMLInputElement>(null)
     const draftMetaRef = useRef<{ id: string; estimateNumber: string } | null>(null)
@@ -695,6 +697,30 @@ export default function NewEstimatePage() {
         })
         setEstimate({ ...estimate, sections: updated })
     }
+
+    const handleReceiptParsed = useCallback((parsedItems: any[]) => {
+        if (!estimate) return
+
+        const allItems = getAllItemsFromEstimate(estimate)
+        const baseCount = allItems.length
+
+        const mappedItems: EstimateItem[] = parsedItems.map((item, index) => ({
+            id: item.id || `receipt-item-${crypto.randomUUID().slice(0, 8)}`,
+            itemNumber: baseCount + index + 1,
+            category: "PARTS",
+            description: item.description || "Unknown Item",
+            quantity: item.quantity || 1,
+            unit: "ea",
+            unit_price: item.unit_price || 0,
+            total: item.total || 0,
+            notes: (item.confidence_score !== undefined && item.confidence_score < 0.8) ? "Need verification (Low AI Confidence)" : undefined
+        }))
+
+        setEstimate(prev => prev ? {
+            ...prev,
+            items: [...prev.items, ...mappedItems]
+        } : prev)
+    }, [estimate])
 
     const handleApplyUpsellOption = (tier: "better" | "best") => {
         if (!estimate || !estimate.upsellOptions?.length) return
@@ -1391,8 +1417,16 @@ export default function NewEstimatePage() {
                                 })}
                             </div>
 
-                            {/* Action Buttons: Add Item / Add Section / Upload CSV */}
+                            {/* Action Buttons: Add Item / Add Section / Upload CSV / Scan Receipt */}
                             <div className="flex gap-2 flex-wrap">
+                                <Button
+                                    variant="outline"
+                                    className="flex-1"
+                                    onClick={() => setIsReceiptScannerOpen(true)}
+                                >
+                                    <Receipt className="h-4 w-4 mr-2" />
+                                    Scan Receipt
+                                </Button>
                                 <Button
                                     variant="outline"
                                     className="flex-1"
@@ -1907,6 +1941,15 @@ export default function NewEstimatePage() {
                 onClose={() => setIsExcelModalOpen(false)}
                 onImport={handleExcelImport}
             />
+
+            {/* Receipt Scanner Modal */}
+            {estimate && (
+                <ReceiptScanner
+                    isOpen={isReceiptScannerOpen}
+                    onClose={() => setIsReceiptScannerOpen(false)}
+                    onSuccess={handleReceiptParsed}
+                />
+            )}
 
             {/* Client Load Modal */}
             <Dialog open={isClientModalOpen} onOpenChange={setIsClientModalOpen}>

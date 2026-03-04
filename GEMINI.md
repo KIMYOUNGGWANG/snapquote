@@ -141,3 +141,26 @@ The following checklist must be strictly adhered to during any **EXECUTION** (co
 - [ ] **Changelog**: Every PR MUST have a one-line entry in `CHANGELOG.md` under the correct version header.
 - [ ] **PR Checklist**: Before merging, verify: (1) Tests pass, (2) No `any` types, (3) No hardcoded secrets, (4) Error boundaries present.
 - [ ] **ADR**: Any architectural decision (new DB, new auth provider, etc.) MUST be documented in `docs/decisions/`.
+
+---
+
+## 🎨 9. Design DNA (Premium Aesthetics)
+
+Apply these rules to every UI component to avoid "Generic AI" looks.
+
+### [ ] 1. Visual Style (Anti-AI Tokens)
+- [ ] **No Default Colors**: Avoid `primary-blue`, `red-500`. Use HSL-curated professional palettes (e.g., Slate, Indigo, Emerald).
+- [ ] **Glassmorphism**: Use `backdrop-blur-md` and semi-transparent backgrounds (`bg-white/10` or `bg-slate-900/40`) for navbars and cards.
+- [ ] **Soft Shadows**: Use multi-layered shadows instead of single black shadows. (e.g., `shadow-[0_10px_20px_-5px_rgba(0,0,0,0.1),0_8px_8px_-8px_rgba(0,0,0,0.04)]`).
+
+### [ ] 2. Typography & Hierarchy
+- [ ] **Premium Fonts**: Use `Inter`, `Outfit`, or `Lexend`. NEVER use system sans-serif.
+- [ ] **Hierarchy**: H1/H2 must have `tracking-tight` and `font-bold`. Body text must have `leading-relaxed` (1.6+).
+
+### [ ] 3. Motion & Interaction
+- [ ] **Micro-animations**: All buttons must have `transition-all duration-300 ease-in-out` and `hover:scale-[1.02]`.
+- [ ] **Interactive States**: Every card/button must have a clear `hover:` and `active:` state (subtle shadow increase or background shift).
+
+### [ ] 4. Layout Discipline
+- [ ] **8px Grid**: All padding/margin must be multiples of 4 (Tailwind units: `p-2`, `p-4`, `p-8`).
+- [ ] **Whitespace**: If it feels okay, add 20% more padding. Premium design "breathes".

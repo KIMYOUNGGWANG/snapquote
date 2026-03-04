@@ -1,4 +1,4 @@
-# Task Board (Reset post-TB-23 Ship)
+# Task Board (Ready for Next Mission)
 
 ## Active Missions
 - TBD: Start next phase.

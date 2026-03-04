@@ -12,14 +12,37 @@ import { ServiceWorkerRegister } from "@/components/service-worker-register";
 import { Analytics } from "@vercel/analytics/next";
 import { cn } from "@/lib/utils";
 
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://snapquote.ai"; // Fallback to production URL
+
 export const metadata: Metadata = {
-  title: "SnapQuote",
-  description: "Trade-Focused AI Estimator",
+  metadataBase: new URL(siteUrl),
+  title: {
+    default: "SnapQuote - Trade-Focused AI Estimator",
+    template: "%s | SnapQuote",
+  },
+  description: "Generate professional trade estimates in seconds with AI. Optimized for contractors and field service professionals.",
+  keywords: ["AI Estimator", "Trade Quotes", "Contractor Tools", "Digital Invoicing", "Field Service AI", "SnapQuote"],
   manifest: "/manifest.json",
   icons: {
     icon: "/icon-192x192.png",
     shortcut: "/favicon.ico",
     apple: "/icon-512x512.png",
+  },
+  openGraph: {
+    title: "SnapQuote - Trade-Focused AI Estimator",
+    description: "Generate professional trade estimates in seconds with AI.",
+    url: siteUrl,
+    siteName: "SnapQuote",
+    locale: "en_US",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "SnapQuote - AI Estimator for Trades",
+    description: "The fastest way for contractors to generate and send estimates.",
+  },
+  alternates: {
+    canonical: "/",
   },
 };
 
