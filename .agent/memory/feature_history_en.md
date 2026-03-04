@@ -255,3 +255,11 @@
   - `npm test` pass (85/85)
   - `npm run lint` pass (warnings only)
   - `npm run build` pass
+
+### [FIX] 22:21:45
+[TB-22] Implemented missing components/receipt-scanner.tsx and integrated with app/new-estimate/page.tsx
+---
+
+### [SHIP] 11:11:27
+Built Zero-Friction Lead Gen Tool (TB-23). Implemented a public proxy for receipt parsing with strict IP rate limits. Integrated a premium polished Free Estimator widget into the landing page to capture emails directly into the Supabase `leads` table.
+---

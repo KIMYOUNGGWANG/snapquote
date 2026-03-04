@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import Image from "next/image"
+import { FreeEstimatorWidget } from "@/components/free-estimator-widget"
 
 // Animated counter component
 function AnimatedCounter({ target, suffix = "", prefix = "" }: { target: number, suffix?: string, prefix?: string }) {
@@ -261,6 +262,24 @@ export default function LandingPage() {
                             <p className="text-sm text-gray-400">Your skills are world-class. But writing professional English estimates? That&apos;s a different trade entirely.</p>
                         </div>
                     </div>
+                </div>
+            </section>
+
+            {/* Free AI Estimator Tool (Lead Gen) */}
+            <section className="py-20 px-6 bg-gradient-to-b from-transparent via-purple-950/10 to-transparent">
+                <div className="max-w-6xl mx-auto">
+                    <div className="text-center mb-12">
+                        <div className="text-sm text-purple-400 font-medium mb-3 uppercase tracking-wider">Try It Now — No Sign Up</div>
+                        <h2 className="text-3xl md:text-4xl font-bold mb-4">
+                            Upload a receipt.
+                            <br />
+                            <span className="text-gray-400">See what AI can do.</span>
+                        </h2>
+                        <p className="text-gray-400 max-w-xl mx-auto">
+                            Snap a photo of any receipt, invoice, or material list. Our AI will calculate the total cost instantly.
+                        </p>
+                    </div>
+                    <FreeEstimatorWidget />
                 </div>
             </section>
 

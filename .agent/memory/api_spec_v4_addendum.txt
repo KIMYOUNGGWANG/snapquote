@@ -1,0 +1,45 @@
+
+---
+
+## 25) POST /api/parse-receipt (Architecture V4)
+
+Purpose: Extract materials and pricing from photos of receipts, shopping carts, or hand-written notes.
+
+Auth: Required (Pro/Team tier or adequate credits).
+Rate limit: 20 requests / 10 min / IP.
+
+Request (`multipart/form-data`):
+- `file: File` (`image/*`, max `10MB`)
+- `context?: string` (Optional context about the receipt, e.g., "Home Depot purchase for Smith bathroom")
+
+Response `200`:
+```typescript
+interface ParsedReceiptItem {
+  id: string; // generated uuid
+  description: string; // extracted or normalized name
+  quantity: number;
+  unit_price: number;
+  total: number;
+  confidence_score: number; // 0.0 to 1.0. Used for UI highlighting if < 0.8
+  original_text?: string; // what the OCR actually saw, if normalization was applied
+}
+
+interface ParseReceiptResponse {
+  ok: true;
+  vendorName?: string;
+  date?: string;
+  subtotal: number;
+  tax: number;
+  total: number;
+  items: ParsedReceiptItem[];
+  warnings?: string[]; // e.g., "Illegible handwriting detected on item 3"
+}
+```
+
+Error responses:
+- `400`: invalid/missing file
+- `401`: unauthorized
+- `402`: insufficient plan tier or credits
+- `413`: file too large
+- `429`: rate limited
+- `500`: multimodal engine failure
