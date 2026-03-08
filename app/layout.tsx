@@ -31,7 +31,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "SnapQuote - Trade-Focused AI Estimator",
     description: "Generate professional trade estimates in seconds with AI.",
-    url: siteUrl,
+    url: "./",
     siteName: "SnapQuote",
     locale: "en_US",
     type: "website",
@@ -42,7 +42,7 @@ export const metadata: Metadata = {
     description: "The fastest way for contractors to generate and send estimates.",
   },
   alternates: {
-    canonical: "/",
+    canonical: "./",
   },
 };
 

@@ -1,5 +1,22 @@
 # Feature History (EN)
 
+## 2026-03-08 - Plumbing ICP Positioning Alignment + SEO/Receipt UX Hardening
+
+- Repositioned public marketing surfaces around the `residential plumbing owner-operator` ICP.
+  - Rewrote `/landing` hero, pain points, features, testimonials, and CTA around plumbing service-call workflows.
+  - Reframed `/pricing` around the real Starter/Pro/Team plan structure with owner-operator outcome language.
+  - Updated the unauthenticated hero/CTA on `/` to match the plumbing quoting workflow.
+- Closed SEO regressions introduced by the recent metadata rollout.
+  - Switched root canonical/openGraph URL handling to self-relative values so child routes no longer collapse onto `/`.
+  - Fixed `robots.txt` private-route disallow matching by removing trailing slashes from exact app route prefixes.
+- Hardened the receipt parsing UX.
+  - Propagated `warnings` from `POST /api/parse-receipt` into the frontend flow.
+  - Merged parser warnings into `estimate.warnings` so review screens surface them directly.
+  - Added an info toast prompting re-check when receipt warnings are present.
+- Verification:
+  - `npx eslint app/layout.tsx app/robots.ts components/receipt-scanner.tsx app/new-estimate/page.tsx app/landing/page.tsx app/landing/layout.tsx app/page.tsx app/pricing/page.tsx app/pricing/layout.tsx`
+  - `npm test`
+
 ## 2026-02-20 - Payment Link Idempotency Hardening
 
 - Added idempotency handling to `POST /api/create-payment-link`.

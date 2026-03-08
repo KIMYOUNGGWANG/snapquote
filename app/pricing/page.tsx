@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, Sparkles, ArrowRight } from "lucide-react"
 import {
@@ -23,25 +23,44 @@ const PLAN_OPTIONS: Array<{
     tier: BillingPaidPlanTier
     label: string
     priceLabel: string
+    bestFor: string
     includes: string[]
 }> = [
         {
             tier: "starter",
             label: "Starter",
             priceLabel: "CAD $29/mo",
-            includes: ["80 estimates/mo", "60 transcription minutes", "60 emails/mo"],
+            bestFor: "Solo plumbers building a quoting habit from the truck",
+            includes: [
+                "Up to 80 field estimates per month",
+                "60 transcription minutes for on-site scope notes",
+                "60 sent estimate emails per month",
+                "Offline capture and voice-first quote drafting",
+            ],
         },
         {
             tier: "pro",
             label: "Pro",
             priceLabel: "CAD $59/mo",
-            includes: ["250 estimates/mo", "180 transcription minutes", "200 emails/mo"],
+            bestFor: "Owner-operators who want faster approvals and payment requests",
+            includes: [
+                "Up to 250 estimates per month",
+                "180 transcription minutes for service-call volume",
+                "200 sent estimate emails per month",
+                "Receipt scan plus payment-ready quoting workflow",
+            ],
         },
         {
             tier: "team",
             label: "Team",
             priceLabel: "CAD $129/mo",
-            includes: ["800 estimates/mo", "Team workflows", "Automation included"],
+            bestFor: "Small plumbing crews sharing workflows, volume, and automation",
+            includes: [
+                "Up to 800 estimates per month",
+                "Shared team workflows across techs",
+                "Automation included",
+                "Built for higher-volume quoting and follow-up",
+            ],
         },
     ]
 
@@ -116,18 +135,6 @@ export default function PricingPage() {
 
     const isSubscribed = Boolean(subscription?.subscribed)
 
-    const handleJoinWaitlist = async () => {
-        await trackPricingEvent({
-            event: "waitlist_joined",
-            metadata: {
-                variant: variant?.name || null,
-                selectedPlanTier,
-            },
-        })
-        toast("Thanks! We recorded your interest.", "success")
-        router.push("/profile")
-    }
-
     const handleUpgradeClick = async () => {
         if (!isAuthed) {
             toast("Please log in to start your subscription.", "info")
@@ -167,31 +174,27 @@ export default function PricingPage() {
         }
     }
 
-    if (loading && !offer && !isAuthed) {
-        return (
-            <div className="space-y-4">
-                <Card>
-                    <CardContent className="p-6 flex items-center gap-3 text-sm text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Loading pricing...
-                    </CardContent>
-                </Card>
-            </div>
-        )
-    }
-
-    // Removed the early return that blocked the UI when!offer was true.
-
     return (
         <div className="space-y-4">
             <Card className="border-primary/20">
                 <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
                         <Sparkles className="h-4 w-4" />
-                        Starter / Pro / Team
+                        Pricing for plumbing owner-operators
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                    {loading && (
+                        <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Checking live pricing and billing status...
+                        </div>
+                    )}
+
+                    <div className="rounded-lg border bg-primary/5 p-3 text-sm text-muted-foreground">
+                        Choose the plan based on how many residential plumbing quotes you send each month, not how much office software you want to babysit.
+                    </div>
+
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         {PLAN_OPTIONS.map((plan) => (
                             <Button
@@ -215,6 +218,9 @@ export default function PricingPage() {
                         <p className="text-xs text-muted-foreground">
                             Tier: <span className="font-medium uppercase">{selectedPlan.tier}</span>
                         </p>
+                        <p className="text-sm text-foreground">
+                            {selectedPlan.bestFor}
+                        </p>
                         {variant?.name && (
                             <p className="text-xs text-muted-foreground">
                                 Variant: <span className="font-mono">{variant.name}</span>
@@ -230,7 +236,7 @@ export default function PricingPage() {
                     </div>
 
                     <div className="rounded-lg border bg-muted/30 p-3 text-sm">
-                        <p className="font-medium mb-2">Includes</p>
+                        <p className="font-medium mb-2">What you get</p>
                         <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
                             {selectedPlan.includes.map((include) => (
                                 <li key={include}>{include}</li>
@@ -238,32 +244,44 @@ export default function PricingPage() {
                         </ul>
                     </div>
 
+                    <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                        Best fit: water-heater replacements, leak repairs, fixture installs, drain calls, and other service quotes you need to send before the day gets away from you.
+                    </div>
+
                     <div className="grid grid-cols-1 gap-2">
                         <Button
                             onClick={handleUpgradeClick}
-                            disabled={checkoutLoading || isSubscribed}
+                            disabled={loading || checkoutLoading || isSubscribed}
                             className="w-full justify-between"
                         >
-                            {checkoutLoading
+                            {loading
+                                ? "Loading live pricing..."
+                                : checkoutLoading
                                 ? "Opening checkout..."
                                 : isSubscribed
                                     ? "Subscription already active"
                                     : !isAuthed ? "Log in to Subscribe" : `Upgrade to ${selectedPlan.label}`}
-                            {!isSubscribed && <ArrowRight className="h-4 w-4" />}
+                            {!loading && !isSubscribed && <ArrowRight className="h-4 w-4" />}
+                        </Button>
+                        <Button
+                            asChild
+                            variant="outline"
+                            className="w-full"
+                        >
+                            <Link href="/new-estimate">
+                                Try 10 free estimates first
+                            </Link>
                         </Button>
                         {isAuthed && (
                             <Button
                                 variant="outline"
                                 onClick={handleManageBillingClick}
-                                disabled={portalLoading || !subscription?.customerId}
+                                disabled={loading || portalLoading || !subscription?.customerId}
                                 className="w-full"
                             >
                                 {portalLoading ? "Opening portal..." : "Manage billing"}
                             </Button>
                         )}
-                        <Button variant="outline" onClick={handleJoinWaitlist} className="w-full">
-                            Join waitlist
-                        </Button>
                     </div>
                 </CardContent>
             </Card>

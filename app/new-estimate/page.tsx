@@ -71,6 +71,18 @@ interface Estimate {
     upsellOptions?: UpsellOption[]
 }
 
+type ReceiptScanResult = {
+    items: Array<{
+        id?: string
+        description?: string
+        quantity?: number
+        unit_price?: number
+        total?: number
+        confidence_score?: number
+    }>
+    warnings: string[]
+}
+
 type Step = "input" | "transcribing" | "verifying" | "generating" | "result"
 
 const ESTIMATE_CATEGORIES: EstimateCategory[] = ["PARTS", "LABOR", "SERVICE", "OTHER"]
@@ -698,29 +710,46 @@ export default function NewEstimatePage() {
         setEstimate({ ...estimate, sections: updated })
     }
 
-    const handleReceiptParsed = useCallback((parsedItems: any[]) => {
-        if (!estimate) return
+    const handleReceiptParsed = useCallback(({ items: parsedItems, warnings }: ReceiptScanResult) => {
+        const normalizedWarnings = warnings
+            .map((warning) => warning.trim())
+            .filter(Boolean)
 
-        const allItems = getAllItemsFromEstimate(estimate)
-        const baseCount = allItems.length
+        setEstimate(prev => {
+            if (!prev) return prev
 
-        const mappedItems: EstimateItem[] = parsedItems.map((item, index) => ({
-            id: item.id || `receipt-item-${crypto.randomUUID().slice(0, 8)}`,
-            itemNumber: baseCount + index + 1,
-            category: "PARTS",
-            description: item.description || "Unknown Item",
-            quantity: item.quantity || 1,
-            unit: "ea",
-            unit_price: item.unit_price || 0,
-            total: item.total || 0,
-            notes: (item.confidence_score !== undefined && item.confidence_score < 0.8) ? "Need verification (Low AI Confidence)" : undefined
-        }))
+            const allItems = getAllItemsFromEstimate(prev)
+            const baseCount = allItems.length
 
-        setEstimate(prev => prev ? {
-            ...prev,
-            items: [...prev.items, ...mappedItems]
-        } : prev)
-    }, [estimate])
+            const mappedItems: EstimateItem[] = parsedItems.map((item, index) => ({
+                id: item.id || `receipt-item-${crypto.randomUUID().slice(0, 8)}`,
+                itemNumber: baseCount + index + 1,
+                category: "PARTS",
+                description: item.description || "Unknown Item",
+                quantity: item.quantity || 1,
+                unit: "ea",
+                unit_price: item.unit_price || 0,
+                total: item.total || 0,
+                notes: (item.confidence_score !== undefined && item.confidence_score < 0.8)
+                    ? "Need verification (Low AI Confidence)"
+                    : undefined
+            }))
+
+            const mergedWarnings = Array.from(
+                new Set([...(prev.warnings || []), ...normalizedWarnings])
+            )
+
+            return {
+                ...prev,
+                items: [...prev.items, ...mappedItems],
+                warnings: mergedWarnings,
+            }
+        })
+
+        if (normalizedWarnings.length > 0) {
+            toast(`⚠️ Review ${normalizedWarnings.length} receipt warning${normalizedWarnings.length === 1 ? "" : "s"} before sending.`, "info")
+        }
+    }, [])
 
     const handleApplyUpsellOption = (tier: "better" | "best") => {
         if (!estimate || !estimate.upsellOptions?.length) return

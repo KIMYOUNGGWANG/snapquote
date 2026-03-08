@@ -1,5 +1,22 @@
 # 기능 히스토리 (KR)
 
+## 2026-03-08 - 플로밍 ICP 포지셔닝 정렬 + SEO/영수증 UX 보강
+
+- 공개 마케팅 메시지를 `residential plumbing owner-operator` 기준으로 재정렬했습니다.
+  - `/landing` 히어로, pain point, 기능 소개, 후기, CTA를 배관 서비스콜 중심 카피로 교체
+  - `/pricing`를 Starter/Pro/Team 실플랜 구조에 맞춰 재서술하고 owner-operator 시나리오 기준으로 설명 강화
+  - `/` 비로그인 상단 히어로/CTA를 배관 견적 워크플로우 중심으로 조정
+- SEO 회귀를 수정했습니다.
+  - 루트 canonical/openGraph URL을 self-relative 방식으로 조정해 하위 페이지가 홈 canonical로 덮이지 않게 수정
+  - `robots.txt`의 private route 차단 규칙에서 trailing slash를 제거해 실제 경로와 정확히 매칭되도록 수정
+- 영수증 파서 UX를 보강했습니다.
+  - `POST /api/parse-receipt` 응답의 `warnings`를 프런트까지 전달
+  - 견적 편집 상태의 `estimate.warnings`에 병합해 사용자 검토 화면에서 그대로 노출
+  - 경고 존재 시 info toast로 재검토를 유도
+- 검증:
+  - `npx eslint app/layout.tsx app/robots.ts components/receipt-scanner.tsx app/new-estimate/page.tsx app/landing/page.tsx app/landing/layout.tsx app/page.tsx app/pricing/page.tsx app/pricing/layout.tsx`
+  - `npm test`
+
 ## 2026-02-20 - 결제링크 멱등성(Idempotency) 보강
 
 - `POST /api/create-payment-link`에 멱등성 처리 추가.

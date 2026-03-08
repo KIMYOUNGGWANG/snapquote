@@ -5,15 +5,29 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loader2, Upload, Receipt, AlertCircle } from "lucide-react"
+import { Loader2, Upload, Receipt } from "lucide-react"
 import { toast } from "@/components/toast"
 import { withAuthHeaders } from "@/lib/auth-headers"
 import Image from "next/image"
 
+type ParsedReceiptItem = {
+    id?: string
+    description?: string
+    quantity?: number
+    unit_price?: number
+    total?: number
+    confidence_score?: number
+}
+
+type ParsedReceiptResult = {
+    items: ParsedReceiptItem[]
+    warnings: string[]
+}
+
 interface ReceiptScannerProps {
     isOpen: boolean
     onClose: () => void
-    onSuccess: (items: any[]) => void
+    onSuccess: (result: ParsedReceiptResult) => void
 }
 
 export function ReceiptScanner({ isOpen, onClose, onSuccess }: ReceiptScannerProps) {
@@ -60,8 +74,12 @@ export function ReceiptScanner({ isOpen, onClose, onSuccess }: ReceiptScannerPro
             }
 
             const data = await response.json()
+            const items = Array.isArray(data.items) ? data.items : []
+            const warnings = Array.isArray(data.warnings)
+                ? data.warnings.filter((warning: unknown): warning is string => typeof warning === "string")
+                : []
             toast("✅ Receipt parsed successfully!", "success")
-            onSuccess(data.items || [])
+            onSuccess({ items, warnings })
             handleClose()
         } catch (error: any) {
             console.error("Parse error:", error)
