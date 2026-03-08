@@ -30,7 +30,7 @@ const PLAN_OPTIONS: Array<{
             tier: "starter",
             label: "Starter",
             priceLabel: "CAD $29/mo",
-            bestFor: "Solo plumbers building a quoting habit from the truck",
+            bestFor: "Solo contractors building a quoting habit from the truck",
             includes: [
                 "Up to 80 field estimates per month",
                 "60 transcription minutes for on-site scope notes",
@@ -54,7 +54,7 @@ const PLAN_OPTIONS: Array<{
             tier: "team",
             label: "Team",
             priceLabel: "CAD $129/mo",
-            bestFor: "Small plumbing crews sharing workflows, volume, and automation",
+            bestFor: "Small trade crews sharing workflows, volume, and automation",
             includes: [
                 "Up to 800 estimates per month",
                 "Shared team workflows across techs",
@@ -180,7 +180,7 @@ export default function PricingPage() {
                 <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
                         <Sparkles className="h-4 w-4" />
-                        Pricing for plumbing owner-operators
+                        Pricing for trade owner-operators
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -192,7 +192,7 @@ export default function PricingPage() {
                     )}
 
                     <div className="rounded-lg border bg-primary/5 p-3 text-sm text-muted-foreground">
-                        Choose the plan based on how many residential plumbing quotes you send each month, not how much office software you want to babysit.
+                        Choose the plan based on how many field quotes you send each month, not how much office software you want to babysit.
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -245,7 +245,7 @@ export default function PricingPage() {
                     </div>
 
                     <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
-                        Best fit: water-heater replacements, leak repairs, fixture installs, drain calls, and other service quotes you need to send before the day gets away from you.
+                        Best fit: repair calls, installs, replacements, change orders, and small projects you need to quote before the day gets away from you.
                     </div>
 
                     <div className="grid grid-cols-1 gap-2">

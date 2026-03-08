@@ -199,11 +199,11 @@ export default function Home() {
   }
 
   const heroTitle = isSignedIn
-    ? "Ready for the next plumbing quote?"
+    ? "Ready for the next field quote?"
     : "Quote the job before you leave."
   const heroSubtitle = isSignedIn
     ? "Capture the scope, clean the draft, and send a professional quote before the next service call starts."
-    : "Built for residential plumbing owner-operators who need to turn 30 seconds of field notes into a quote the customer can approve today."
+    : "Built for owner-operators and small trade teams who need to turn 30 seconds of field notes into a quote the customer can approve today."
 
   return (
     <>
@@ -269,7 +269,7 @@ export default function Home() {
             <header className="flex flex-col items-center text-center space-y-4 pt-2">
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-medium tracking-wide uppercase">
                 <Sparkles className="w-3 h-3" />
-                <span>Residential Plumbing Workflow</span>
+                <span>Field Quote Workflow</span>
               </div>
 
               <h1 className="text-3xl font-bold tracking-tight text-white leading-tight">
@@ -289,7 +289,7 @@ export default function Home() {
                   <div className="space-y-2">
                     <p className="text-xs text-blue-300 font-medium uppercase tracking-wider">Listening...</p>
                     <p className="text-sm text-gray-300 leading-relaxed">
-                      <TypewriterText text="Replace 50-gallon water heater, expansion tank, shutoff valve, haul away old unit..." />
+                      <TypewriterText text="Replace damaged trim, reset fixture, patch access, haul away debris..." />
                     </p>
                   </div>
                 </div>
@@ -300,7 +300,7 @@ export default function Home() {
             <Link href="/new-estimate" className="w-full max-w-sm mx-auto block">
               <Button size="lg" className="w-full h-16 text-lg font-bold rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 shadow-[0_0_30px_-5px_rgba(37,99,235,0.4)] border border-blue-400/20 transition-all hover:scale-[1.02] active:scale-[0.98]">
                 <Mic className="mr-2 h-6 w-6" />
-                Create Plumbing Quote
+                Create Field Quote
               </Button>
               <p className="text-center text-xs text-muted-foreground mt-3">
                 Tap to speak • Works offline • Review before sending

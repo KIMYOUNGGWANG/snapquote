@@ -1,11 +1,11 @@
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
-    title: "AI Plumbing Estimate Generator",
-    description: "Create a professional plumbing estimate from a 30-second voice note. Built for owner-operators who need to quote from the job site.",
+    title: "AI Estimate Generator for Trades",
+    description: "Create a professional field estimate from a 30-second voice note. Built for owner-operators and small trade teams who quote from the job site.",
     openGraph: {
-        title: "AI Plumbing Estimate Generator | SnapQuote",
-        description: "Send a professional plumbing quote before you leave the driveway.",
+        title: "AI Estimate Generator for Trades | SnapQuote",
+        description: "Send a professional field quote before you leave the job site.",
     }
 };
 

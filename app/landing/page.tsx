@@ -85,10 +85,10 @@ export default function LandingPage() {
     const [isMenuOpen, setIsMenuOpen] = useState(false)
 
     const voiceExamples = [
-        "Replace 50-gallon water heater, expansion tank, shutoff valve, haul away old unit, 4 hours labor",
-        "Kitchen sink leak under cabinet, replace P-trap and angle stops, 1.5 hours labor",
-        "Install customer-supplied toilet, wax ring, supply line, disposal of old unit",
-        "Basement sump pump replacement, new check valve, test discharge line, 3 hours labor"
+        "Replace damaged entry door, new hardware, haul away old unit, 5 hours labor",
+        "Install customer-supplied vanity, reconnect fixture, patch minor drywall, 4 hours labor",
+        "Swap two light fixtures, add dimmer switch, test circuits, cleanup included",
+        "Repair ceiling drywall after leak, texture blend, prime and paint, 1 day labor"
     ]
 
     return (
@@ -133,19 +133,19 @@ export default function LandingPage() {
                                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                                     <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
                                 </span>
-                                For Residential Plumbing Owner-Operators
+                                For Owner-Operators and Small Trade Teams
                             </div>
 
                             <h1 className="text-4xl md:text-6xl font-bold leading-tight mb-6">
-                                Send the plumbing quote
+                                Send the field quote
                                 <br />
                                 <span className="bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
-                                    before you leave the driveway.
+                                    before you leave the job site.
                                 </span>
                             </h1>
 
                             <p className="text-lg text-gray-400 mb-4 max-w-lg">
-                                Record 30 seconds of scope notes on-site. SnapQuote turns them into a professional plumbing estimate you can review, send, and get approved before the customer cools off.
+                                Record 30 seconds of scope notes on-site. SnapQuote turns them into a professional estimate you can review, send, and get approved before the customer cools off.
                             </p>
 
                             {/* Voice Input Demo */}
@@ -173,7 +173,7 @@ export default function LandingPage() {
                                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                                     </svg>
-                                    Create Your First Plumbing Quote
+                                    Create Your First Field Quote
                                 </Link>
                                 <a href="#how-it-works" className="border border-white/10 hover:border-white/20 text-gray-300 hover:text-white px-8 py-4 rounded-2xl text-base font-medium transition-all flex items-center justify-center gap-2">
                                     See How It Works
@@ -185,7 +185,7 @@ export default function LandingPage() {
                             </div>
 
                             <p className="text-xs text-gray-500 mt-4">
-                                ✓ No credit card required &nbsp;·&nbsp; ✓ Works offline in basements &nbsp;·&nbsp; ✓ 10 free estimates
+                                ✓ No credit card required &nbsp;·&nbsp; ✓ Works offline in weak-signal job sites &nbsp;·&nbsp; ✓ 10 free estimates
                             </p>
                         </div>
 
@@ -195,7 +195,7 @@ export default function LandingPage() {
                             <div className="relative bg-white/5 border border-white/10 rounded-3xl p-2 shadow-2xl shadow-blue-900/20">
                                 <Image
                                     src="/hero-contractor.png"
-                                    alt="Plumber using SnapQuote at a residential job site"
+                                    alt="Contractor using SnapQuote at a residential job site"
                                     width={600}
                                     height={600}
                                     className="rounded-2xl w-full h-auto object-cover"
@@ -243,18 +243,18 @@ export default function LandingPage() {
             <section className="py-20 px-6">
                 <div className="max-w-4xl mx-auto text-center">
                     <h2 className="text-3xl md:text-4xl font-bold mb-6">
-                        Sound familiar for a plumbing owner?
+                        Sound familiar for a field owner?
                     </h2>
                     <div className="grid md:grid-cols-3 gap-6 mt-12">
                         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:border-red-500/30 transition-colors">
                             <div className="text-4xl mb-4">🌙</div>
                             <h3 className="font-semibold text-lg mb-2">Quotes After Dinner</h3>
-                            <p className="text-sm text-gray-400">You finished the service call hours ago, but the water heater quote still needs to get written after everyone else is asleep.</p>
+                            <p className="text-sm text-gray-400">You finished the service call hours ago, but the quote still needs to get written after everyone else is asleep.</p>
                         </div>
                         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:border-red-500/30 transition-colors">
                             <div className="text-4xl mb-4">📱</div>
                             <h3 className="font-semibold text-lg mb-2">No Signal Below Grade</h3>
-                            <p className="text-sm text-gray-400">Basement mechanical room, crawlspace, rural property. Web-only software dies exactly where plumbers do their real work.</p>
+                            <p className="text-sm text-gray-400">Basement, crawlspace, rural property, concrete shell. Web-only software dies exactly where field crews do their real work.</p>
                         </div>
                         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:border-red-500/30 transition-colors">
                             <div className="text-4xl mb-4">🗣️</div>
@@ -271,7 +271,7 @@ export default function LandingPage() {
                     <div className="text-center mb-12">
                         <div className="text-sm text-purple-400 font-medium mb-3 uppercase tracking-wider">Try It Now — No Sign Up</div>
                         <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                            Upload a plumbing receipt.
+                            Upload a receipt or material list.
                             <br />
                             <span className="text-gray-400">See what AI can pull into an estimate.</span>
                         </h2>
@@ -356,7 +356,7 @@ export default function LandingPage() {
                     <div className="text-center mb-16">
                         <div className="text-sm text-blue-400 font-medium mb-3 uppercase tracking-wider">Why SnapQuote</div>
                         <h2 className="text-3xl md:text-4xl font-bold">
-                            Built for plumbing jobs,
+                            Built for field jobs,
                             <br />
                             <span className="text-gray-400">not office workflows.</span>
                         </h2>
@@ -459,7 +459,7 @@ export default function LandingPage() {
                                 When you pull away from the customer&apos;s house, the quote should already be <strong className="text-white">out</strong>. Not waiting until tonight. Not buried in your notes app.
                             </p>
                             <p className="text-lg text-gray-300 mb-8 max-w-2xl mx-auto leading-relaxed">
-                                <strong className="text-white">Done means done.</strong> Dinner stays dinner. Weekends stay weekends. Plumbing paperwork should not follow you home.
+                                <strong className="text-white">Done means done.</strong> Dinner stays dinner. Weekends stay weekends. Quote admin should not follow you home.
                             </p>
                             <p className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
                                 Quote it before you drive off.
@@ -484,7 +484,7 @@ export default function LandingPage() {
                         {/* Starter */}
                         <div className="bg-white/5 border border-white/10 rounded-2xl p-8">
                             <h3 className="text-lg font-bold mb-1">Starter</h3>
-                            <p className="text-sm text-gray-400 mb-6">For solo plumbers building a quoting habit</p>
+                            <p className="text-sm text-gray-400 mb-6">For solo contractors building a quoting habit</p>
                             <div className="text-4xl font-bold mb-1">CAD $29</div>
                             <p className="text-sm text-gray-400 mb-6">per month</p>
                             <ul className="space-y-3 text-sm text-gray-300">
@@ -598,13 +598,13 @@ export default function LandingPage() {
                                 ))}
                             </div>
                             <p className="text-sm text-gray-300 mb-4 leading-relaxed">
-                                &quot;I quoted a water-heater replacement from the driveway and had approval before I hit the next red light. That never used to happen.&quot;
+                                &quot;I quoted the job from the driveway and had approval before I hit the next red light. That never used to happen.&quot;
                             </p>
                             <div className="flex items-center gap-3">
                                 <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center text-sm font-bold text-blue-400">M</div>
                                 <div>
                                     <p className="text-sm font-medium">Mike R.</p>
-                                    <p className="text-xs text-gray-500">Plumber, 12 years</p>
+                                    <p className="text-xs text-gray-500">Contractor, 12 years</p>
                                 </div>
                             </div>
                         </div>
@@ -624,7 +624,7 @@ export default function LandingPage() {
                                 <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center text-sm font-bold text-green-400">S</div>
                                 <div>
                                     <p className="text-sm font-medium">Sarah T.</p>
-                                    <p className="text-xs text-gray-500">Drain & Sewer, 9 years</p>
+                                    <p className="text-xs text-gray-500">Owner-operator, 9 years</p>
                                 </div>
                             </div>
                         </div>
@@ -644,7 +644,7 @@ export default function LandingPage() {
                                 <div className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center text-sm font-bold text-purple-400">D</div>
                                 <div>
                                     <p className="text-sm font-medium">David L.</p>
-                                    <p className="text-xs text-gray-500">Plumbing Owner, 15 years</p>
+                                    <p className="text-xs text-gray-500">Remodeler, 15 years</p>
                                 </div>
                             </div>
                         </div>
@@ -656,7 +656,7 @@ export default function LandingPage() {
             <section className="py-20 px-6">
                 <div className="max-w-4xl mx-auto text-center">
                     <h2 className="text-3xl md:text-5xl font-bold mb-6">
-                        Your plumbing quote should be sent
+                        Your next quote should be sent
                         <br />
                         <span className="bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">before you start the truck.</span>
                     </h2>
@@ -667,7 +667,7 @@ export default function LandingPage() {
                         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                         </svg>
-                        Create Your First Plumbing Quote
+                        Create Your First Field Quote
                     </Link>
                     <p className="text-xs text-gray-600 mt-4">Works offline · Built for owner-operators · Review before sending</p>
                 </div>
@@ -682,7 +682,7 @@ export default function LandingPage() {
                                 <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-700 rounded-lg flex items-center justify-center text-white font-bold text-sm">SQ</div>
                                 <span className="font-bold">SnapQuote</span>
                             </div>
-                            <p className="text-sm text-gray-500">Dirty hands. Fast plumbing quotes.</p>
+                            <p className="text-sm text-gray-500">Dirty hands. Fast field quotes.</p>
                         </div>
                         <div>
                             <h4 className="font-semibold mb-3 text-sm">Product</h4>
@@ -695,10 +695,10 @@ export default function LandingPage() {
                         <div>
                             <h4 className="font-semibold mb-3 text-sm">Best Fit</h4>
                             <ul className="space-y-2 text-sm text-gray-500">
-                                <li>Residential plumbing</li>
-                                <li>Water heaters</li>
-                                <li>Drain and leak calls</li>
-                                <li>Fixture installs</li>
+                                <li>Residential service calls</li>
+                                <li>Small installs</li>
+                                <li>Repair work</li>
+                                <li>Change orders</li>
                             </ul>
                         </div>
                         <div>
