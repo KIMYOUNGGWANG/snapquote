@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
+import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -97,13 +98,41 @@ export default function ProfilePage() {
 
     const loadProfile = useCallback(async () => {
         try {
-            const savedProfile = getProfile()
-            if (savedProfile) {
-                setProfile(savedProfile)
-                if (savedProfile.logo_url) {
-                    setLogoPreview(savedProfile.logo_url)
+            // Priority 1: Supabase (Server State)
+            const { data: { session } } = await supabase.auth.getSession()
+            if (session?.user) {
+                const { data: dbProfile, error: dbError } = await supabase
+                    .from("profiles")
+                    .select("business_name, phone, email, address, license_number, tax_rate, logo_url, state_province, payment_link")
+                    .eq("id", session.user.id)
+                    .single()
+
+                if (dbProfile && !dbError) {
+                    const mappedProfile: BusinessInfo = {
+                        business_name: dbProfile.business_name || "",
+                        phone: dbProfile.phone || "",
+                        email: dbProfile.email || "",
+                        address: dbProfile.address || "",
+                        license_number: dbProfile.license_number || "",
+                        tax_rate: dbProfile.tax_rate ?? 13,
+                        logo_url: dbProfile.logo_url || "",
+                        state_province: dbProfile.state_province || "ON",
+                        payment_link: dbProfile.payment_link || ""
+                    }
+                    setProfile(mappedProfile)
+                    if (mappedProfile.logo_url) setLogoPreview(mappedProfile.logo_url)
+                    // Also sync to local storage for offline use
+                    saveProfile(mappedProfile)
+                } else {
+                    // Priority 2: Local Storage (Fallback)
+                    const savedProfile = getProfile()
+                    if (savedProfile) {
+                        setProfile(savedProfile)
+                        if (savedProfile.logo_url) setLogoPreview(savedProfile.logo_url)
+                    }
                 }
             }
+
             // Load price list
             const prices = await getPriceList()
             setPriceList(prices)
@@ -218,13 +247,36 @@ export default function ProfilePage() {
     const handleSave = async () => {
         setSaving(true)
         try {
+            // 1. Save to Supabase (Server)
+            const { data: { session } } = await supabase.auth.getSession()
+            if (session?.user) {
+                const { error: dbError } = await supabase
+                    .from("profiles")
+                    .upsert({
+                        id: session.user.id,
+                        business_name: profile.business_name,
+                        phone: profile.phone,
+                        email: profile.email,
+                        address: profile.address,
+                        license_number: profile.license_number,
+                        tax_rate: profile.tax_rate,
+                        logo_url: profile.logo_url,
+                        state_province: profile.state_province,
+                        payment_link: profile.payment_link
+                    })
+
+                if (dbError) throw dbError
+            }
+
+            // 2. Save to Local Storage (Client)
             saveProfile(profile)
-            toast("✅ Profile saved!", "success")
+
+            toast("✅ Profile synced and saved!", "success")
             const stats = await getStorageStats()
             setStorageStats(stats)
-        } catch (error) {
+        } catch (error: any) {
             console.error("Error saving profile:", error)
-            toast("❌ Failed to save profile.", "error")
+            toast(`❌ Failed to sync: ${error.message}`, "error")
         } finally {
             setSaving(false)
         }

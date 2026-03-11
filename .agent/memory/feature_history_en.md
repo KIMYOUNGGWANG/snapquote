@@ -288,3 +288,7 @@ Implemented comprehensive SEO optimization: metadataBase, OpenGraph, Twitter car
 ### [SHIP] 18:10:04
 [Feature Summary] Deployed Security & Performance Patches (Generate API quota bypass, Zod input validation, useEffect rendering optimizations). All 96 unit tests and 6 E2E tests passed.
 ---
+
+### [SHIP] 23:28:44
+Fixed profile sync: App now syncs Setup Wizard inputs to Supabase and saves to local storage.
+---

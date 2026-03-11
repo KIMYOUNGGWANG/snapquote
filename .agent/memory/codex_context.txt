@@ -1,23 +1,25 @@
-=== 🤖 Orchestrator 4.0 Context Bridge ===
-You are an Actentic Worker in the Orchestrator 4.0 Factory.
-Mode: [INDEXED] (Use -v for full content)
+=== 🤖 Orchestrator 5.1 — Precision Context Bridge ===
+You are an Agentic Worker in the Orchestrator 5.1 Factory.
+Mode: [PRECISION] — Only essentials loaded. No noise.
 Your role is defined in the workflow below.
 
 --- [ 1. The Mission ] ---
-# Task Board (Ready for Next Mission)
+# 📋 Task Board
 
-## Active Missions
-- TBD: Start next phase.
+## [ ] Backlog
+- [ ] Implement Supabase sync in Profile Page (`app/profile/page.tsx`) <!-- id: 0 -->
+    - [ ] Fetch profile from `profiles` table on load
+    - [ ] Upsert profile to `profiles` table on save
+- [ ] Verify Dashboard Setup Wizard logic (`app/page.tsx`) <!-- id: 1 -->
+- [ ] Manual verification of cross-device sync <!-- id: 2 -->
 
-## Tasks
-| ID | Area | Endpoint | Flow | Status |
-|:--|:--|:--|:--|:--|
-| TBD | TBD | TBD | TBD | Not Started |
+## [ ] In Progress
 
---- [ 1.5 System Architecture & Docs ] ---
+## [ ] Done
 
---- [ 1.8 Strategic Debate Log ] ---
-
+## [ ] Verification
+- `npx eslint app/profile/page.tsx app/page.tsx`
+- Manual check: Setup wizard should not appear after profile save.
 
 --- [ 2. The Contract (API Spec) ] ---
 # API Spec: Estimate Generation and Delivery Runtime
@@ -1067,70 +1069,1505 @@ Response: `text/plain` outputting `User-Agent: *` and appropriate `Allow`/`Disal
 - V4 rollout status:
   - `/api/parse-receipt`: implemented (runtime + tests)
 
---- [ 2.1 Project Context (Conductor) ] ---
-CONTEXT: conductor/product.md
-# 📦 Product Strategy: Project Conductor
+--- [ 3. Precision Skills ] ---
+Auto-detected tech:  next react supabase
+📦 Concat Mode: Merging 5 skills into .agent/memory/current_loaded_skills.md ...
+✅ Merged into: .agent/memory/current_loaded_skills.md
+📋 AGENT DIRECTIVE: Read ONLY this single file: .agent/memory/current_loaded_skills.md
 
-Define the core vision and product requirements here.
+⚡ Token-efficient: Loaded 5 / 1113 total indexed skills.
 
-## Overview
-This project is an AI-orchestrated development environment.
+# 🧠 Dynamically Loaded Skills (Auto-generated)
+# Query: " next react supabase"
+# Generated: 2026-03-11T20:05:51
 
-## Target Audience
-AI Engineers and Developers using Agentic Workflows.
+---
+## Source: /Users/kim-young-gwang/.agent/skills/skills/ui-ux-pro-max/SKILL.md
 
-## Core Features
-1. Orchestrator 4.0 Engine.
-2. Parallel Implementation Threads.
-3. Multi-Model Routing.
+---
+name: ui-ux-pro-max
+description: "UI/UX design intelligence. 50 styles, 21 palettes, 50 font pairings, 20 charts, 9 stacks (React, Next.js, Vue, Svelte, SwiftUI, React Native, Flutter, Tailwind, shadcn/ui). Actions: plan, build, create, design, implement, review, fix, improve, optimize, enhance, refactor, check UI/UX code. Projects: website, landing page, dashboard, admin panel, e-commerce, SaaS, portfolio, blog, mobile app, .html, .tsx, .vue, .svelte. Elements: button, modal, navbar, sidebar, card, table, form, chart. Styles: glassmorphism, claymorphism, minimalism, brutalism, neumorphism, bento grid, dark mode, responsive, skeuomorphism, flat design. Topics: color palette, accessibility, animation, layout, typography, font pairing, spacing, hover, shadow, gradient. Integrations: shadcn/ui MCP for component search and examples."
+---
 
-CONTEXT: conductor/tech-stack.md
-# 💻 Technology Stack
+# UI/UX Pro Max - Design Intelligence
 
-## Frontend
-- React / Next.js
-- Tailwind CSS / Vanilla CSS
+Comprehensive design guide for web and mobile applications. Contains 50+ styles, 97 color palettes, 57 font pairings, 99 UX guidelines, and 25 chart types across 9 technology stacks. Searchable database with priority-based recommendations.
 
-## Backend
-- Supabase (PostgreSQL, Edge Functions)
-- Node.js
+## When to Apply
 
-## Infrastructure
-- Vercel (Deployment)
-- Git (Version Control)
+Reference these guidelines when:
+- Designing new UI components or pages
+- Choosing color palettes and typography
+- Reviewing code for UX issues
+- Building landing pages or dashboards
+- Implementing accessibility requirements
 
-CONTEXT: conductor/tracks.md
-# Engineering Tracks
+## Rule Categories by Priority
 
-## 2026-02-20 - Fix Loop: Dependency Security Patch
+| Priority | Category | Impact | Domain |
+|----------|----------|--------|--------|
+| 1 | Accessibility | CRITICAL | `ux` |
+| 2 | Touch & Interaction | CRITICAL | `ux` |
+| 3 | Performance | HIGH | `ux` |
+| 4 | Layout & Responsive | HIGH | `ux` |
+| 5 | Typography & Color | MEDIUM | `typography`, `color` |
+| 6 | Animation | MEDIUM | `ux` |
+| 7 | Style Selection | MEDIUM | `style`, `product` |
+| 8 | Charts & Data | LOW | `chart` |
 
-- Scope: `npm audit` vulnerability remediation for high-risk dependency paths.
-- Actions:
-  - Replaced `xlsx` import path with CSV parser.
-  - Removed `next-pwa` wrapper and moved to manual service worker registration.
-  - Added Next image optimizer hardening.
-- QA:
-  - `npm test`: pass (36/36)
-  - `npm run lint`: pass (1 pre-existing warning)
-  - `npm prune`: pass (`next-pwa`/`xlsx` removed from installed tree)
-- Status: In progress for full lockfile re-resolution and Next major upgrade planning.
+## Quick Reference
 
-## 2026-02-25 - Fix Loop: Database Security Patch
+### 1. Accessibility (CRITICAL)
 
-- Scope: Static schema audit remediation (missing BK/FK indexes and RLS policies).
-- Actions:
-  - Added B-Tree indexes for critical foreign keys (`estimate_items`, `automations`, `job_queue`, `feedback`).
-  - Restricted `referral_events` public insert vector to Service Role only.
-  - Relaxed `pricing_experiments` read policy to public for pre-login A/B testing.
-- QA:
-  - Validated structural integrity of `supabase_schema_fresh.sql` and legacy `supabase_schema.sql`.
-- Status: Ready to be applied to remote via `supabase db push`.
+- `color-contrast` - Minimum 4.5:1 ratio for normal text
+- `focus-states` - Visible focus rings on interactive elements
+- `alt-text` - Descriptive alt text for meaningful images
+- `aria-labels` - aria-label for icon-only buttons
+- `keyboard-nav` - Tab order matches visual order
+- `form-labels` - Use label with for attribute
+
+### 2. Touch & Interaction (CRITICAL)
+
+- `touch-target-size` - Minimum 44x44px touch targets
+- `hover-vs-tap` - Use click/tap for primary interactions
+- `loading-buttons` - Disable button during async operations
+- `error-feedback` - Clear error messages near problem
+- `cursor-pointer` - Add cursor-pointer to clickable elements
+
+### 3. Performance (HIGH)
+
+- `image-optimization` - Use WebP, srcset, lazy loading
+- `reduced-motion` - Check prefers-reduced-motion
+- `content-jumping` - Reserve space for async content
+
+### 4. Layout & Responsive (HIGH)
+
+- `viewport-meta` - width=device-width initial-scale=1
+- `readable-font-size` - Minimum 16px body text on mobile
+- `horizontal-scroll` - Ensure content fits viewport width
+- `z-index-management` - Define z-index scale (10, 20, 30, 50)
+
+### 5. Typography & Color (MEDIUM)
+
+- `line-height` - Use 1.5-1.75 for body text
+- `line-length` - Limit to 65-75 characters per line
+- `font-pairing` - Match heading/body font personalities
+
+### 6. Animation (MEDIUM)
+
+- `duration-timing` - Use 150-300ms for micro-interactions
+- `transform-performance` - Use transform/opacity, not width/height
+- `loading-states` - Skeleton screens or spinners
+
+### 7. Style Selection (MEDIUM)
+
+- `style-match` - Match style to product type
+- `consistency` - Use same style across all pages
+- `no-emoji-icons` - Use SVG icons, not emojis
+
+### 8. Charts & Data (LOW)
+
+- `chart-type` - Match chart type to data type
+- `color-guidance` - Use accessible color palettes
+- `data-table` - Provide table alternative for accessibility
+
+## How to Use
+
+Search specific domains using the CLI tool below.
+
+---
+
+## Prerequisites
+
+Check if Python is installed:
+
+```bash
+python3 --version || python --version
+```
+
+If Python is not installed, install it based on user's OS:
+
+**macOS:**
+```bash
+brew install python3
+```
+
+**Ubuntu/Debian:**
+```bash
+sudo apt update && sudo apt install python3
+```
+
+**Windows:**
+```powershell
+winget install Python.Python.3.12
+```
+
+---
+
+## How to Use This Skill
+
+When user requests UI/UX work (design, build, create, implement, review, fix, improve), follow this workflow:
+
+### Step 1: Analyze User Requirements
+
+Extract key information from user request:
+- **Product type**: SaaS, e-commerce, portfolio, dashboard, landing page, etc.
+- **Style keywords**: minimal, playful, professional, elegant, dark mode, etc.
+- **Industry**: healthcare, fintech, gaming, education, etc.
+- **Stack**: React, Vue, Next.js, or default to `html-tailwind`
+
+### Step 2: Generate Design System (REQUIRED)
+
+**Always start with `--design-system`** to get comprehensive recommendations with reasoning:
+
+```bash
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py "<product_type> <industry> <keywords>" --design-system [-p "Project Name"]
+```
+
+This command:
+1. Searches 5 domains in parallel (product, style, color, landing, typography)
+2. Applies reasoning rules from `ui-reasoning.csv` to select best matches
+3. Returns complete design system: pattern, style, colors, typography, effects
+4. Includes anti-patterns to avoid
+
+**Example:**
+```bash
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py "beauty spa wellness service" --design-system -p "Serenity Spa"
+```
+
+### Step 3: Supplement with Detailed Searches (as needed)
+
+After getting the design system, use domain searches to get additional details:
+
+```bash
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py "<keyword>" --domain <domain> [-n <max_results>]
+```
+
+**When to use detailed searches:**
+
+| Need | Domain | Example |
+|------|--------|---------|
+| More style options | `style` | `--domain style "glassmorphism dark"` |
+| Chart recommendations | `chart` | `--domain chart "real-time dashboard"` |
+| UX best practices | `ux` | `--domain ux "animation accessibility"` |
+| Alternative fonts | `typography` | `--domain typography "elegant luxury"` |
+| Landing structure | `landing` | `--domain landing "hero social-proof"` |
+
+### Step 4: Stack Guidelines (Default: html-tailwind)
+
+Get implementation-specific best practices. If user doesn't specify a stack, **default to `html-tailwind`**.
+
+```bash
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py "<keyword>" --stack html-tailwind
+```
+
+Available stacks: `html-tailwind`, `react`, `nextjs`, `vue`, `svelte`, `swiftui`, `react-native`, `flutter`, `shadcn`
+
+---
+
+## Search Reference
+
+### Available Domains
+
+| Domain | Use For | Example Keywords |
+|--------|---------|------------------|
+| `product` | Product type recommendations | SaaS, e-commerce, portfolio, healthcare, beauty, service |
+| `style` | UI styles, colors, effects | glassmorphism, minimalism, dark mode, brutalism |
+| `typography` | Font pairings, Google Fonts | elegant, playful, professional, modern |
+| `color` | Color palettes by product type | saas, ecommerce, healthcare, beauty, fintech, service |
+| `landing` | Page structure, CTA strategies | hero, hero-centric, testimonial, pricing, social-proof |
+| `chart` | Chart types, library recommendations | trend, comparison, timeline, funnel, pie |
+| `ux` | Best practices, anti-patterns | animation, accessibility, z-index, loading |
+| `react` | React/Next.js performance | waterfall, bundle, suspense, memo, rerender, cache |
+| `web` | Web interface guidelines | aria, focus, keyboard, semantic, virtualize |
+| `prompt` | AI prompts, CSS keywords | (style name) |
+
+### Available Stacks
+
+| Stack | Focus |
+|-------|-------|
+| `html-tailwind` | Tailwind utilities, responsive, a11y (DEFAULT) |
+| `react` | State, hooks, performance, patterns |
+| `nextjs` | SSR, routing, images, API routes |
+| `vue` | Composition API, Pinia, Vue Router |
+| `svelte` | Runes, stores, SvelteKit |
+| `swiftui` | Views, State, Navigation, Animation |
+| `react-native` | Components, Navigation, Lists |
+| `flutter` | Widgets, State, Layout, Theming |
+| `shadcn` | shadcn/ui components, theming, forms, patterns |
+
+---
+
+## Example Workflow
+
+**User request:** "Làm landing page cho dịch vụ chăm sóc da chuyên nghiệp"
+
+### Step 1: Analyze Requirements
+- Product type: Beauty/Spa service
+- Style keywords: elegant, professional, soft
+- Industry: Beauty/Wellness
+- Stack: html-tailwind (default)
+
+### Step 2: Generate Design System (REQUIRED)
+
+```bash
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py "beauty spa wellness service elegant" --design-system -p "Serenity Spa"
+```
+
+**Output:** Complete design system with pattern, style, colors, typography, effects, and anti-patterns.
+
+### Step 3: Supplement with Detailed Searches (as needed)
+
+```bash
+# Get UX guidelines for animation and accessibility
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py "animation accessibility" --domain ux
+
+# Get alternative typography options if needed
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py "elegant luxury serif" --domain typography
+```
+
+### Step 4: Stack Guidelines
+
+```bash
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py "layout responsive form" --stack html-tailwind
+```
+
+**Then:** Synthesize design system + detailed searches and implement the design.
+
+---
+
+## Output Formats
+
+The `--design-system` flag supports two output formats:
+
+```bash
+# ASCII box (default) - best for terminal display
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py "fintech crypto" --design-system
+
+# Markdown - best for documentation
+python3 .claude/skills/ui-ux-pro-max/scripts/search.py "fintech crypto" --design-system -f markdown
+```
+
+---
+
+## Tips for Better Results
+
+1. **Be specific with keywords** - "healthcare SaaS dashboard" > "app"
+2. **Search multiple times** - Different keywords reveal different insights
+3. **Combine domains** - Style + Typography + Color = Complete design system
+4. **Always check UX** - Search "animation", "z-index", "accessibility" for common issues
+5. **Use stack flag** - Get implementation-specific best practices
+6. **Iterate** - If first search doesn't match, try different keywords
+
+---
+
+## Common Rules for Professional UI
+
+These are frequently overlooked issues that make UI look unprofessional:
+
+### Icons & Visual Elements
+
+| Rule | Do | Don't |
+|------|----|----- |
+| **No emoji icons** | Use SVG icons (Heroicons, Lucide, Simple Icons) | Use emojis like 🎨 🚀 ⚙️ as UI icons |
+| **Stable hover states** | Use color/opacity transitions on hover | Use scale transforms that shift layout |
+| **Correct brand logos** | Research official SVG from Simple Icons | Guess or use incorrect logo paths |
+| **Consistent icon sizing** | Use fixed viewBox (24x24) with w-6 h-6 | Mix different icon sizes randomly |
+
+### Interaction & Cursor
+
+| Rule | Do | Don't |
+|------|----|----- |
+| **Cursor pointer** | Add `cursor-pointer` to all clickable/hoverable cards | Leave default cursor on interactive elements |
+| **Hover feedback** | Provide visual feedback (color, shadow, border) | No indication element is interactive |
+| **Smooth transitions** | Use `transition-colors duration-200` | Instant state changes or too slow (>500ms) |
+
+### Light/Dark Mode Contrast
+
+| Rule | Do | Don't |
+|------|----|----- |
+| **Glass card light mode** | Use `bg-white/80` or higher opacity | Use `bg-white/10` (too transparent) |
+| **Text contrast light** | Use `#0F172A` (slate-900) for text | Use `#94A3B8` (slate-400) for body text |
+| **Muted text light** | Use `#475569` (slate-600) minimum | Use gray-400 or lighter |
+| **Border visibility** | Use `border-gray-200` in light mode | Use `border-white/10` (invisible) |
+
+### Layout & Spacing
+
+| Rule | Do | Don't |
+|------|----|----- |
+| **Floating navbar** | Add `top-4 left-4 right-4` spacing | Stick navbar to `top-0 left-0 right-0` |
+| **Content padding** | Account for fixed navbar height | Let content hide behind fixed elements |
+| **Consistent max-width** | Use same `max-w-6xl` or `max-w-7xl` | Mix different container widths |
+
+---
+
+## Pre-Delivery Checklist
+
+Before delivering UI code, verify these items:
+
+### Visual Quality
+- [ ] No emojis used as icons (use SVG instead)
+- [ ] All icons from consistent icon set (Heroicons/Lucide)
+- [ ] Brand logos are correct (verified from Simple Icons)
+- [ ] Hover states don't cause layout shift
+- [ ] Use theme colors directly (bg-primary) not var() wrapper
+
+### Interaction
+- [ ] All clickable elements have `cursor-pointer`
+- [ ] Hover states provide clear visual feedback
+- [ ] Transitions are smooth (150-300ms)
+- [ ] Focus states visible for keyboard navigation
+
+### Light/Dark Mode
+- [ ] Light mode text has sufficient contrast (4.5:1 minimum)
+- [ ] Glass/transparent elements visible in light mode
+- [ ] Borders visible in both modes
+- [ ] Test both modes before delivery
+
+### Layout
+- [ ] Floating elements have proper spacing from edges
+- [ ] No content hidden behind fixed navbars
+- [ ] Responsive at 375px, 768px, 1024px, 1440px
+- [ ] No horizontal scroll on mobile
+
+### Accessibility
+- [ ] All images have alt text
+- [ ] Form inputs have labels
+- [ ] Color is not the only indicator
+- [ ] `prefers-reduced-motion` respected
+
+---
+## Source: /Users/kim-young-gwang/.agent/skills/skills/cc-skill-frontend-patterns/SKILL.md
+
+---
+name: frontend-patterns
+description: Frontend development patterns for React, Next.js, state management, performance optimization, and UI best practices.
+author: affaan-m
+version: "1.0"
+---
+
+# Frontend Development Patterns
+
+Modern frontend patterns for React, Next.js, and performant user interfaces.
+
+## Component Patterns
+
+### Composition Over Inheritance
+
+```typescript
+// ✅ GOOD: Component composition
+interface CardProps {
+  children: React.ReactNode
+  variant?: 'default' | 'outlined'
+}
+
+export function Card({ children, variant = 'default' }: CardProps) {
+  return <div className={`card card-${variant}`}>{children}</div>
+}
+
+export function CardHeader({ children }: { children: React.ReactNode }) {
+  return <div className="card-header">{children}</div>
+}
+
+export function CardBody({ children }: { children: React.ReactNode }) {
+  return <div className="card-body">{children}</div>
+}
+
+// Usage
+<Card>
+  <CardHeader>Title</CardHeader>
+  <CardBody>Content</CardBody>
+</Card>
+```
+
+### Compound Components
+
+```typescript
+interface TabsContextValue {
+  activeTab: string
+  setActiveTab: (tab: string) => void
+}
+
+const TabsContext = createContext<TabsContextValue | undefined>(undefined)
+
+export function Tabs({ children, defaultTab }: {
+  children: React.ReactNode
+  defaultTab: string
+}) {
+  const [activeTab, setActiveTab] = useState(defaultTab)
+
+  return (
+    <TabsContext.Provider value={{ activeTab, setActiveTab }}>
+      {children}
+    </TabsContext.Provider>
+  )
+}
+
+export function TabList({ children }: { children: React.ReactNode }) {
+  return <div className="tab-list">{children}</div>
+}
+
+export function Tab({ id, children }: { id: string, children: React.ReactNode }) {
+  const context = useContext(TabsContext)
+  if (!context) throw new Error('Tab must be used within Tabs')
+
+  return (
+    <button
+      className={context.activeTab === id ? 'active' : ''}
+      onClick={() => context.setActiveTab(id)}
+    >
+      {children}
+    </button>
+  )
+}
+
+// Usage
+<Tabs defaultTab="overview">
+  <TabList>
+    <Tab id="overview">Overview</Tab>
+    <Tab id="details">Details</Tab>
+  </TabList>
+</Tabs>
+```
+
+### Render Props Pattern
+
+```typescript
+interface DataLoaderProps<T> {
+  url: string
+  children: (data: T | null, loading: boolean, error: Error | null) => React.ReactNode
+}
+
+export function DataLoader<T>({ url, children }: DataLoaderProps<T>) {
+  const [data, setData] = useState<T | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
+
+  useEffect(() => {
+    fetch(url)
+      .then(res => res.json())
+      .then(setData)
+      .catch(setError)
+      .finally(() => setLoading(false))
+  }, [url])
+
+  return <>{children(data, loading, error)}</>
+}
+
+// Usage
+<DataLoader<Market[]> url="/api/markets">
+  {(markets, loading, error) => {
+    if (loading) return <Spinner />
+    if (error) return <Error error={error} />
+    return <MarketList markets={markets!} />
+  }}
+</DataLoader>
+```
+
+## Custom Hooks Patterns
+
+### State Management Hook
+
+```typescript
+export function useToggle(initialValue = false): [boolean, () => void] {
+  const [value, setValue] = useState(initialValue)
+
+  const toggle = useCallback(() => {
+    setValue(v => !v)
+  }, [])
+
+  return [value, toggle]
+}
+
+// Usage
+const [isOpen, toggleOpen] = useToggle()
+```
+
+### Async Data Fetching Hook
+
+```typescript
+interface UseQueryOptions<T> {
+  onSuccess?: (data: T) => void
+  onError?: (error: Error) => void
+  enabled?: boolean
+}
+
+export function useQuery<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  options?: UseQueryOptions<T>
+) {
+  const [data, setData] = useState<T | null>(null)
+  const [error, setError] = useState<Error | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  const refetch = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const result = await fetcher()
+      setData(result)
+      options?.onSuccess?.(result)
+    } catch (err) {
+      const error = err as Error
+      setError(error)
+      options?.onError?.(error)
+    } finally {
+      setLoading(false)
+    }
+  }, [fetcher, options])
+
+  useEffect(() => {
+    if (options?.enabled !== false) {
+      refetch()
+    }
+  }, [key, refetch, options?.enabled])
+
+  return { data, error, loading, refetch }
+}
+
+// Usage
+const { data: markets, loading, error, refetch } = useQuery(
+  'markets',
+  () => fetch('/api/markets').then(r => r.json()),
+  {
+    onSuccess: data => console.log('Fetched', data.length, 'markets'),
+    onError: err => console.error('Failed:', err)
+  }
+)
+```
+
+### Debounce Hook
+
+```typescript
+export function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value)
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value)
+    }, delay)
+
+    return () => clearTimeout(handler)
+  }, [value, delay])
+
+  return debouncedValue
+}
+
+// Usage
+const [searchQuery, setSearchQuery] = useState('')
+const debouncedQuery = useDebounce(searchQuery, 500)
+
+useEffect(() => {
+  if (debouncedQuery) {
+    performSearch(debouncedQuery)
+  }
+}, [debouncedQuery])
+```
+
+## State Management Patterns
+
+### Context + Reducer Pattern
+
+```typescript
+interface State {
+  markets: Market[]
+  selectedMarket: Market | null
+  loading: boolean
+}
+
+type Action =
+  | { type: 'SET_MARKETS'; payload: Market[] }
+  | { type: 'SELECT_MARKET'; payload: Market }
+  | { type: 'SET_LOADING'; payload: boolean }
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'SET_MARKETS':
+      return { ...state, markets: action.payload }
+    case 'SELECT_MARKET':
+      return { ...state, selectedMarket: action.payload }
+    case 'SET_LOADING':
+      return { ...state, loading: action.payload }
+    default:
+      return state
+  }
+}
+
+const MarketContext = createContext<{
+  state: State
+  dispatch: Dispatch<Action>
+} | undefined>(undefined)
+
+export function MarketProvider({ children }: { children: React.ReactNode }) {
+  const [state, dispatch] = useReducer(reducer, {
+    markets: [],
+    selectedMarket: null,
+    loading: false
+  })
+
+  return (
+    <MarketContext.Provider value={{ state, dispatch }}>
+      {children}
+    </MarketContext.Provider>
+  )
+}
+
+export function useMarkets() {
+  const context = useContext(MarketContext)
+  if (!context) throw new Error('useMarkets must be used within MarketProvider')
+  return context
+}
+```
+
+## Performance Optimization
+
+### Memoization
+
+```typescript
+// ✅ useMemo for expensive computations
+const sortedMarkets = useMemo(() => {
+  return markets.sort((a, b) => b.volume - a.volume)
+}, [markets])
+
+// ✅ useCallback for functions passed to children
+const handleSearch = useCallback((query: string) => {
+  setSearchQuery(query)
+}, [])
+
+// ✅ React.memo for pure components
+export const MarketCard = React.memo<MarketCardProps>(({ market }) => {
+  return (
+    <div className="market-card">
+      <h3>{market.name}</h3>
+      <p>{market.description}</p>
+    </div>
+  )
+})
+```
+
+### Code Splitting & Lazy Loading
+
+```typescript
+import { lazy, Suspense } from 'react'
+
+// ✅ Lazy load heavy components
+const HeavyChart = lazy(() => import('./HeavyChart'))
+const ThreeJsBackground = lazy(() => import('./ThreeJsBackground'))
+
+export function Dashboard() {
+  return (
+    <div>
+      <Suspense fallback={<ChartSkeleton />}>
+        <HeavyChart data={data} />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <ThreeJsBackground />
+      </Suspense>
+    </div>
+  )
+}
+```
+
+### Virtualization for Long Lists
+
+```typescript
+import { useVirtualizer } from '@tanstack/react-virtual'
+
+export function VirtualMarketList({ markets }: { markets: Market[] }) {
+  const parentRef = useRef<HTMLDivElement>(null)
+
+  const virtualizer = useVirtualizer({
+    count: markets.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 100,  // Estimated row height
+    overscan: 5  // Extra items to render
+  })
+
+  return (
+    <div ref={parentRef} style={{ height: '600px', overflow: 'auto' }}>
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          position: 'relative'
+        }}
+      >
+        {virtualizer.getVirtualItems().map(virtualRow => (
+          <div
+            key={virtualRow.index}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: `${virtualRow.size}px`,
+              transform: `translateY(${virtualRow.start}px)`
+            }}
+          >
+            <MarketCard market={markets[virtualRow.index]} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+```
+
+## Form Handling Patterns
+
+### Controlled Form with Validation
+
+```typescript
+interface FormData {
+  name: string
+  description: string
+  endDate: string
+}
+
+interface FormErrors {
+  name?: string
+  description?: string
+  endDate?: string
+}
+
+export function CreateMarketForm() {
+  const [formData, setFormData] = useState<FormData>({
+    name: '',
+    description: '',
+    endDate: ''
+  })
+
+  const [errors, setErrors] = useState<FormErrors>({})
+
+  const validate = (): boolean => {
+    const newErrors: FormErrors = {}
+
+    if (!formData.name.trim()) {
+      newErrors.name = 'Name is required'
+    } else if (formData.name.length > 200) {
+      newErrors.name = 'Name must be under 200 characters'
+    }
+
+    if (!formData.description.trim()) {
+      newErrors.description = 'Description is required'
+    }
+
+    if (!formData.endDate) {
+      newErrors.endDate = 'End date is required'
+    }
+
+    setErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!validate()) return
+
+    try {
+      await createMarket(formData)
+      // Success handling
+    } catch (error) {
+      // Error handling
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        value={formData.name}
+        onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
+        placeholder="Market name"
+      />
+      {errors.name && <span className="error">{errors.name}</span>}
+
+      {/* Other fields */}
+
+      <button type="submit">Create Market</button>
+    </form>
+  )
+}
+```
+
+## Error Boundary Pattern
+
+```typescript
+interface ErrorBoundaryState {
+  hasError: boolean
+  error: Error | null
+}
+
+export class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  ErrorBoundaryState
+> {
+  state: ErrorBoundaryState = {
+    hasError: false,
+    error: null
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('Error boundary caught:', error, errorInfo)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-fallback">
+          <h2>Something went wrong</h2>
+          <p>{this.state.error?.message}</p>
+          <button onClick={() => this.setState({ hasError: false })}>
+            Try again
+          </button>
+        </div>
+      )
+    }
+
+    return this.props.children
+  }
+}
+
+// Usage
+<ErrorBoundary>
+  <App />
+</ErrorBoundary>
+```
+
+## Animation Patterns
+
+### Framer Motion Animations
+
+```typescript
+import { motion, AnimatePresence } from 'framer-motion'
+
+// ✅ List animations
+export function AnimatedMarketList({ markets }: { markets: Market[] }) {
+  return (
+    <AnimatePresence>
+      {markets.map(market => (
+        <motion.div
+          key={market.id}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -20 }}
+          transition={{ duration: 0.3 }}
+        >
+          <MarketCard market={market} />
+        </motion.div>
+      ))}
+    </AnimatePresence>
+  )
+}
+
+// ✅ Modal animations
+export function Modal({ isOpen, onClose, children }: ModalProps) {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          <motion.div
+            className="modal-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+          />
+          <motion.div
+            className="modal-content"
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+          >
+            {children}
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  )
+}
+```
+
+## Accessibility Patterns
+
+### Keyboard Navigation
+
+```typescript
+export function Dropdown({ options, onSelect }: DropdownProps) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [activeIndex, setActiveIndex] = useState(0)
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        setActiveIndex(i => Math.min(i + 1, options.length - 1))
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        setActiveIndex(i => Math.max(i - 1, 0))
+        break
+      case 'Enter':
+        e.preventDefault()
+        onSelect(options[activeIndex])
+        setIsOpen(false)
+        break
+      case 'Escape':
+        setIsOpen(false)
+        break
+    }
+  }
+
+  return (
+    <div
+      role="combobox"
+      aria-expanded={isOpen}
+      aria-haspopup="listbox"
+      onKeyDown={handleKeyDown}
+    >
+      {/* Dropdown implementation */}
+    </div>
+  )
+}
+```
+
+### Focus Management
+
+```typescript
+export function Modal({ isOpen, onClose, children }: ModalProps) {
+  const modalRef = useRef<HTMLDivElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (isOpen) {
+      // Save currently focused element
+      previousFocusRef.current = document.activeElement as HTMLElement
+
+      // Focus modal
+      modalRef.current?.focus()
+    } else {
+      // Restore focus when closing
+      previousFocusRef.current?.focus()
+    }
+  }, [isOpen])
+
+  return isOpen ? (
+    <div
+      ref={modalRef}
+      role="dialog"
+      aria-modal="true"
+      tabIndex={-1}
+      onKeyDown={e => e.key === 'Escape' && onClose()}
+    >
+      {children}
+    </div>
+  ) : null
+}
+```
+
+**Remember**: Modern frontend patterns enable maintainable, performant user interfaces. Choose patterns that fit your project complexity.
+---
+## Source: /Users/kim-young-gwang/.agent/skills/skills/nextjs-supabase-auth/SKILL.md
+
+---
+name: nextjs-supabase-auth
+description: "Expert integration of Supabase Auth with Next.js App Router Use when: supabase auth next, authentication next.js, login supabase, auth middleware, protected route."
+source: vibeship-spawner-skills (Apache 2.0)
+---
+
+# Next.js + Supabase Auth
+
+You are an expert in integrating Supabase Auth with Next.js App Router.
+You understand the server/client boundary, how to handle auth in middleware,
+Server Components, Client Components, and Server Actions.
+
+Your core principles:
+1. Use @supabase/ssr for App Router integration
+2. Handle tokens in middleware for protected routes
+3. Never expose auth tokens to client unnecessarily
+4. Use Server Actions for auth operations when possible
+5. Understand the cookie-based session flow
+
+## Capabilities
+
+- nextjs-auth
+- supabase-auth-nextjs
+- auth-middleware
+- auth-callback
+
+## Requirements
+
+- nextjs-app-router
+- supabase-backend
+
+## Patterns
+
+### Supabase Client Setup
+
+Create properly configured Supabase clients for different contexts
+
+### Auth Middleware
+
+Protect routes and refresh sessions in middleware
+
+### Auth Callback Route
+
+Handle OAuth callback and exchange code for session
+
+## Anti-Patterns
+
+### ❌ getSession in Server Components
+
+### ❌ Auth State in Client Without Listener
+
+### ❌ Storing Tokens Manually
+
+## Related Skills
+
+Works well with: `nextjs-app-router`, `supabase-backend`
+
+---
+## Source: /Users/kim-young-gwang/.agent/skills/skills/senior-architect/SKILL.md
+
+---
+name: senior-architect
+description: Comprehensive software architecture skill for designing scalable, maintainable systems using ReactJS, NextJS, NodeJS, Express, React Native, Swift, Kotlin, Flutter, Postgres, GraphQL, Go, Python. Includes architecture diagram generation, system design patterns, tech stack decision frameworks, and dependency analysis. Use when designing system architecture, making technical decisions, creating architecture diagrams, evaluating trade-offs, or defining integration patterns.
+---
+
+# Senior Architect
+
+Complete toolkit for senior architect with modern tools and best practices.
+
+## Quick Start
+
+### Main Capabilities
+
+This skill provides three core capabilities through automated scripts:
+
+```bash
+# Script 1: Architecture Diagram Generator
+python scripts/architecture_diagram_generator.py [options]
+
+# Script 2: Project Architect
+python scripts/project_architect.py [options]
+
+# Script 3: Dependency Analyzer
+python scripts/dependency_analyzer.py [options]
+```
+
+## Core Capabilities
+
+### 1. Architecture Diagram Generator
+
+Automated tool for architecture diagram generator tasks.
+
+**Features:**
+- Automated scaffolding
+- Best practices built-in
+- Configurable templates
+- Quality checks
+
+**Usage:**
+```bash
+python scripts/architecture_diagram_generator.py <project-path> [options]
+```
+
+### 2. Project Architect
+
+Comprehensive analysis and optimization tool.
+
+**Features:**
+- Deep analysis
+- Performance metrics
+- Recommendations
+- Automated fixes
+
+**Usage:**
+```bash
+python scripts/project_architect.py <target-path> [--verbose]
+```
+
+### 3. Dependency Analyzer
+
+Advanced tooling for specialized tasks.
+
+**Features:**
+- Expert-level automation
+- Custom configurations
+- Integration ready
+- Production-grade output
+
+**Usage:**
+```bash
+python scripts/dependency_analyzer.py [arguments] [options]
+```
+
+## Reference Documentation
+
+### Architecture Patterns
+
+Comprehensive guide available in `references/architecture_patterns.md`:
+
+- Detailed patterns and practices
+- Code examples
+- Best practices
+- Anti-patterns to avoid
+- Real-world scenarios
+
+### System Design Workflows
+
+Complete workflow documentation in `references/system_design_workflows.md`:
+
+- Step-by-step processes
+- Optimization strategies
+- Tool integrations
+- Performance tuning
+- Troubleshooting guide
+
+### Tech Decision Guide
+
+Technical reference guide in `references/tech_decision_guide.md`:
+
+- Technology stack details
+- Configuration examples
+- Integration patterns
+- Security considerations
+- Scalability guidelines
+
+## Tech Stack
+
+**Languages:** TypeScript, JavaScript, Python, Go, Swift, Kotlin
+**Frontend:** React, Next.js, React Native, Flutter
+**Backend:** Node.js, Express, GraphQL, REST APIs
+**Database:** PostgreSQL, Prisma, NeonDB, Supabase
+**DevOps:** Docker, Kubernetes, Terraform, GitHub Actions, CircleCI
+**Cloud:** AWS, GCP, Azure
+
+## Development Workflow
+
+### 1. Setup and Configuration
+
+```bash
+# Install dependencies
+npm install
+# or
+pip install -r requirements.txt
+
+# Configure environment
+cp .env.example .env
+```
+
+### 2. Run Quality Checks
+
+```bash
+# Use the analyzer script
+python scripts/project_architect.py .
+
+# Review recommendations
+# Apply fixes
+```
+
+### 3. Implement Best Practices
+
+Follow the patterns and practices documented in:
+- `references/architecture_patterns.md`
+- `references/system_design_workflows.md`
+- `references/tech_decision_guide.md`
+
+## Best Practices Summary
+
+### Code Quality
+- Follow established patterns
+- Write comprehensive tests
+- Document decisions
+- Review regularly
+
+### Performance
+- Measure before optimizing
+- Use appropriate caching
+- Optimize critical paths
+- Monitor in production
+
+### Security
+- Validate all inputs
+- Use parameterized queries
+- Implement proper authentication
+- Keep dependencies updated
+
+### Maintainability
+- Write clear code
+- Use consistent naming
+- Add helpful comments
+- Keep it simple
+
+## Common Commands
+
+```bash
+# Development
+npm run dev
+npm run build
+npm run test
+npm run lint
+
+# Analysis
+python scripts/project_architect.py .
+python scripts/dependency_analyzer.py --analyze
+
+# Deployment
+docker build -t app:latest .
+docker-compose up -d
+kubectl apply -f k8s/
+```
+
+## Troubleshooting
+
+### Common Issues
+
+Check the comprehensive troubleshooting section in `references/tech_decision_guide.md`.
+
+### Getting Help
+
+- Review reference documentation
+- Check script output messages
+- Consult tech stack documentation
+- Review error logs
+
+## Resources
+
+- Pattern Reference: `references/architecture_patterns.md`
+- Workflow Guide: `references/system_design_workflows.md`
+- Technical Guide: `references/tech_decision_guide.md`
+- Tool Scripts: `scripts/` directory
+
+---
+## Source: /Users/kim-young-gwang/.agent/skills/skills/senior-fullstack/SKILL.md
+
+---
+name: senior-fullstack
+description: Comprehensive fullstack development skill for building complete web applications with React, Next.js, Node.js, GraphQL, and PostgreSQL. Includes project scaffolding, code quality analysis, architecture patterns, and complete tech stack guidance. Use when building new projects, analyzing code quality, implementing design patterns, or setting up development workflows.
+---
+
+# Senior Fullstack
+
+Complete toolkit for senior fullstack with modern tools and best practices.
+
+## Quick Start
+
+### Main Capabilities
+
+This skill provides three core capabilities through automated scripts:
+
+```bash
+# Script 1: Fullstack Scaffolder
+python scripts/fullstack_scaffolder.py [options]
+
+# Script 2: Project Scaffolder
+python scripts/project_scaffolder.py [options]
+
+# Script 3: Code Quality Analyzer
+python scripts/code_quality_analyzer.py [options]
+```
+
+## Core Capabilities
+
+### 1. Fullstack Scaffolder
+
+Automated tool for fullstack scaffolder tasks.
+
+**Features:**
+- Automated scaffolding
+- Best practices built-in
+- Configurable templates
+- Quality checks
+
+**Usage:**
+```bash
+python scripts/fullstack_scaffolder.py <project-path> [options]
+```
+
+### 2. Project Scaffolder
+
+Comprehensive analysis and optimization tool.
+
+**Features:**
+- Deep analysis
+- Performance metrics
+- Recommendations
+- Automated fixes
+
+**Usage:**
+```bash
+python scripts/project_scaffolder.py <target-path> [--verbose]
+```
+
+### 3. Code Quality Analyzer
+
+Advanced tooling for specialized tasks.
+
+**Features:**
+- Expert-level automation
+- Custom configurations
+- Integration ready
+- Production-grade output
+
+**Usage:**
+```bash
+python scripts/code_quality_analyzer.py [arguments] [options]
+```
+
+## Reference Documentation
+
+### Tech Stack Guide
+
+Comprehensive guide available in `references/tech_stack_guide.md`:
+
+- Detailed patterns and practices
+- Code examples
+- Best practices
+- Anti-patterns to avoid
+- Real-world scenarios
+
+### Architecture Patterns
+
+Complete workflow documentation in `references/architecture_patterns.md`:
+
+- Step-by-step processes
+- Optimization strategies
+- Tool integrations
+- Performance tuning
+- Troubleshooting guide
+
+### Development Workflows
+
+Technical reference guide in `references/development_workflows.md`:
+
+- Technology stack details
+- Configuration examples
+- Integration patterns
+- Security considerations
+- Scalability guidelines
+
+## Tech Stack
+
+**Languages:** TypeScript, JavaScript, Python, Go, Swift, Kotlin
+**Frontend:** React, Next.js, React Native, Flutter
+**Backend:** Node.js, Express, GraphQL, REST APIs
+**Database:** PostgreSQL, Prisma, NeonDB, Supabase
+**DevOps:** Docker, Kubernetes, Terraform, GitHub Actions, CircleCI
+**Cloud:** AWS, GCP, Azure
+
+## Development Workflow
+
+### 1. Setup and Configuration
+
+```bash
+# Install dependencies
+npm install
+# or
+pip install -r requirements.txt
+
+# Configure environment
+cp .env.example .env
+```
+
+### 2. Run Quality Checks
+
+```bash
+# Use the analyzer script
+python scripts/project_scaffolder.py .
+
+# Review recommendations
+# Apply fixes
+```
+
+### 3. Implement Best Practices
+
+Follow the patterns and practices documented in:
+- `references/tech_stack_guide.md`
+- `references/architecture_patterns.md`
+- `references/development_workflows.md`
+
+## Best Practices Summary
+
+### Code Quality
+- Follow established patterns
+- Write comprehensive tests
+- Document decisions
+- Review regularly
+
+### Performance
+- Measure before optimizing
+- Use appropriate caching
+- Optimize critical paths
+- Monitor in production
+
+### Security
+- Validate all inputs
+- Use parameterized queries
+- Implement proper authentication
+- Keep dependencies updated
+
+### Maintainability
+- Write clear code
+- Use consistent naming
+- Add helpful comments
+- Keep it simple
+
+## Common Commands
+
+```bash
+# Development
+npm run dev
+npm run build
+npm run test
+npm run lint
+
+# Analysis
+python scripts/project_scaffolder.py .
+python scripts/code_quality_analyzer.py --analyze
+
+# Deployment
+docker build -t app:latest .
+docker-compose up -d
+kubectl apply -f k8s/
+```
+
+## Troubleshooting
+
+### Common Issues
+
+Check the comprehensive troubleshooting section in `references/development_workflows.md`.
+
+### Getting Help
+
+- Review reference documentation
+- Check script output messages
+- Consult tech stack documentation
+- Review error logs
+
+## Resources
+
+- Pattern Reference: `references/tech_stack_guide.md`
+- Workflow Guide: `references/architecture_patterns.md`
+- Technical Guide: `references/development_workflows.md`
+- Tool Scripts: `scripts/` directory
 
 
---- [ 2.5 Multi-Skill Library ] ---
-(Index Mode: Listing available skills)
+--- [ 4. Learnings (Past Mistakes) ] ---
+# 🧠 Kaizen Meta-Learnings
 
---- [ 3. The Rules (Workflow) ] ---
+## [2026-03-04] Cycle Learnings: SEO Optimization
+- **What worked well**: Next.js 14 Metadata API simplifies OpenGraph and Twitter card integration significantly compared to manual `<meta>` tags.
+- **Next cycle**: Preload `design-dna` and `api-design-principles` skills to ensure UI/UX consistency even in small SEO tasks.
+- **Tip**: Always set `metadataBase` to avoid issues with absolute URL generation for social sharing images.
+
+--- [ 5. The Rules (Workflow: develop) ] ---
 ---
 description: Autonomous Development Loop (Orchestrator 5.1)
 ---
@@ -1148,7 +2585,7 @@ Self-driving development engine with **Sequential Pipeline** and **Specialist Di
 - [ ] **Environment Scan**: Run `bash .agent/scripts/audit-status.sh` → check for unresolved errors, uncommitted changes, or spec drift.
 - [ ] **Contract Check**: Verify `docs/api-spec.md` exists.
     - ✅ Found → Load spec and use as the binding contract for all implementation.
-    - ❌ Not Found → **HALT. Print: "⚠️ Contract Missing. Run `/launch` first to generate API Spec."** Do NOT proceed.
+    - ❌ Not Found → **HALT. Print: "⚠️ Contract Missing. Run `/plan` first to generate API Spec."** Do NOT proceed.
 - [ ] **Board Init**: Update `.agent/memory/task_board.md` with mission, agents, and recommended model.
 
 ## 1. [AGENT] Sequential Pipeline ⚡
@@ -1259,14 +2696,15 @@ Self-driving development engine with **Sequential Pipeline** and **Specialist Di
 
 ---
 > [!IMPORTANT]
-> **Contract-First**: If `docs/api-spec.md` does not exist, run `/launch` first.
+> **Contract-First**: If `docs/api-spec.md` does not exist, run `/plan` first.
 > **Sequential Pipeline**: This agent runs single-threaded. No external handshake files.
 > **Language Protocol**: Agent internal reasoning = English. User reports = Korean.
 
 ## [AGENT] Secretary: Daily Log
 - [ ] **Log**: Run `bash .agent/scripts/logger.sh ".agent/memory/daily/$(date +%Y-%m-%d).md" "DEVELOP" "[Summary of changes]"`
 
---- [ 4. Instructions ] ---
-Please execute the current step marked in [ 1. The Mission ].
-Follow the rules in [ 3. The Rules ] strictly.
+--- [ 6. Instructions ] ---
+Execute the current step marked in [ 1. The Mission ].
+Follow the rules in [ 5. The Rules ] strictly.
 If writing code, adhere to [ 2. The Contract ].
+Reference [ 4. Learnings ] to avoid repeating past mistakes.
