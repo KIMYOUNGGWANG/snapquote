@@ -1,1003 +1,30 @@
 === 🤖 Orchestrator 4.0 Context Bridge ===
 You are an Actentic Worker in the Orchestrator 4.0 Factory.
-Mode: [VERBOSE]
+Mode: [INDEXED] (Use -v for full content)
 Your role is defined in the workflow below.
 
 --- [ 1. The Mission ] ---
-# Task Board: Estimate Generation & Delivery Runtime
+# Task Board (Ready for Next Mission)
 
-- Project: SnapQuote
-- Version: v1.1 (Hotfix)
-- Date: 2026-02-20
-- Status: V1 complete; V2 core API rollout complete (TB-10/TB-12/TB-13/TB-18); V3 TB-15/TB-17 complete
+## Active Missions
+- TBD: Start next phase.
 
-## Develop Loop Init (Orchestrator 4.1)
-
-- Current mission: Resolve Critic high-priority API/Data issue (duplicate payment link risk) under locked contract.
-- Recommended model: `[LIGHT]` (API handler hardening + test update, bounded scope).
-- Active agents:
-  - Orchestrator (contract check and board control)
-  - Backend Thread A (API Builder)
-  - Critic (post-fix audit)
-  - Secretary (history + daily log updates)
-
-## Mission Resolution
-
-- `Mission` section in `.agent/memory/codex_context.txt` is empty.
-- Fallback applied: execute required Architect workflow artifacts from Rule 3 (task board + locked API spec + critique + daily log).
-
-## Phase Checklist
-
-- [x] 0. Intelligence setup and context scan complete.
-- [x] 1. Goal alignment complete (`conductor/product.md` reviewed).
-- [x] 2. Blueprint drafted for runtime API surface.
-- [x] 3. Runtime API spec generated and locked in `docs/api-spec.md`.
-- [x] 4. Strategic audit documented in `.agent/memory/agent_debate.md`.
-- [x] 5. Presentation package prepared for user sign-off.
-
-## Runtime Tasks
-
-| Task ID | Task | Endpoint(s) | Owner | Status |
+## Tasks
+| ID | Area | Endpoint | Flow | Status |
 |:--|:--|:--|:--|:--|
-| TB-01 | Public audio transcription for no-login and logged-in flows | `POST /api/transcribe` | Backend | Complete |
-| TB-02 | Public estimate generation from notes/images | `POST /api/generate` | Backend | Complete |
-| TB-03 | Optional-auth estimate delivery by email with PDF support | `POST /api/send-email` | Backend | Complete |
-| TB-04 | Authenticated Stripe payment link creation in tenant connected account | `POST /api/create-payment-link` | Backend | Complete |
-| TB-05 | Payment settlement sync from Stripe to estimate status | `POST /api/webhooks/stripe` | Backend | Complete |
-| TB-06 | Backfill/reconcile paid Stripe sessions | `GET/POST /api/webhooks/stripe/reconcile` | Backend | Complete |
-| TB-07 | Authenticated usage and quota visibility | `GET /api/billing/usage` | Backend | Complete |
-| TB-08 | Tenant Stripe Connect onboarding + status + dashboard management | `POST /api/stripe/connect/onboard`, `GET /api/stripe/connect/status`, `POST /api/stripe/connect/dashboard-link` | Backend + Frontend | Complete |
-| TB-09 | Authenticated local paid status probe for sent estimates | `GET /api/payments/stripe/status` | Backend + Frontend | Complete |
-| TB-14 | SaaS subscription billing (checkout/portal/status + webhook sync) | `POST /api/billing/stripe/checkout`, `POST /api/billing/stripe/portal`, `GET /api/billing/subscription`, `POST /api/webhooks/stripe/billing` | Backend + Frontend | Complete |
-
-## Cross-Checks
-
-- Every runtime task maps to at least one endpoint in `docs/api-spec.md`.
-- Public contract endpoints (`transcribe`, `generate`, `send-email`, `create-payment-link`, `payments/stripe/status`, `stripe/connect/*`) match the hotfix contract in Context Bridge section [2].
-- Internal payment reliability endpoints (`webhooks/stripe`, `webhooks/stripe/reconcile`) are documented as operational, non-public contract routes.
-
-## Lock Rule
-
-- Spec state: `LOCKED`.
-- Rule: no implementation changes without updating `docs/api-spec.md` first.
-
-## Develop Execution (2026-02-20)
-
-- [x] 0. Orchestrator setup: contract check + board init completed.
-- [x] 1A. Backend Thread: payment-link idempotency hardening implemented.
-- [x] 1B. Frontend Thread: added `/payment-success` route to close Stripe redirect UX gap (no API contract delta).
-- [x] 2. Critic reflexion: issue classified and re-audited in `.agent/memory/agent_debate.md`.
-- [x] 3. Specialist dispatch: API/Data fix applied and verified by lint + test updates.
-- [x] 4. Secretary docs: feature history EN/KR updated.
-- [x] 5A. QA guard: regression suite passes on Node 20 after loader/script compatibility fix.
-- [x] 5B. CISO external scanner: processed user-provided `npm audit` report and executed dependency patch workflow.
-
-## Fix Loop Init (Orchestrator 4.1)
-
-- Bug focus: dependency security vulnerabilities from `npm audit` (34 issues reported, including high severity items).
-- Recommended model: `[HEAVY]` (supply-chain patching across config, dependencies, and client import path).
-- Active agents:
-  - Orchestrator (bug triage + board state)
-  - Lead Dev (reproduction and patch)
-  - Security Specialist Dispatch (`vulnerability-scanner`, `api-security-best-practices` equivalent workflow)
-  - Critic (regression shield)
-  - Secretary (history/findings/daily log)
-
-## Fix Execution (2026-02-20)
-
-- [x] 0. Intelligence setup: audit report classified as Security patch scope.
-- [x] 1. Reproduction: red state confirmed from provided `npm audit report`.
-- [x] 2. Specialist dispatch (Security):
-  - Removed `xlsx` usage from import flow by converting to secure CSV-only parser.
-  - Removed `next-pwa` integration and switched to manual service worker registration.
-  - Added Next image optimizer mitigation in `next.config.mjs` (`images.unoptimized`, empty `remotePatterns`).
-- [x] 3. Critic regression shield: fix reviewed and recorded in `.agent/memory/agent_debate.md`.
-- [x] 4. Secretary docs: feature history EN/KR updated, root cause documented in `findings.md`.
-- [x] 5A. QA final guard: `npm test` and `npm run lint` green (existing lint warning unchanged).
-- [x] 5B. Tracks log: `conductor/tracks.md` updated.
-
-## Develop Execution (2026-02-24) - Guest Paid Reflection Closure
-
-- [x] 0. Contract update first: `docs/api-spec.md` extended with `GET /api/payments/stripe/status`.
-- [x] 1A. Backend Thread: implemented Stripe payment status probe route with validation + rate limit.
-- [x] 1B. Frontend Thread: persisted `paymentLinkId` in local estimate lifecycle and added history auto-sync (`sent -> paid`).
-- [x] 2. Critic reflexion: documented API/Data risk closure in `.agent/memory/agent_debate.md`.
-- [x] 3. Specialist dispatch: tests added for new route (`tests/api/stripe-routes.test.mjs`).
-- [x] 4. Secretary docs: feature history EN/KR + daily log updated.
-- [x] 5A. QA guard: `npm test` and `npm run lint` pass.
-- [x] 5B. Build guard: blocker resolved on 2026-02-25 via TB-11 recovery (historical note retained).
-
-## Develop Execution (2026-02-24) - Stripe Connect Tenant Ownership
-
-- [x] 0. Contract update first: auth/payment model updated in `docs/api-spec.md` (Connect endpoints + auth requirement changes).
-- [x] 1A. Backend Thread: implemented Stripe Connect onboarding/status/dashboard-link routes.
-- [x] 1B. Backend Thread: migrated payment-link route to authenticated tenant connected-account creation (`stripeAccount`).
-- [x] 2. Frontend Thread: added Stripe Connect management UI on profile and linked payment-link UX error guidance.
-- [x] 3. Critic reflexion: recorded architecture correction and risk closure in `.agent/memory/agent_debate.md`.
-- [x] 4. Specialist dispatch: expanded mocks/tests for Connect + payment constraints (`tests/api/stripe-connect-routes.test.mjs`, `tests/api/core-workflow-routes.test.mjs`).
-- [x] 5A. QA guard: `npm test` and `npm run lint` pass (one pre-existing lint warning remains).
-- [x] 5B. Build guard: `ELOOP` blocker resolved on 2026-02-25 (see TB-11 execution).
-
-## Architecture V2 Init (Orchestrator 4.1)
-
-- Project: SnapQuote V2 (The Lazy Capture Expansion & System Hardening)
-- Focus: Gemini Multimodal AI Integration, Sync Resilience, CI/CD Fixes, Comms Monetization.
-- Recommended model: `[HEAVY]` (architecture contract planning + system scope updates).
-- Active agents:
-  - Orchestrator (contract and board control)
-  - Architect (runtime API contract expansion)
-  - Critic (strategic audit and risk screening)
-  - Secretary (history + daily log updates)
-
-### Runtime Tasks (V2)
-
-| Task ID | Task | Endpoint(s) | Owner | Status |
-|:--|:--|:--|:--|:--|
-| TB-10 | Gemini API integration for multimodal "Capture First" parsing | `POST /api/generate` (Switch engine) | Backend | Complete |
-| TB-11 | CI/CD ELOOP build fix (`GEMINI.md` symlink cleanup) | N/A (Build Config) | DevOps | Complete |
-| TB-12 | Conflict-Free Replicated Data Type (CRDT) for offline sync | `POST /api/sync/crdt` (New) | Backend | Complete |
-| TB-13 | SMS monetization strategy shift (Email primary, Twilio Pay-as-you-go) | `POST /api/send-sms` (New/Premium) | Backend | Complete |
-| TB-18 | In-app feedback capture API + widget wiring | `POST /api/feedback` (New) | Backend + Frontend | Complete |
-| TB-14 | SaaS subscription billing for service monetization | `POST /api/billing/stripe/checkout`, `POST /api/billing/stripe/portal`, `GET /api/billing/subscription`, `POST /api/webhooks/stripe/billing` | Backend + Frontend | Complete |
-
-## Launch Execution (2026-02-25) - Architecture V2 Planning
-
-- [x] 0. Intelligence setup: architecture complexity classified as `[HEAVY]`.
-- [x] 1. Goal alignment: `conductor/product.md` and `conductor/tech-stack.md` validated for V2 scope.
-- [x] 2. Blueprinting: V2 tasks (`TB-10` to `TB-13`) documented in runtime board.
-- [x] 3. Runtime API spec: `docs/api-spec.md` updated and locked with V2 endpoint surface.
-- [x] 4. Critic audit: strategic risks and constraints documented in `.agent/memory/agent_debate.md`.
-- [x] 5. Final sign-off: user approval received on 2026-02-27; implementation sequence unlocked.
-
-## V2 Execution Queue (Post Sign-off)
-
-- Priority lock:
-  - 1) TB-10 (`POST /api/generate` Gemini engine switch)
-  - 2) TB-12 (`POST /api/sync/crdt`)
-  - 3) TB-13 (`POST /api/send-sms`)
-- Execution result (2026-02-28):
-  - TB-10 complete
-  - TB-12 complete
-  - TB-13 complete
-- Constraint: `docs/api-spec.md` remains `LOCKED`; any contract delta must be updated first.
-
-## Develop Execution (2026-02-27) - V2 Final Sign-off Closure
-
-- [x] 0. Contract check: confirmed `docs/api-spec.md` exists and remains `LOCKED`.
-- [x] 1. Board control: closed pending V2 final sign-off gate and synchronized stale unresolved marker.
-- [x] 2. Critic reflexion: recorded governance closure verdict in `.agent/memory/agent_debate.md`.
-- [x] 3. Secretary docs: appended records to `feature_history_en.md`, `feature_history_kr.md`, and daily log.
-- [x] 4A. QA guard: `npm run lint` pass (one pre-existing warning), `npm test` pass (58/58).
-- [x] 4B. CISO guard: `npm audit` blocked by network DNS (`ENOTFOUND registry.npmjs.org`); fallback static scan showed no hardcoded secret/eval/DOM-injection patterns in runtime paths.
-
-## V2 Cross-Checks
-
-- Every V2 task (`TB-10` to `TB-13`, `TB-18`) maps to at least one endpoint or ops scope in `docs/api-spec.md`.
-- V2 additions preserve lock rule: implementation must follow contract updates first.
-
-## Develop Execution (2026-02-25) - TB-11 Build Guard Recovery
-
-- [x] 0. Reproduction: `next build` failed with `ELOOP` on workspace-root `GEMINI.md` symlink.
-- [x] 1. Build Config fix: replaced looping symlink with regular `GEMINI.md` file.
-- [x] 2. Type gate fix: aligned Supabase helper typing in `lib/server/stripe-connect.ts` to restore production type-check path.
-- [x] 3. Scope gate fix: excluded non-runtime skill workspace (`codex`, `.agent`) from `tsconfig.json` build type scope.
-- [x] 4. Frontend SSR gate: removed `useSearchParams` reliance from `/login` and `/new-estimate` to satisfy static prerender constraints.
-- [x] 5A. QA guard: `npm run lint` and `npm test -- --runInBand` pass (single pre-existing lint warning unchanged).
-- [x] 5B. Build guard: `npm run build` passes successfully.
-
-## Develop Execution (2026-02-25) - TB-14 SaaS Subscription Billing
-
-- [x] 0. Contract update first: `docs/api-spec.md` extended with Stripe Billing SaaS endpoints and webhook contract.
-- [x] 1A. Backend Thread: implemented billing routes (`/api/billing/stripe/checkout`, `/api/billing/stripe/portal`, `/api/billing/subscription`).
-- [x] 1B. Backend Thread: implemented billing webhook route (`/api/webhooks/stripe/billing`) with plan-tier synchronization.
-- [x] 2. Database Thread: added profile billing columns migration (`supabase/migrations/20260225150000_add_stripe_billing_to_profiles.sql`).
-- [x] 3. Frontend Thread: connected `/pricing` upgrade CTA to Stripe Checkout and billing management portal flow.
-- [x] 4. Specialist dispatch: expanded Stripe mocks and added API tests (`tests/api/billing-subscription-routes.test.mjs`).
-- [x] 5A. QA guard: `npm run lint` and `npm test -- --runInBand` pass (single pre-existing lint warning unchanged).
-- [x] 5B. Build guard: `npm run build` passes with new billing routes included.
-
-## Architecture V3 Init (Orchestrator 4.1)
-
-- Project: SnapQuote V3 (Painkiller Upsells Expansion)
-- Focus: Quote Recovery Copilot (Pro) and Dynamic Pricing Engine (Enterprise).
-- Recommended model: `[HEAVY]` (architecture contract planning + system scope updates).
-- Active agents:
-  - Orchestrator (contract and board control)
-  - Architect (runtime API contract expansion)
-  - Critic (strategic audit and risk screening)
-  - Secretary (history + daily log updates)
-
-### Runtime Tasks (V3)
-
-| Task ID | Task | Endpoint(s) | Owner | Status |
-|:--|:--|:--|:--|:--|
-| TB-10 | Gemini Multimodal Expansion (Images + Voice) | `POST /api/generate` | Fullstack | Complete |
-| TB-15 | Quote Recovery Copilot logic and cron queue | `POST /api/quotes/recovery/trigger` | Backend | Complete |
-| TB-16 | Dynamic Pricing Engine markup and rule evaluation | `POST /api/pricing/dynamic/calculate` | Backend | Backlog |
-| TB-17 | Social Login (Google/Apple) & 3-Step Setup Wizard | `GET /auth/callback` | Fullstack | Complete |
-| TB-18 | In-App Feedback & Bug Reporting Widget | `POST /api/feedback` | Fullstack | Complete |
-| TB-19 | Good-Better-Best Generator (Auto-Upsell) | `POST /api/generate` | AI/Backend | Complete |
-| TB-20 | Auth Redirect & Sync Reliability Overhaul | N/A (Client Runtime) | Fullstack | Complete |
-
-## Develop Execution (2026-03-01) - TB-20 Auth Redirect & Sync Reliability
-
-- [x] 0. Strategy Selection: implemented "Force-Reload" strategy for 100% reliable auth transitions.
-- [x] 1A. Frontend Thread: created `AuthRedirectManager` and integrated into root `layout.tsx`.
-- [x] 1B. Frontend Thread: updated `useAuthGuard` and `SyncManager` to remove fragmented listeners and use `window.location.href`.
-- [x] 2A. Database Thread: updated IndexedDB schema and `LocalEstimate` typing to include `updatedAt`.
-- [x] 2B. Sync Thread: refactored `syncEstimates` logic to use "Last Write Wins" via `updatedAt` metadata comparison.
-- [x] 3. Critic reflexion: documented choice of `window.location.href` vs client-side routing in `.agent/memory/agent_debate.md`.
-- [x] 4. Secretary docs: updated `docs/api-spec.md` with Global Auth Management section.
-- [x] 5. QA guard: verified login/logout flow across all protected routes.
-## Develop Execution (2026-02-27) - TB-17 Social Login (Google PKCE)
-
-- [x] 0. Contract check: confirmed `GET /auth/callback` exists in locked `docs/api-spec.md` (no contract delta required).
-- [x] 1A. Frontend Thread: added social auth entry point on `/login` with Google OAuth dispatch and callback redirect wiring.
-- [x] 1B. Fullstack Thread: implemented `app/auth/callback/page.tsx` to exchange PKCE code, sanitize redirect targets, and propagate OAuth errors safely to login.
-- [x] 2. Specialist dispatch (API/Data + Security hygiene): extracted shared callback normalization helpers in `lib/auth/oauth-callback.ts` (next path / intent / error normalization).
-- [x] 3. Verification: added tests `tests/api/oauth-callback-utils.test.mjs`; `npm test` pass (63/63), `npm run lint` pass (one pre-existing warning unchanged).
-- [x] 4. Build guard: rerun on 2026-02-28 passes after replacing root `GEMINI.md` symlink with a regular file.
-
-## Develop Execution (2026-02-28) - TB-17 Setup Wizard & Apple Login
-- [x] 1. Re-added Apple Login to `app/login/page.tsx`.
-- [x] 2. Built `components/setup-wizard.tsx` to collect `business_name` and `default_tax_rate` upon first login.
-- [x] 3. Conditionally rendered the wizard in `app/page.tsx` replacing the main dashboard until profile completion.
-- [x] 4. Resolved TypeScript and strict null check errors.
-
-~~## Scope Adjustment (2026-02-28) - TB-17 Apple Login Removal~~
-~~- [x] Product decision: removed Apple OAuth sign-in and retained Google OAuth + magic link flow.~~
-~~- [x] Contract sync: `/auth/callback` description updated to Google-only OAuth PKCE handling in `docs/api-spec.md`.~~
-~~- [x] Frontend sync: removed Apple button/provider dispatch from `app/login/page.tsx`.~~
-~~- [x] Verification: regression (`npm test`) and lint (`npm run lint`) pass.~~
-
-## Develop Execution (2026-02-28) - TB-12 CRDT Sync Endpoint
-
-- [x] 0. Contract check: confirmed `POST /api/sync/crdt` exists in locked `docs/api-spec.md` (no contract delta required).
-- [x] 1A. Backend Thread: implemented `app/api/sync/crdt/route.ts` with auth guard, payload validation, dedup merge, and upsert to `sync_change_log`.
-- [x] 1B. Database Thread: added migration `supabase/migrations/20260228100000_add_sync_change_log_and_feedback_metadata.sql` for `sync_change_log` + indexes + RLS.
-- [x] 2. Specialist dispatch (API/Data): added deterministic merge/upsert tests in `tests/api/sync-and-feedback-routes.test.mjs`.
-- [x] 3. Verification: `npm test` pass (71/71), `npm run lint` pass (single pre-existing warning unchanged).
-- [x] 4. Build guard: `npm run build` passes after workspace-root `GEMINI.md` symlink cleanup.
-
-## Develop Execution (2026-02-28) - TB-18 Feedback API + Widget Wiring
-
-- [x] 0. Contract check: confirmed `POST /api/feedback` exists in locked `docs/api-spec.md` (no contract delta required).
-- [x] 1A. Backend Thread: implemented `app/api/feedback/route.ts` with optional auth, payload validation, and IP rate limit.
-- [x] 1B. Frontend Thread: rewired `components/feedback-modal.tsx` to call `/api/feedback` instead of direct client-side table insert.
-- [x] 2. Database Thread: extended `feedback` table with `metadata jsonb` in migration `20260228100000_add_sync_change_log_and_feedback_metadata.sql`.
-- [x] 3. Specialist dispatch (API/Data + Security hygiene): added route coverage for guest/auth/rate-limit paths in `tests/api/sync-and-feedback-routes.test.mjs`.
-- [x] 4. Verification: `npm test` pass (71/71), `npm run lint` pass (single pre-existing warning unchanged).
-- [x] 5A. Build guard: `npm run build` passes after workspace-root `GEMINI.md` symlink cleanup.
-- [ ] 5B. CISO guard: `npm audit` blocked by network DNS (`ENOTFOUND registry.npmjs.org`) in current environment.
-
-## Develop Execution (2026-02-28) - TB-10 Gemini Engine Switch (`POST /api/generate`)
-
-- [x] 0. Contract check: confirmed `POST /api/generate` remains contract-compatible (response schema unchanged).
-- [x] 1A. Backend Thread: switched runtime generation to Gemini-first strategy (`GEMINI_API_KEY` present) with OpenAI fallback path for compatibility.
-- [x] 1B. Backend Thread: added Gemini response parsing + usage token extraction while preserving existing estimate normalization and quota recording flow.
-- [x] 2. Specialist dispatch (API/Data): extended tests to cover Gemini provider path while preserving OpenAI mock path.
-- [x] 3. Verification: `npm test` pass (77/77), `npm run lint` pass (single pre-existing warning unchanged), `npm run build` pass.
-- [ ] 4. CISO guard: `npm audit` blocked by network DNS (`ENOTFOUND registry.npmjs.org`) in current environment.
-
-## Develop Execution (2026-02-28) - TB-13 SMS Delivery API (`POST /api/send-sms`)
-
-- [x] 0. Contract check: confirmed `POST /api/send-sms` exists in locked `docs/api-spec.md`.
-- [x] 1A. Backend Thread: implemented `app/api/send-sms/route.ts` with auth, validation, rate limit, credit balance check, and Twilio provider dispatch.
-- [x] 1B. Backend Thread: persisted send records to `sms_messages` and ledger deduction to `sms_credit_ledger` on successful provider response.
-- [x] 2. Specialist dispatch (API/Data): added route tests for unauthorized/invalid/insufficient-credit/rate-limit/success paths in `tests/api/send-sms-routes.test.mjs`.
-- [x] 3. Verification: `npm test` pass (77/77), `npm run lint` pass (single pre-existing warning unchanged), `npm run build` pass.
-- [ ] 4. CISO guard: `npm audit` blocked by network DNS (`ENOTFOUND registry.npmjs.org`) in current environment.
-
-## Develop Execution (2026-02-28) - TB-15 Quote Recovery Copilot
-
-- [x] 0. Contract check: confirmed `POST /api/quotes/recovery/trigger` exists in locked `docs/api-spec.md` (no contract delta required).
-- [x] 1A. Backend Thread: implemented `app/api/quotes/recovery/trigger/route.ts` with 48h candidate scan, claim lock (`first_followup_queued_at`), and Gemini-first follow-up message generation.
-- [x] 1B. Backend Thread: integrated delivery dispatch by channel (Twilio SMS with credit gating, Resend email fallback, `skipped_no_contact` path).
-- [x] 2. Database Thread: no schema delta required; reused existing follow-up tracking columns (`sent_at`, `first_followup_queued_at`, `first_followed_up_at`, `last_followed_up_at`).
-- [x] 3. Specialist dispatch (API/Data): added route tests in `tests/api/quote-recovery-routes.test.mjs` for auth/plan-tier/dryRun/sms/email/cron/rate-limit paths.
-- [x] 4A. QA guard: `npm test` pass (85/85), `npm run lint` pass (0 warnings/errors).
-- [x] 4B. Build guard: `npm run build` pass.
-- [ ] 4C. CISO guard: `npm audit` blocked by network DNS (`ENOTFOUND registry.npmjs.org`) in current environment.
-
-## Develop Execution (2026-03-01) - TB-19 Auto-Upsell Generator
-
-- [x] 0. Contract check: verified `POST /api/generate` includes `upsellOptions` in `docs/api-spec.md`.
-- [x] 1A. AI Thread: updated Gemini/OpenAI generation prompt in `app/api/generate/route.ts` to generate `better` and `best` upsell options.
-- [x] 1B. AI Thread: structured output normalization enforces `upsellOptions` shape (`tier/title/description/addedItems`) with empty-item filtering.
-- [x] 2A. Frontend Thread: updated `app/new-estimate/page.tsx` to parse/render auto-upsell packages and allow one-click package apply into estimate items.
-- [x] 2B. Data Thread: extended local estimate typing in `lib/estimates-storage.ts` and persisted optional `upsellOptions` in draft/sent payload.
-- [x] 3. Specialist dispatch (API/Data): updated `tests/api/core-workflow-routes.test.mjs` to verify upsell normalization (`tier` fallback + empty package filtering).
-- [x] 4A. QA guard: `npm test` pass (85/85), `npm run lint` pass (0 warnings/errors), `npm run build` pass.
-- [ ] 4B. CISO guard: `npm audit` blocked by DNS (`ENOTFOUND registry.npmjs.org`) in current environment; fallback static scan found no `eval`/`new Function`/`dangerouslySetInnerHTML` usage in TB-19 touched files.
+| TBD | TBD | TBD | TBD | Not Started |
 
 --- [ 1.5 System Architecture & Docs ] ---
 
 --- [ 1.8 Strategic Debate Log ] ---
-# Strategic Audit: Estimate Generation and Delivery Runtime (v1.1)
 
-Date: 2026-02-20
-
-## Critic Findings
-
-1. High risk: no idempotency key is used in `POST /api/create-payment-link`.
-- Impact: repeated client retries can create multiple Stripe payment links for one estimate.
-- Recommendation: add an idempotency strategy keyed by `estimateId + amount + userId`.
-
-2. Medium risk: guest traffic on `transcribe` and `generate` has no durable quota identity.
-- Impact: abuse control is IP-limited, which is weaker behind NAT/proxy clusters.
-- Recommendation: add signed anonymous session IDs or captcha gate for sustained guest usage.
-
-3. Medium risk: webhook success path depends on metadata quality.
-- Impact: missing `estimateId` and `estimateNumber` causes paid sessions that cannot be linked.
-- Recommendation: enforce metadata presence at payment-link creation and add monitoring threshold alerts.
-
-4. Low risk: mixed error payload shapes across runtime endpoints.
-- Impact: frontend error handling must branch for string, structured, and success-flag error forms.
-- Recommendation: standardize on one error envelope in v1.2.
-
-## Debate Conclusion
-
-- The runtime is deployable with current behavior, but payment correctness relies on metadata discipline and reconcile jobs.
-- Contract is acceptable for v1.1 hotfix if operations run reconcile and monitor alerts.
-- Spec is locked, with follow-up improvements deferred to a planned v1.2 normalization pass.
-
-## Develop Loop Reflexion (2026-02-20)
-
-Issue classification:
-- Type: API/Data
-- Priority: High
-- Signal: duplicate payment-link creation risk due missing idempotency handling.
-
-Dispatch:
-- Skill family applied: `api-design-principles` (contract-safe backend hardening).
-- Fix: added Stripe request idempotency support in `POST /api/create-payment-link`.
-  - Use client header `Idempotency-Key` when present.
-  - Otherwise generate deterministic key from `userId + estimate reference + amount`.
-
-Verification:
-- Added test coverage for deterministic idempotency key behavior.
-- Added test coverage for client header override behavior.
-- Contract note added in `docs/api-spec.md`.
-- Node 20 compatibility fix applied to test runner (`tests/loader.mjs`, `package.json`), and `npm test` now passes.
-- `npm run lint` passes (one pre-existing React hook warning outside this fix scope).
-- External vulnerability scanner (`npm audit`) could not reach npm registry due network restriction; local static grep-based scan found no hardcoded secret or obvious dynamic-code risk patterns.
-
-Resolution status:
-- High-priority API/Data issue: Resolved.
-- Remaining medium/low items from prior audit: Open (planned for v1.2).
-
-## Fix Loop Debate: Dependency Security Patch (2026-02-20)
-
-Issue classification:
-- Type: Security / Supply-chain dependency risk.
-- Priority: High (multiple high-severity advisories from `npm audit`).
-
-Root-cause pattern:
-- High-risk/no-fix package in direct runtime dependency (`xlsx`).
-- Vulnerable transitive chain introduced by `next-pwa` (workbox/del/glob/minimatch path).
-- Framework-level advisory on current Next major line.
-
-Implemented patch set:
-- Replaced Excel parser with CSV-only parser in `components/excel-import-modal.tsx` to remove `xlsx` runtime dependency.
-- Removed `next-pwa` wrapper from `next.config.mjs`; switched to app-owned service worker registration and static `public/sw.js`.
-- Added defensive Next image config in `next.config.mjs`:
-  - `images.unoptimized = true`
-  - `images.remotePatterns = []`
-
-Regression check:
-- `npm test`: pass (36/36).
-- `npm run lint`: pass (single pre-existing hook dependency warning remains).
-- `npm prune --no-audit --no-fund`: pass; extraneous `next-pwa`/`xlsx` removed from installed tree.
-- `npm ls next-pwa xlsx --depth=2`: empty after prune.
-
-Critic verdict:
-- Not a band-aid for `xlsx`/`next-pwa` chain; direct attack surface reduced by removing vulnerable direct dependencies.
-- Residual risk remains for Next advisory until major framework upgrade and fresh lockfile re-resolution in network-enabled CI.
-
-## Frontend Thread Closure (2026-02-24)
-
-Issue classification:
-- Type: UX / Runtime reliability.
-- Priority: Medium.
-- Signal: Stripe `after_completion.redirect` points to `/payment-success`, but route was missing and could return 404 after checkout.
-
-Dispatch:
-- Added `app/payment-success/page.tsx` for a dedicated post-checkout confirmation surface.
-- Included immediate user actions (`/history`, `/new-estimate`) and an explicit note about webhook/reconcile eventual consistency.
-- Kept API contract unchanged (`docs/api-spec.md` remains locked with no endpoint delta).
-
-Critic verdict:
-- Checkout completion flow is now closed on frontend and no longer depends on undefined route behavior.
-- Remaining operational dependency: webhook secret correctness and reconcile scheduling still required for paid-state consistency.
-
-## Develop Loop Reflexion (2026-02-24) - Guest Paid Status Sync
-
-Issue classification:
-- Type: API/Data
-- Priority: High
-- Signal: guest/no-login flow could complete Stripe checkout but local history remained `sent` because status updates depended on authenticated cloud sync.
-
-Dispatch:
-- Contract-first update in `docs/api-spec.md`:
-  - Added `GET /api/payments/stripe/status` as optional-auth public endpoint for paid status probing.
-- Backend:
-  - Added `app/api/payments/stripe/status/route.ts`.
-  - Implemented rate limiting, query validation, Stripe checkout session scan by `paymentLinkId`, metadata resolution fallback via payment intent, and Stripe auth error mapping.
-  - Enhanced `POST /api/create-payment-link` redirect URL builder to preserve estimate context (`estimateId`, `estimateNumber`) on `/payment-success`.
-- Frontend/data:
-  - Persisted payment-link tracking metadata in local estimate model (`paymentLink`, `paymentLinkId`, `paymentLinkType`, payment sync markers).
-  - Updated `app/new-estimate/page.tsx` to persist payment link id and ensure email-send success writes/updates local estimate to `sent` even when draft was not manually saved.
-  - Updated `app/history/page.tsx` to poll payment status for sent estimates with `paymentLinkId` and auto-transition to `paid`.
-
-Verification:
-- Added route tests in `tests/api/stripe-routes.test.mjs`:
-  - missing `paymentLinkId` validation
-  - unpaid vs paid status detection
-  - Stripe authentication error path
-- Ran regression: `npm test` pass (41 tests).
-- Ran lint: `npm run lint` pass (one pre-existing hook dependency warning unchanged).
-- Attempted build: blocked by pre-existing filesystem symlink loop (`ELOOP` at `GEMINI.md`), unrelated to this patch scope.
-
-Resolution status:
-- Guest payment completion visibility gap: Resolved.
-- Operational dependencies unchanged: webhook/reconcile remain required for server-of-record consistency.
-
-## Develop Loop Reflexion (2026-02-24) - Multi-Tenant Stripe Connect Pivot
-
-Issue classification:
-- Type: API/Data + Product Architecture
-- Priority: High
-- Signal: platform-level Stripe secret flow made the operator the payment owner, which breaks true SaaS tenant ownership for contractors/company representatives.
-
-Dispatch:
-- Contract-first updates:
-  - `POST /api/create-payment-link` auth requirement restored.
-  - Added Stripe Connect runtime endpoints:
-    - `POST /api/stripe/connect/onboard`
-    - `GET /api/stripe/connect/status`
-    - `POST /api/stripe/connect/dashboard-link`
-  - `GET /api/payments/stripe/status` moved to authenticated payment domain.
-- Backend implementation:
-  - Added Stripe Connect service helper (`lib/server/stripe-connect.ts`) and profile schema migration for connected-account fields.
-  - Updated payment-link creation to require authenticated user + linked Stripe account and to create links under `stripeAccount`.
-  - Added onboarding/status/dashboard-link APIs for each tenant to self-manage payment operations.
-  - Added estimate context params to payment success redirect.
-- Frontend implementation:
-  - Added Stripe Connect status/connect/manage section in `app/profile/page.tsx`.
-  - Updated payment-link generation UX in estimate and quick-quote flows with Connect-specific guidance on 401/403 responses.
-  - Preserved local paid-sync loop while moving payment status probe to authenticated access.
-
-Verification:
-- Extended mocks for Stripe Connect account APIs.
-- Updated payment-link route tests for authenticated connected-account behavior.
-- Added dedicated connect route tests (`tests/api/stripe-connect-routes.test.mjs`).
-- Full regression: `npm test` pass (49 tests).
-- Lint: pass, with one pre-existing warning outside this scope.
-
-Resolution status:
-- Tenant payment ownership model: Resolved (Connect-based).
-- Remaining operational work: rollout migration in deployed Supabase and provision production Connect settings.
-
-## Debate Session: Architecture V2 Launch (2026-02-25)
-
-**Subject**: Upgrading Core Engine to Gemini Multimodal & System Hardening
-**Context**: "Capture-First" UX demands real-time processing of messy field recordings and imagery. Concurrently, offline sync (CRDT) and comms (SMS) need business decoupling to control costs.
-
-### Critic (Strategic Audit)
-1. **Gemini Engine Switch (`POST /api/generate`)**:
-   - **Pro**: Gemini's massive context window and multimodal ingestion natively support the "Dump Bucket" UX (TB-10). It can process photos of job sites alongside audio transcripts without hitting standard token cliffs.
-   - **Risk**: Moving away from the current tested OpenAI Prompt V5 Lite format parsing. We must ensure Gemini outputs strictly matching JSON schema (`EstimateItem[]`, `EstimateSection[]`).
-   - **Verdict**: HIGH VALUE. The competitive advantage of image+audio "lazy capture" heavily outweighs the switch cost. Must use strict structured output mode for Gemini.
-
-2. **Sync Conflict Resolution (`POST /api/sync/crdt`)**:
-   - **Critique**: Moving from Last-Write-Wins to CRDT (TB-12) is historically difficult on standard relational DBs (Supabase Postgres).
-   - **Verdict**: NECESSARY BUT COMPLEX. We should start with a timestamp-based vector clock per record before attempting full operational transformation (OT) or Yjs/CRDT.
-
-3. **SMS Monetization (`POST /api/send-sms`)**:
-   - **Critique**: Current $19 Pro Plan cannot sustain automated Twilio SMS campaigns due to variable per-msg fees and A2P 10DLC registration blockers.
-   - **Verdict**: APPROVED. Refactoring to a credit-based system (Pay-as-you-go) protects margins, while leaving Email fallback as the primary "free" automation channel.
-
-4. **CI/CD Build Blocker (`GEMINI.md` ELOOP)**:
-   - **Verdict**: Banal but critical. TB-11 must be executed immediately to restore continuous deployment pipeline integrity.
-
-## Fix Loop Debate: Database Security Patch (2026-02-25)
-
-**Issue classification**:
-- Type: Security / Performance Risk
-- Priority: High
-- Signal: Static analysis of `supabase_schema_fresh.sql` revealed missing foreign key indexes, over-permissive public insert policies on referral tables, and missing RLS documentation for ops tables.
-
-**Implemented patch set**:
-- Added missing B-Tree indexes for `estimate_items(estimate_id)`, `automations(user_id)`, `job_queue(user_id)`, and `feedback(user_id)` to prevent cascade delete locks and slow sequential scans.
-- Removed `Anyone can insert referral events` RLS policy to patch a DDoS/storage bloat vulnerability (events should be inserted via Edge Functions using Service Role).
-- Removed duplicate unique index on `estimate_attachments(estimate_id)`.
-- Replaced `to authenticated` with `to public` (no role restriction) for `pricing_experiments` select policy so unauthenticated visitors can view A/B pricing structures.
-
-**Critic verdict**:
-- **PASS**: Fixes are structurally sound. The foreign key indexes are strictly necessary for Postgres performance under scale, and locking down public inserts prevents malicious database inflation. No application logic regressions expected since the application tier operates under matching scopes.
-
-## Launch Workflow Closure (2026-02-25)
-
-Issue classification:
-- Type: Architecture / Contract planning.
-- Priority: High.
-- Signal: user requested strict execution of Launch workflow artifacts before V2 implementation.
-
-Dispatch:
-- Re-validated board/spec/debate linkage against lock rule.
-- Hardened `docs/api-spec.md` V2 sections with explicit rate limits, error envelopes, and runtime table requirements for `sync/crdt` and `send-sms`.
-- Corrected task mapping gap by adding `TB-09` to the contract verification matrix.
-
-Critic verdict:
-- Launch-phase artifacts are coherent and internally consistent for V2 sign-off.
-- Implementation should start only after user approves V2 sequence priority (`TB-10` vs `TB-11` first).
-
-## Develop Loop Reflexion (2026-02-25) - TB-11 Build Guard Recovery
-
-Issue classification:
-- Type: Build / CI reliability.
-- Priority: High.
-- Signal: production build blocked by `ELOOP` at workspace root (`GEMINI.md`) and follow-on type/prerender blockers.
-
-Dispatch:
-- Replaced looping `GEMINI.md` symlink with a regular file to remove filesystem recursion.
-- Fixed Supabase helper type contract in `lib/server/stripe-connect.ts` by using explicit `SupabaseClient` typing.
-- Reduced type-check scope by excluding non-runtime workspace folders (`codex`, `.agent`) in `tsconfig.json`.
-- Removed `useSearchParams` dependency from `app/login/page.tsx` and `app/new-estimate/page.tsx` (replaced with `window.location.search` parsing) to satisfy Next static prerender constraints.
-
-Verification:
-- `npm run build`: pass.
-- `npm run lint`: pass (one pre-existing `react-hooks/exhaustive-deps` warning remains in `components/automation/automation-settings.tsx`).
-- `npm test -- --runInBand`: pass (49/49).
-
-Resolution status:
-- TB-11 build blocker: Resolved.
-- Next implementation candidate: TB-10 (Gemini engine switch for `POST /api/generate`).
-
-## Develop Loop Reflexion (2026-02-25) - TB-14 SaaS Subscription Billing
-
-Issue classification:
-- Type: API/Data + Product Monetization.
-- Priority: High.
-- Signal: product already supports tenant quote-payment collection (Stripe Connect), but lacked platform-owned SaaS subscription charging for service usage.
-
-Dispatch:
-- Contract-first update:
-  - Added SaaS billing endpoints:
-    - `POST /api/billing/stripe/checkout`
-    - `POST /api/billing/stripe/portal`
-    - `GET /api/billing/subscription`
-    - `POST /api/webhooks/stripe/billing`
-  - Extended error matrix + DB/runtime mapping in `docs/api-spec.md`.
-- Database:
-  - Added billing linkage columns to `profiles` via migration:
-    - `stripe_customer_id`
-    - `stripe_subscription_id`
-    - `stripe_subscription_status`
-    - `stripe_subscription_price_id`
-    - `stripe_subscription_current_period_end`
-    - `stripe_cancel_at_period_end`
-    - `stripe_subscription_updated_at`
-- Backend:
-  - Implemented checkout session creation with authenticated user mapping and Stripe customer bootstrap.
-  - Implemented portal session creation for self-service subscription management.
-  - Implemented subscription status API for authenticated clients.
-  - Implemented billing webhook with signature verification and profile `plan_tier` synchronization (`active/trialing -> pro`, otherwise `free`).
-- Frontend:
-  - Connected `/pricing` upgrade CTA to real Stripe Checkout flow.
-  - Added billing portal entry point and current plan/subscription status rendering.
-
-Verification:
-- Added route tests in `tests/api/billing-subscription-routes.test.mjs` for:
-  - checkout auth + happy path + conflict path
-  - portal missing-customer + happy path
-  - subscription status payload
-  - billing webhook signature guard + subscription update + checkout completion handling
-- Extended Stripe mocks (`tests/mocks/stripe.mjs`, `tests/mocks/state.mjs`) to support billing primitives.
-- `npm run lint`: pass (one pre-existing hook dependency warning unchanged).
-- `npm test -- --runInBand`: pass (58/58).
-- `npm run build`: pass with new routes included.
-
-Resolution status:
-- SaaS subscription billing baseline: Resolved.
-- Remaining product tasks: plan packaging/price experiments and customer-facing billing copy tuning.
-
-## Ideation Session (Orchestrator 4.1): Upsell Features (2026-02-26)
-
-**Subject**: Validating "Dynamic Pricing Engine" (Enterprise) and "Quote Recovery Copilot" (Pro) as SnapQuote Upsells.
-
-### 1. CPO (Strategy & Market Fit)
-- **Market Gap**: Small trade businesses lose margin to material cost fluctuations and lose revenue to abandoned quotes (ghosting).
-- **Strategy**: These are classic "Painkillers". By gating these behind Pro/Enterprise tiers, we transition SnapQuote from a "time-saver" to a "revenue-generator". The ROI for the user is mathematically guaranteed if even one quote is recovered or one margin protected.
-- **Verdict**: STRONGLY APPROVED.
-
-### 2. CTO (Technical Feasibility)
-- **Feature 4 (Quote Recovery Copilot)**: 
-  - *Requirements*: Need tracking pixel or read-receipt on the shared estimate link. Background cron/queue to scan for `status == 'sent'` & `updated_at < 24h` to trigger AI follow-up.
-  - *Complexity*: Medium. We have SMS (Twilio) and Email (Resend) from V2. Need event triggers and LLM personalization prompt.
-- **Feature 2 (Dynamic Pricing Engine)**:
-  - *Requirements*: Integration with external commodity pricing APIs or regional indexes. Complex configuration UX for markup rules.
-  - *Complexity*: High. Recommend starting with a "Rule-based Auto-Markup" before live commodity scraping.
-- **Verdict**: FEASIBLE. Feature 4 is a quick win. Feature 2 needs strict scoping.
-
-### 3. Marketing Lead (Virality & Hook)
-- **Hook (Feature 4)**: "Stop leaving money on the table. Our AI follows up so you don't have to."
-- **Hook (Feature 2)**: "Never lose margin to inflation again."
-- **Verdict**: Feature 4 has strong word-of-mouth potential when a user sees an abandoned quote magically turn into a paid invoice overnight.
-
-## Launch Planning (Reflexion)
-- Agreed to proceed with API Spec generation for `TB-15` (Quote Recovery) and `TB-16` (Dynamic Pricing).
-
-## Marketing Audit: Canbu Launch Copy (2026-02-27)
-
-**Subject**: Authenticity Audit for the Canbu Community V1 Launch.
-
-### 1. Strategist Context
-- **Goal**: Market the current V1 core to gather early feedback without waiting for V2/V3 features.
-- **Angle**: Target the 3 biggest pain points validated from the trades community: unpaid after-hours work, speed-to-lead drop-off, and fat-finger typing constraints on job sites.
-
-### 2. Critic Audit (Anti-AI Filter)
-- **Review**: The drafted Korean copy "더 이상 집 식탁에서 피곤한 몸으로 견적서를 쓰지 마세요" (Stop doing estimates at your dining table) is grounded in reality. The copy avoids typical AI fluff words (e.g., "Elevate", "Unlock", "Synergize").
-- **Verdict**: PASS. The copy is gritty, authentic, and directly addresses the physical and emotional pain points of the target audience.
-
-## Ideation Session (Orchestrator 4.1): Post-V3 Expansion (2026-02-27)
-
-**Subject**: Brainstorming "Painkiller" features beyond the current roadmap (V1-V3).
-
-### 1. CPO (Strategy & Market Fit)
-- **Market Gap 1 (The Supply Run)**: Estimating is only half the battle. After winning the bid, the contractor wastes hours manually translating the quote into a shopping list for Home Depot or Ferguson.
-- **Market Gap 2 (The Subcontractor Chase)**: General Contractors (GCs) or Lead Plumbers often need an Electrician to finish a quote. Chasing subs for their numbers delays the final estimate to the client.
-- **Market Gap 3 (Single Option Loss)**: Contractors usually quote exactly what the client asked for, missing out on massive upsell potential because building 3 different options takes too long.
-
-### 2. CTO (Technical Feasibility)
-- **Idea A: "Supply House Auto-Cart" (Material List Extraction)**
-  - *Feasibility*: High. We already extract line items. We can easily prompt the LLM to output a grouped Bill of Materials (BOM) alongside the quote.
-- **Idea B: "Subcontractor Whisperer" (Split Quoting)**
-  - *Feasibility*: Medium-High. Requires Magic Link generation. The GC selects a line item (e.g., "Electrical panel upgrade") -> we generate an SMS link -> Electrician clicks link, enters price, and it auto-updates the GC's main quote via Supabase Realtime.
-- **Idea C: "Good-Better-Best Generator" (Auto-Upsell)**
-  - *Feasibility*: High. It's purely an LLM prompt engineering task. We can instruct the model to always generate 3 pricing tiers based on the initial voice input.
-
-### 3. Marketing Lead (Virality Hook)
-- **Idea A (Auto-Cart)**: "Stop wandering the aisles at Home Depot. Your quote is your shopping list."
-- **Idea B (Subcontractor)**: This is a **Viral Loop**! The GC sends the link to the Electrician. The Electrician uses our platform to enter the price, experiences the UI, and becomes our next user. This is a PLG (Product-Led Growth) goldmine.
-- **Idea C (Auto-Upsell)**: "Increase your average ticket size by 30% without typing a single extra word."
-
-### 4. Verdict
-- All three are exceptional.
-- **Idea B (Subcontractor Whisperer)** has the highest potential for viral acquisition (B2B network effect).
-- **Idea C (Good-Better-Best)** is the easiest to implement immediately (just modifying the `/api/generate` prompt).
-
-## Ideation Session (Orchestrator 4.1): Critical Bottleneck Resolutions (2026-02-27)
-
-**Subject**: Resolving the 4 major product bottlenecks (Onboarding Drop-off, Voice Limitations, Sync Conflicts, Feedback Blindspot).
-
-### 1. CPO (Strategy)
-- **Bottleneck 1 (Onboarding)**: The magic-link and early Stripe Connect requirement kills the "Aha!" momentum.
-  - *Solution*: **Frictionless Onboarding**. Introduce Social Login (Google/Apple) and a 3-step "Setup Wizard" (Business Name, Logo, Tax Rate) immediately post-signup. Defer Stripe Connect setup until the user has generated at least 3 estimates.
-- **Bottleneck 2 (Input Limits)**: Voice is great, but contractors need to upload photos of broken pipes or job sites.
-  - *Solution*: **Multimodal Expansion**. Expedite TB-10 (Gemini V2). Allow image uploads alongside voice.
-- **Bottleneck 3 (Sync Anxiety)**: Users fear losing data if they edit offline and try to sync later.
-  - *Solution*: **CRDT Engine**. Expedite TB-12. Implement strictly deterministic merging to guarantee zero data loss.
-- **Bottleneck 4 (Blindness)**: We just launched on Canbu but have no easy way for users to report bugs or request features.
-  - *Solution*: **In-App Feedback Widget**. A floating button that captures screenshots and user comments, sending them directly to our database or Slack/Email.
-
-### 2. CTO (Technical Feasibility)
-- **Frictionless Onboarding (TB-17 update)**: High feasibility. Supabase provides out-of-the-box OAuth. The Setup Wizard is just a simple state machine on the frontend writing to the `profiles` table.
-- **Multimodal (TB-10)**: Medium. Requires migrating the OpenAI Whisper/GPT-4o pipeline to Google Gemini API (or adding GPT-4o Vision).
-- **CRDT (TB-12)**: Very High complexity. Requires implementing vector clocks and tombstoning in the Dexie offline DB and Supabase RPCs.
-- **Feedback Widget (TB-18)**: High feasibility. Create a simple `POST /api/feedback` endpoint and a minimal React portal widget.
-
-### 3. Verdict
-Proceed with `/launch` for these items. Update API Spec and Task Board to lock the execution scope.
-
-## Launch Workflow Closure: V2 Final Sign-off (2026-02-27)
-
-Issue classification:
-- Type: Program Control / Release Governance
-- Priority: High
-- Signal: V2 launch planning had one remaining open gate (`Final sign-off`) before implementation.
-
-Dispatch:
-- User approval received for V2 launch plan.
-- Closed sign-off gate in `.agent/memory/task_board.md`.
-- Locked execution priority for implementation: `TB-10` -> `TB-12` -> `TB-13`.
-
-Critic verdict:
-- **PASS**: Contract and board remain coherent after gate closure.
-- No API contract delta introduced in sign-off closure step.
-- Implementation continues under contract-first rule (`docs/api-spec.md` update required before any endpoint contract change).
-
-## Develop Loop Reflexion (2026-02-27) - TB-17 Social Login (Google/Apple)
-
-Issue classification:
-- Type: Auth UX / API-Frontend integration
-- Priority: High
-- Signal: typed email + magic-link-only flow creates onboarding friction on job sites; V3 task TB-17 required OAuth login callback support.
-
-## Performance Optimization Audit (2026-02-28)
-- Initiated `/optimize` workflow to audit code complexity and bundle size.
-- Identified heavy modular components (Modals and Charts) statically loaded on the `/` route (`app/page.tsx`).
-- Refactored imports to use `next/dynamic` (`{ ssr: false }`) for components: `OnboardingModal`, `QuickQuoteModal`, `SetupWizard`, `RevenueChart`, `FunnelMetricsCard`, `UsagePlanCard`.
-- **Verdict**: PASS. No behavioral side-effects. First Load JS parsing size for `/` chunk reduced by >50%.
-
-Dispatch:
-- Added OAuth entry points on `app/login/page.tsx`:
-  - `Continue with Google`
-  - `Continue with Apple`
-  - callback redirect target wired to `/auth/callback?next=...&intent=...`
-- Added callback completion screen `app/auth/callback/page.tsx`:
-  - exchanges Supabase PKCE authorization code with `supabase.auth.exchangeCodeForSession(code)`
-  - redirects only to normalized internal paths
-  - returns OAuth provider errors to `/login` via sanitized `oauth_error`
-- Added shared safety helpers `lib/auth/oauth-callback.ts`:
-  - path normalization to prevent open-redirect style misuse
-  - intent normalization
-  - OAuth error message normalization and bounded redirect payload
-
-Verification:
-- Added tests: `tests/api/oauth-callback-utils.test.mjs`.
-- Regression: `npm test` pass (63/63).
-- Lint: `npm run lint` pass (single pre-existing `react-hooks/exhaustive-deps` warning unchanged).
-- Build: `npm run build` failed due pre-existing filesystem loop (`ELOOP` at workspace root `GEMINI.md`), unrelated to TB-17 logic.
-
-Critic verdict:
-- **PASS (Functional)**: OAuth login flow is now implemented end-to-end under existing contract without schema drift.
-- **OPEN (Environment)**: build gate remains externally blocked by `GEMINI.md` symlink loop and should be cleared before final ship.
-
-## Scope Adjustment (2026-02-28) - TB-17 Apple Login Removal
-
-Issue classification:
-- Type: Product Scope / Auth UX simplification
-- Priority: Medium
-- Signal: user explicitly requested to drop Apple login from TB-17.
-
-Dispatch:
-- Updated contract language to Google-only OAuth callback handling.
-- Removed Apple OAuth dispatch from `app/login/page.tsx` and retained Google OAuth + magic-link entry paths.
-
-Verification:
-- `npm test`: pass.
-- `npm run lint`: pass (single pre-existing warning unchanged).
-
-Critic verdict:
-- **PASS**: scope reduction is coherent with current endpoint contract (`GET /auth/callback`) and does not introduce API behavior regression.
-
-## Develop Loop Reflexion (2026-02-28) - TB-12 CRDT Sync Endpoint
-
-Issue classification:
-- Type: API/Data
-- Priority: High
-- Signal: offline concurrent edits required a durable sync journal endpoint under locked V2 contract.
-
-Dispatch:
-- Implemented `POST /api/sync/crdt` at `app/api/sync/crdt/route.ts`.
-- Added strict request validation (`clientId`, `changes[]`, mutation size guards), authenticated access, and IP+user rate limiting.
-- Implemented deterministic merge behavior:
-  - latest `timestamp` per (`table`, `recordId`) wins
-  - equal timestamps merge mutation payloads
-- Persisted merged changes to `sync_change_log` with idempotent upsert conflict key:
-  - `user_id, client_id, table_name, record_id, logical_ts`
-- Added migration `supabase/migrations/20260228100000_add_sync_change_log_and_feedback_metadata.sql`:
-  - `sync_change_log` table, indexes, constraints, RLS policies.
-
-Verification:
-- Added test coverage in `tests/api/sync-and-feedback-routes.test.mjs`:
-  - unauthorized guard
-  - payload validation failure
-  - merge + upsert happy path
-  - rate-limit rejection
-- Regression: `npm test` pass (71/71).
-- Lint: `npm run lint` pass (single pre-existing warning unchanged).
-- Build guard: `npm run build` fails with pre-existing symlink loop (`ELOOP: GEMINI.md`) unrelated to route logic.
-- CISO guard: `npm audit` blocked by DNS (`ENOTFOUND registry.npmjs.org`) in current network-restricted environment.
-
-Critic verdict:
-- **PASS (Functional)**: endpoint behavior matches locked contract (`ok`, `mergedCount`, `serverTimestamp`) and enforces auth/rate limits.
-- **Residual risk**: full CRDT conflict semantics beyond timestamp merge remain future scope (`TB-12` hardening phase).
-
-## Launch Workflow: Phase 3 Quote Recovery Copilot (2026-03-01)
-
-**Subject**: Strategic inception of the sales-focused expansion (TB-15).
-
-### 1. CPO (Strategy)
-- **Problem**: We have solved "Scale" (Multimodal) and "Trust" (CRDT), but we haven't solved "Revenue" (Win Rates). 
-- **Solution**: The Quote Recovery Copilot turns SnapQuote from a passive tool into an active sales agent. By automating the follow-up, we provide immediate ROI to the contractor.
-- **Priority**: TB-15 is the #1 priority for Phase 3.
-
-### 2. CTO (Technical)
-- **Feasibility**: High. We already have the Twilio (TB-13) and Resend (TB-03) integrations. We just need a scheduler/trigger logic and a Gemini prompt that uses the estimate's metadata to sound authentic.
-- **Risk**: Over-messaging. We must ensure `followed_up_at` is updated atomically to avoid spamming homeowners.
-
-### 3. Verdict
-- Proceed with implementation. API Spec defined and task board updated.
-- Verify Twilio credit balance logic before dispatching recovery SMS.
-- Added endpoint tests in `tests/api/sync-and-feedback-routes.test.mjs`:
-  - invalid payload
-  - guest insert path
-  - authenticated insert path
-  - rate-limit rejection
-- Regression: `npm test` pass (71/71).
-- Lint: `npm run lint` pass (single pre-existing warning unchanged).
-- Build guard: `npm run build` fails with pre-existing symlink loop (`ELOOP: GEMINI.md`) unrelated to TB-18 behavior.
-- CISO guard: `npm audit` blocked by DNS (`ENOTFOUND registry.npmjs.org`) in current environment.
-
-Critic verdict:
-- **PASS**: feedback ingestion now follows locked API contract (`POST /api/feedback`) with better security posture and clearer ownership boundaries.
-
-## Develop Loop Reflexion (2026-02-28) - TB-10 Gemini Engine Switch (`POST /api/generate`)
-
-Issue classification:
-- Type: API/Data
-- Priority: High
-- Signal: V2 execution queue required migration of estimate generation runtime from OpenAI-only path to Gemini-capable engine while preserving output schema.
-
-Dispatch:
-- Refactored `app/api/generate/route.ts` into provider-based generation:
-  - Gemini-first when `GEMINI_API_KEY` is configured (or provider forced).
-  - OpenAI fallback path preserved for compatibility and controlled rollout.
-- Added Gemini request/response handling:
-  - system instruction + multimodal parts assembly
-  - safe extraction of text JSON payload from Gemini candidates
-  - prompt/completion token extraction from `usageMetadata`
-- Kept contract output invariant:
-  - estimate normalization (`items`, `sections`, notes, warnings)
-  - quota recording and error envelope behavior.
-
-Verification:
-- Added Gemini-path test coverage in `tests/api/core-workflow-routes.test.mjs`.
-- Full regression: `npm test` pass (77/77).
-- Lint: `npm run lint` pass (single pre-existing warning unchanged).
-- Build: `npm run build` pass after replacing workspace-root `GEMINI.md` symlink with regular file.
-- CISO: `npm audit` blocked by DNS (`ENOTFOUND registry.npmjs.org`) in current environment.
-
-Critic verdict:
-- **PASS**: endpoint contract stayed stable while engine capabilities advanced to Gemini-first execution.
-
-## Develop Loop Reflexion (2026-02-28) - TB-13 SMS Delivery API (`POST /api/send-sms`)
-
-Issue classification:
-- Type: API/Data
-- Priority: High
-- Signal: V2 monetization scope required authenticated, credit-gated SMS delivery endpoint under locked contract.
-
-Dispatch:
-- Implemented `app/api/send-sms/route.ts`:
-  - auth guard (`requireAuthenticatedUser`)
-  - payload validation (`toPhoneNumber`, `message`, `estimateId`)
-  - IP/user rate limit (20 requests / 10 min)
-  - credit balance check from `sms_credit_ledger`
-  - Twilio send dispatch (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`)
-  - success persistence to `sms_messages` and credit deduction ledger record.
-
-Verification:
-- Added `tests/api/send-sms-routes.test.mjs`:
-  - unauthorized
-  - invalid payload
-  - insufficient credits (402)
-  - rate-limited (429)
-  - successful send + ledger deduction
-- Full regression: `npm test` pass (77/77).
-- Lint: `npm run lint` pass (single pre-existing warning unchanged).
-- Build: `npm run build` pass.
-- CISO: `npm audit` blocked by DNS (`ENOTFOUND registry.npmjs.org`).
-
-Critic verdict:
-- **PASS**: runtime behavior matches locked endpoint contract and introduces minimal, test-covered provider integration risk.
-
-## Develop Loop Reflexion (2026-02-28) - TB-15 Quote Recovery Copilot (`POST /api/quotes/recovery/trigger`)
-
-Issue classification:
-- Type: API/Data + Revenue Automation.
-- Priority: High.
-- Signal: sent estimates older than 48 hours had no contract-compliant runtime trigger for automated follow-up delivery.
-
-Dispatch:
-- Implemented `app/api/quotes/recovery/trigger/route.ts`.
-  - Auth model: `CRON_SECRET` or authenticated Pro/Team bearer token.
-  - Guardrails: IP rate limit (10 req / 1 hr), payload validation, plan-tier gating (402).
-  - Candidate scan: `status='sent'` + `first_followup_queued_at is null`, then 48-hour staleness filter via `sent_at` fallback `created_at`.
-  - Duplicate-send prevention: conditional claim update on `first_followup_queued_at` before dispatch.
-  - Message generation: Gemini-first (`GEMINI_API_KEY`) with deterministic fallback text template.
-  - Delivery routing:
-    - SMS via Twilio when E.164 phone exists and SMS credits are available.
-    - Email via Resend when SMS is unavailable but email exists.
-    - `skipped_no_contact` when no reachable channel exists.
-  - Follow-up acknowledgment: updates `first_followed_up_at` and `last_followed_up_at` on successful send.
-- Added tests in `tests/api/quote-recovery-routes.test.mjs`:
-  - unauthorized guard
-  - Pro/Team gate (`402`)
-  - dry-run planning response
-  - email dispatch path
-  - SMS dispatch + ledger deduction
-  - no-contact skip path
-  - cron-secret auth path
-  - rate-limit rejection
-
-Verification:
-- `npm test`: pass (85/85).
-- `npm run lint`: pass (0 warnings/errors).
-- `npm run build`: pass.
-- `npm audit`: blocked by DNS (`ENOTFOUND registry.npmjs.org`) in current environment.
-- Fallback static scan (`rg` on TB-15 files): no `eval`/`new Function`/unsafe HTML injection patterns detected.
-
-Critic verdict:
-- **PASS**: TB-15 contract behavior is implemented end-to-end with test coverage and anti-duplicate safeguards.
-- **Residual risk**: production behavior depends on valid Twilio/Resend credentials and SMS credit provisioning.
-
-## Strategy Shift: Phase 3.5 Auto-Upsell (2026-03-01)
-
-**Subject**: Reprioritizing TB-19 over TB-16 for immediate ROI.
-
-### 1. Strategy
-- The user recognized the immediate upside in the "Good-Better-Best" Auto-Upsell concept discussed previously.
-- TB-16 (Dynamic Pricing Engine) is deferred due to its high complexity (commodity APIs, strict UX configuration).
-- TB-19 (Auto-Upsell Generator) is officially injected into the backlog and moved to execution.
-
-### 2. Execution Path
-- Modify the existing `POST /api/generate` schema to include an optional `upsellOptions` array.
-- Update the Gemini prompt in `app/api/generate/route.ts` to output these options as `addedItems` representing tier upgrades ("better", "best").
-- Minimal frontend changes required to visualize these upgrade options inside the estimate editor.
-
-## Develop Loop Reflexion (2026-03-01) - TB-19 Auto-Upsell Generator (`POST /api/generate`)
-
-Issue classification:
-- Type: API/Data + Revenue UX.
-- Priority: High.
-- Signal: generated estimates lacked contract-specified `upsellOptions`, preventing the Good-Better-Best upsell flow from surfacing in runtime UI.
-
-Dispatch:
-- Backend/AI (`app/api/generate/route.ts`):
-  - enforced normalized upsell output shape (`tier`, `title`, `description`, `addedItems`) through `normalizeUpsellOptions`.
-  - filtered invalid options with empty `addedItems`.
-  - kept contract-safe optional return semantics (`upsellOptions` emitted only when non-empty).
-  - fixed prompt-string escaping issue so lint/build parsing remains stable.
-- Frontend (`app/new-estimate/page.tsx`):
-  - added payload normalization for `upsellOptions`.
-  - rendered auto-upsell packages in result view with added-value preview.
-  - added one-click apply action to merge selected package items into the estimate and remove applied tier from pending options.
-- Data typing (`lib/estimates-storage.ts`):
-  - extended `LocalEstimate` with optional `upsellOptions` for draft/sent persistence.
-- Test coverage (`tests/api/core-workflow-routes.test.mjs`):
-  - added assertions for upsell tier fallback normalization and invalid-package filtering.
-
-Verification:
-- `npm test`: pass (85/85).
-- `npm run lint`: pass (0 warnings/errors).
-- `npm run build`: pass.
-- `npm audit`: blocked by DNS (`ENOTFOUND registry.npmjs.org`) in current environment.
-- fallback static scan (`rg`): no `eval` / `new Function` / `dangerouslySetInnerHTML` patterns in TB-19 touched files.
-
-Critic verdict:
-- **PASS**: TB-19 is contract-compliant end-to-end (generation -> normalization -> UI exposure -> persistence) with regression coverage.
-- **Residual risk**: upsell quality depends on model output quality and should be monitored with production telemetry for conversion effectiveness.
-## Develop Loop Reflexion (2026-03-01) - TB-20 Auth Redirect & Sync Reliability
-
-Issue classification:
-- Type: UX / Data Integrity
-- Priority: High
-- Signal: users reported "hanging" screens during logout and potential data loss when switching devices with stale local storage.
-
-Dispatch:
-- **Auth Strategy**: Switched from `next/navigation` `router.push` to `window.location.href` for all authentication-gated transitions.
-  - *Rationale*: Client-side routing in Next.js can sometimes be interrupted by heavy background operations (like sync or model cleanup) during an auth state change. A hard reload ensures 100% reliable state reset.
-- **Sync Strategy**: Implemented "Last Write Wins" via `updatedAt` timestamps.
-  - *Rationale*: Replaces the simple boolean `synced` flag which didn't account for multi-device edits. Now, the engine pulls cloud metadata first to decide if the local version is truly newer.
-- **Database**: Updated IndexedDB schema and `LocalEstimate` interface to support persistent `updatedAt` tracking.
-
-Verification:
-- Manually verified logout instantly clears session and redirects to `/landing`.
-- Verified sync indicator reports bidirectional transfer counts.
-- `npm run lint` and `npm run build` pass.
-
-Critic verdict:
-- **PASS**: The trade-off of a "flash" on reload is a worthwhile price for 100% auth reliability in a data-heavy field app. Timestamp-based sync provides the necessary foundation for the future CRDT (TB-12) migration.
 
 --- [ 2. The Contract (API Spec) ] ---
 # API Spec: Estimate Generation and Delivery Runtime
 
 - Project: SnapQuote
 - Version: v1.1 (Hotfix + V2 Planning Addendum)
-- Updated: 2026-02-28
+- Updated: 2026-03-04
 - Base URL: `/api`
 - Status: `LOCKED`
 
@@ -1023,6 +50,7 @@ Critic verdict:
   - `POST /api/billing/stripe/checkout`
   - `POST /api/billing/stripe/portal`
   - `GET /api/billing/subscription`
+  - `POST /api/parse-receipt`
 - Secret-based internal auth:
   - `POST /api/webhooks/stripe` (Stripe signature)
   - `POST /api/webhooks/stripe/billing` (Stripe signature)
@@ -1068,7 +96,13 @@ Notes:
 | `POST` | `/api/feedback` | Collect in-app bug/feature/general feedback | Optional | Internal app API |
 | `POST` | `/api/quotes/recovery/trigger` | Trigger Quote Recovery AI Copilot | Required | Internal app API |
 | `POST` | `/api/pricing/dynamic/calculate` | Calculate dynamic pricing markup based on indices | Required | Internal app API |
+| `POST` | `/api/parse-receipt` | Parse receipt/cart image into estimate-ready items | Required | Internal app API |
+| `POST` | `/api/sub-quotes/request` | Create a sub-quote request and secret token | Required | Public |
+| `POST` | `/api/sub-quotes/submit` | Submit sub-quote data using guest token | Guest-Token | Public |
+| `GET` | `/api/sub-quotes/status` | Read sub-quote request status (public) | Guest-Token | Public |
 | `GET` | `/auth/callback` | Handle Supabase OAuth (Google) PKCE code exchange | N/A | Public |
+| `GET` | `/sitemap.xml` | Dynamically generated SEO sitemap (Next.js) | N/A | Public |
+| `GET` | `/robots.txt` | Dynamically generated SEO robots (Next.js) | N/A | Public |
 
 ---
 
@@ -1884,6 +918,52 @@ Error responses:
 
 ---
 
+## 25) POST /api/parse-receipt (Architecture V4)
+
+Purpose: Extract materials and pricing from receipt/cart photos into structured line items.
+
+Auth: Required (Pro/Team only).
+Rate limit: 20 requests / 10 min / IP.
+
+Request (`multipart/form-data`):
+- `file: File` (`image/*`, max `10MB`)
+- `context?: string` (Optional context for normalization hints)
+
+Response `200`:
+```typescript
+interface ParsedReceiptItem {
+  id: string; // generated id
+  description: string;
+  quantity: number;
+  unit_price: number;
+  total: number;
+  confidence_score: number; // 0.0 - 1.0
+  original_text?: string;
+}
+
+interface ParseReceiptResponse {
+  ok: true;
+  vendorName?: string;
+  date?: string;
+  subtotal: number;
+  tax: number;
+  total: number;
+  items: ParsedReceiptItem[];
+  warnings?: string[];
+}
+```
+
+Error responses:
+- `400`: invalid/missing file payload
+- `401`: unauthorized
+- `402`: requires Pro or Team plan
+- `413`: file too large
+- `422`: no parsable line items found
+- `429`: rate limited
+- `500`: parse provider/internal failure
+
+---
+
 ## Error Code Matrix
 
 | Code | Meaning | Common Endpoints |
@@ -1894,6 +974,7 @@ Error responses:
 | `403` | authenticated but action not allowed (connect not linked/incomplete or billing customer missing) | create-payment-link, stripe/connect/dashboard-link, billing/stripe/portal |
 | `409` | request conflicts with existing active state | billing/stripe/checkout (already subscribed) |
 | `413` | payload too large | transcribe, send-email |
+| `422` | semantic validation failed (valid request, unusable extracted payload) | parse-receipt |
 | `429` | rate limit exceeded | public runtime endpoints + billing/* + sync/crdt + send-sms + feedback |
 | `500` | server/config/provider failure | all endpoints |
 
@@ -1937,8 +1018,28 @@ Error responses:
 | `TB-16` | `POST /api/pricing/dynamic/calculate` | mapped |
 | `TB-17` | `GET /auth/callback` | mapped |
 | `TB-18` | `POST /api/feedback` | mapped |
+| `TB-22` | `POST /api/parse-receipt` | mapped |
+| `TB-23` | `POST /api/parse-receipt` (Public Lead Gen Form) | mapped |
+| `SEO-3` | `GET /sitemap.xml` | mapped |
+| `SEO-4` | `GET /robots.txt` | mapped |
 
 All tasks in `.agent/memory/task_board.md` map to at least one endpoint in this document.
+
+---
+
+## Discoverability (SEO) Routes
+
+## 19) GET /sitemap.xml
+Purpose: Return dynamic XML sitemap for search engines.
+Auth: None.
+Rate limit: Standard static/ISR delivery.
+Response: `application/xml` containing `<urlset>` with standard routes (`/`, `/pricing`, etc.).
+
+## 20) GET /robots.txt
+Purpose: Return plain text instructions for web crawlers.
+Auth: None.
+Rate limit: Standard static/ISR delivery.
+Response: `text/plain` outputting `User-Agent: *` and appropriate `Allow`/`Disallow` lines, along with `Sitemap: <host>/sitemap.xml`.
 
 ---
 
@@ -1963,6 +1064,8 @@ All tasks in `.agent/memory/task_board.md` map to at least one endpoint in this 
   - `/api/sync/crdt`: implemented (runtime + tests)
   - `/api/feedback`: implemented (runtime + widget wiring + tests)
   - `/api/send-sms`: implemented (runtime + tests)
+- V4 rollout status:
+  - `/api/parse-receipt`: implemented (runtime + tests)
 
 --- [ 2.1 Project Context (Conductor) ] ---
 CONTEXT: conductor/product.md
@@ -2025,89 +1128,93 @@ CONTEXT: conductor/tracks.md
 
 
 --- [ 2.5 Multi-Skill Library ] ---
+(Index Mode: Listing available skills)
 
 --- [ 3. The Rules (Workflow) ] ---
 ---
-description: Autonomous Development Loop (Orchestrator 4.1)
+description: Autonomous Development Loop (Orchestrator 5.1)
 ---
 
-# ⚙️ Develop (Agentic Factory v4.1)
+# ⚙️ Develop (Agentic Factory v5.1)
 
-Self-driving development engine with **Parallel Implementation** and **Specialist Dispatch**.
+Self-driving development engine with **Sequential Pipeline** and **Specialist Dispatch**.
 
 ## 0. [AGENT] Orchestrator: Intelligence Setup
 - [ ] **Model Router**: Analyze task complexity.
     - `[LIGHT]` → Recommend Flash/mini model.
     - `[HEAVY]` → Recommend Pro/Sonnet model.
-- [ ] **Skill Discovery**: Scan codebase for tech signals and auto-load matching skills from `.agent/skills/`.
+- [ ] **Smart Skill Discovery** ⚡: Run `bash .agent/scripts/smart-skill-loader.sh "<detected tech signals>" --concat` → load skills into `.agent/memory/current_loaded_skills.md`, then read that single file.
+- [ ] **Learnings Preload**: If `.agent/memory/learnings.md` exists → read it to avoid repeating past mistakes.
+- [ ] **Environment Scan**: Run `bash .agent/scripts/audit-status.sh` → check for unresolved errors, uncommitted changes, or spec drift.
 - [ ] **Contract Check**: Verify `docs/api-spec.md` exists.
     - ✅ Found → Load spec and use as the binding contract for all implementation.
     - ❌ Not Found → **HALT. Print: "⚠️ Contract Missing. Run `/launch` first to generate API Spec."** Do NOT proceed.
 - [ ] **Board Init**: Update `.agent/memory/task_board.md` with mission, agents, and recommended model.
 
-## 1. [AGENT] Parallel Implementation (P4) ⚡
+## 1. [AGENT] Sequential Pipeline ⚡
 
-> **Factory Rule**: Both threads reference `docs/api-spec.md` as the single source of truth.
-> If the project is frontend-only or backend-only, skip the irrelevant thread.
+> **Factory Rule**: All steps reference `docs/api-spec.md` as the single source of truth.
+> Steps execute **sequentially** within a single agent context. No external handshake files needed.
 
-### Thread A: Backend (API Builder)
+### Step 1: Backend API
 
 **Input**: `docs/api-spec.md` → **Output**: Working API endpoints
 
-| Step | Action | Validation |
-|:-----|:-------|:-----------|
-| A1 | Read ALL endpoints from `docs/api-spec.md` | - |
-| A2 | Implement each endpoint (route, handler, DB query) | - |
-| A3 | Validate: Every response MUST match the spec's TypeScript schema | Type check |
-| A4 | Write endpoint tests (1 test per endpoint minimum) | `npm test` |
+| Sub | Action | Validation |
+|:----|:-------|:-----------|
+| 1.1 | Read ALL endpoints from `docs/api-spec.md` | - |
+| 1.2 | Implement each endpoint (route, handler, DB query) | - |
+| 1.3 | Validate: Every response MUST match the spec's TypeScript schema | Type check |
+| 1.4 | Write endpoint tests (1 test per endpoint minimum) | `npm test` |
 
-**Skills Auto-Loaded**: `nextjs-supabase-auth`, `api-design-principles`, `clean-code`, `supabase-automation`, `typescript-expert`
-**Output Checkpoint**: All endpoints return correct schema. Tests pass.
-
----
-
-### Thread B: Frontend (UI Builder)
-
-**Input**: `docs/api-spec.md` → **Output**: Working UI with mock data
-
-| Step | Action | Validation |
-|:-----|:-------|:-----------|
-| B1 | Create `src/mocks/api-mocks.ts` — mock responses matching spec schemas | Type check |
-| B2 | Build pages/components using `fsd-lite` folder structure | - |
-| B3 | Wire UI to mock data (fetch from `api-mocks.ts`) | Visual check |
-| B4 | Apply `anti-ai-design` + `modern-css-patterns` for premium look | UI review |
-
-**Skills Auto-Loaded**: `react-best-practices` (Vercel 45-Rule), `nextjs-app-router-patterns`, `nextjs-best-practices`, `fsd-lite`, `anti-ai-design`, `tailwind-design-system`, `zustand-store-ts`
-**Output Checkpoint**: UI renders correctly with mock data. No hardcoded values.
+**Skills**: Run `bash ~/.agent/scripts/smart-skill-loader.sh "backend api <detected-stack>" --concat --strict` → load only high-relevance backend skills.
+**Gate**: All endpoints return correct schema. Tests pass. Proceed to Step 2.
 
 ---
 
-### Phase: Integration (Thread A + B Merge)
+### Step 2: Frontend UI
 
-> **This phase begins ONLY after both Thread A and Thread B checkpoints pass.**
+**Input**: `docs/api-spec.md` + Step 1 completed endpoints → **Output**: Working UI
 
-| Step | Action | Validation |
-|:-----|:-------|:-----------|
-| I1 | Replace `api-mocks.ts` imports with real API calls | - |
-| I2 | Run **Contract Test**: Compare actual API responses vs `docs/api-spec.md` | Schema match |
-| I3 | Run full E2E flow using `e2e-testing-patterns`: Create → Read → Update → Delete | Functional check |
-| I4 | If mismatch found → Log to `agent_debate.md` and fix | - |
+| Sub | Action | Validation |
+|:----|:-------|:-----------|
+| 2.1 | Create `src/mocks/api-mocks.ts` — mock responses matching spec schemas | Type check |
+| 2.2 | Build pages/components using `fsd-lite` folder structure | - |
+| 2.3 | Wire UI to mock data (fetch from `api-mocks.ts`) | Visual check |
+| 2.4 | Apply premium design: load `.agent/skills/design/design-dna.md` rules | UI review |
+
+**Skills**: Run `bash ~/.agent/scripts/smart-skill-loader.sh "frontend ui <detected-stack>" --concat --strict` → load only high-relevance frontend skills.
+**Gate**: UI renders correctly with mock data. No hardcoded values. Proceed to Step 3.
+
+---
+
+### Step 3: Integration (Backend + Frontend Merge)
+
+> **This step begins ONLY after Step 1 and Step 2 gates pass.**
+
+| Sub | Action | Validation |
+|:----|:-------|:-----------|
+| 3.1 | Replace `api-mocks.ts` imports with real API calls | - |
+| 3.2 | Run **Contract Test**: Compare actual API responses vs `docs/api-spec.md` | Schema match |
+| 3.3 | Run full E2E flow: Create → Read → Update → Delete | Functional check |
+| 3.4 | If mismatch found → fix immediately before proceeding | - |
 
 **Gate**: Integration is COMPLETE only when Contract Test passes 100%.
 
-
-## 2. [AGENT] Critic: Reflexion Loop
-- [ ] **Review**: Audit code against `api-spec.md` contract and skill standards.
-- [ ] **Debate**: Record all critique in `.agent/memory/agent_debate.md` (IN ENGLISH).
-- [ ] **Reiterate**: If rejected, Lead Dev must refactor until approved.
+## 2. [AGENT] Critic Gate — Auto-Retry Loop ♻️
+> Load `.agent/skills/engineering/critic-gate.md` for full evaluation criteria.
+- [ ] **Evaluate**: Audit code against `api-spec.md` contract, security rules, type safety, and design standards.
+- [ ] **PASS** → Proceed to Specialist Dispatch.
+- [ ] **FAIL** → Log failure reason briefly. **Context Prune**: discard the failed approach from your reasoning, keep only the 1-line failure summary, and re-implement from scratch.
+  - **Retry #1**: Re-implement with a fresh approach based on the failure summary.
+  - **Retry #2**: Re-implement with stricter constraints.
+  - **Retry #3 (Escalate)**: Use `notify_user` tool with `BlockedOnUser: true` → **HALT and wait for user.**
 
 ## 3. [AGENT] Specialist Dispatch (P7) 🎯
 
 > **Rule**: Do NOT generic-fix. Diagnose first, then dispatch the right specialist.
 
-### Step 1: Diagnose (Error Classification)
-
-Read the Critic's feedback from `agent_debate.md` and classify each issue:
+### Diagnose (Error Classification)
 
 | Signal (키워드) | Error Type | Priority |
 |:---------------|:-----------|:--------:|
@@ -2118,32 +1225,28 @@ Read the Critic's feedback from `agent_debate.md` and classify each issue:
 | `query`, `migration`, `RLS`, `foreign key`, `deadlock` | **Database** | 🔴 High |
 | `TypeError`, `undefined`, `null`, `any`, `lint` | **Type/Quality** | 🟢 Low |
 
-### Step 2: Dispatch (Specialist Loading)
+### Dispatch (Dynamic Specialist Loading)
 
-Load the matching skill and apply its rules to fix the issue:
+> **v5.1 Rule**: Do NOT use hardcoded skill names. Use `smart-skill-loader.sh` to dynamically find the best specialist.
 
-| Error Type | Dispatched Skill | Action |
-|:-----------|:-----------------|:-------|
-| UI/CSS | `anti-ai-design` + `modern-css-patterns` | Restyle component |
-| API/Data | `api-design-principles` + `api-spec-template` | Fix endpoint, re-validate vs spec |
-| Security | `vulnerability-scanner` + `api-security-best-practices` | Full scan + patch |
-| Performance | `performance-optimization` | Profile + optimize |
-| Database | `nextjs-supabase-auth` + `supabase-automation` | Fix query/RLS/migration |
-| Database (Plan B) | `neon-postgres` + `clerk-auth` | Neon/Clerk fallback |
-| Type/Quality | `clean-code` (Uncle Bob) + `typescript-expert` | Refactor + lint |
+| Error Type | Skill Loader Query | Action |
+|:-----------|:-------------------|:-------|
+| UI/CSS | `bash ~/.agent/scripts/smart-skill-loader.sh "ui css design" --concat --strict` | Restyle component |
+| API/Data | `bash ~/.agent/scripts/smart-skill-loader.sh "api endpoint data" --concat --strict` | Fix endpoint, re-validate vs spec |
+| Security | `bash ~/.agent/scripts/smart-skill-loader.sh "security vulnerability" --concat --strict` | Full scan + patch |
+| Performance | `bash ~/.agent/scripts/smart-skill-loader.sh "performance optimization" --concat --strict` | Profile + optimize |
+| Database | `bash ~/.agent/scripts/smart-skill-loader.sh "database query migration" --concat --strict` | Fix query/RLS/migration |
+| Type/Quality | `bash ~/.agent/scripts/smart-skill-loader.sh "typescript clean code" --concat --strict` | Refactor + lint |
 
-### Step 3: Verify (Post-Fix Gate)
-
+### Post-Fix Gate
 - [ ] Re-run the Critic's original test case.
-- [ ] If PASS → Mark issue as resolved in `agent_debate.md`.
-- [ ] If FAIL → Re-dispatch (max 2 retries, then escalate to user).
+- [ ] If PASS → Mark resolved.
+- [ ] If FAIL → Re-dispatch (max 2 retries, then escalate via `notify_user`).
 
 > [!WARNING]
 > **Security issues (🔴 Critical)** must be fixed BEFORE any other issue type.
-> Never ship code with unresolved Security dispatches.
 
 ## 4. [AGENT] Secretary: Bilingual Documentation
-- [ ] **History (EN)**: Append feature record to `.agent/memory/feature_history_en.md`.
 - [ ] **History (KR)**: Append feature record to `.agent/memory/feature_history_kr.md`.
 
 ## 5. [AGENT] QA & CISO: Final Guard
@@ -2151,16 +1254,17 @@ Load the matching skill and apply its rules to fix the issue:
 - [ ] **CISO Scan**: Execute `vulnerability-scanner`.
 - [ ] **Handover**: Signal "Ready for Ship" only if 100% green.
 
+## 6. [AGENT] Workflow Transition
+- [ ] **Next**: Use `notify_user` to ask user: "개발이 완료되었습니다. `/ship`으로 배포를 진행할까요, 아니면 `/uiux`로 디자인 폴리싱을 먼저 할까요?"
+
 ---
 > [!IMPORTANT]
 > **Contract-First**: If `docs/api-spec.md` does not exist, run `/launch` first.
-> **Language Protocol**: Agent debate = English. User reports = Korean.
+> **Sequential Pipeline**: This agent runs single-threaded. No external handshake files.
+> **Language Protocol**: Agent internal reasoning = English. User reports = Korean.
 
 ## [AGENT] Secretary: Daily Log
-- [ ] **Log**: Append summary to `.agent/memory/daily/YYYY-MM-DD.md`.
-  - Workflow name, timestamp, files changed count.
-  - Key decision (1-2 sentences).
-  - Tomorrow's TODO (if applicable).
+- [ ] **Log**: Run `bash .agent/scripts/logger.sh ".agent/memory/daily/$(date +%Y-%m-%d).md" "DEVELOP" "[Summary of changes]"`
 
 --- [ 4. Instructions ] ---
 Please execute the current step marked in [ 1. The Mission ].

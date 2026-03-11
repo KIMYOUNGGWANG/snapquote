@@ -1,7 +1,9 @@
 import { OpenAI } from "openai"
 import { NextResponse } from "next/server"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
+import { parseJsonRequest } from "@/lib/server/request-validation"
 import { enforceUsageQuota, recordUsage } from "@/lib/server/usage-quota"
+import { generateRequestSchema } from "@/lib/validation/api-schemas"
 
 type UserMessageContentPart =
     | { type: "text"; text: string }
@@ -42,6 +44,10 @@ const openai = new OpenAI({
 const OPENAI_GENERATE_MODEL = process.env.OPENAI_GENERATE_MODEL?.trim() || "gpt-4o"
 const GEMINI_GENERATE_MODEL = process.env.GEMINI_GENERATE_MODEL?.trim() || "gemini-2.5-flash"
 const GENERATE_PROVIDER = process.env.GENERATE_AI_PROVIDER?.trim().toLowerCase() || "auto"
+const GENERATE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000
+const GENERATE_RATE_LIMIT_MAX = 20
+const ANONYMOUS_GENERATE_LIMIT = 10
+const ANONYMOUS_GENERATE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 
 function toFiniteNumber(value: unknown, fallback = 0): number {
     if (typeof value === "number" && Number.isFinite(value)) return value
@@ -558,12 +564,33 @@ export async function POST(req: Request) {
             )
         }
 
-        const { images, notes, userProfile, projectType } = await req.json()
         const ip = getClientIp(req)
+        if (quota.isAnonymous) {
+            const anonymousQuota = await checkRateLimit({
+                key: `generate:anonymous:${ip}`,
+                limit: ANONYMOUS_GENERATE_LIMIT,
+                windowMs: ANONYMOUS_GENERATE_WINDOW_MS,
+            })
+
+            if (!anonymousQuota.allowed) {
+                const used = ANONYMOUS_GENERATE_LIMIT - Math.max(0, anonymousQuota.remaining ?? 0)
+                return NextResponse.json(
+                    {
+                        error: "Anonymous trial limit reached. Sign in to continue generating estimates.",
+                        code: "FREE_PLAN_LIMIT_REACHED",
+                        metric: "generate",
+                        usage: used,
+                        limit: ANONYMOUS_GENERATE_LIMIT,
+                    },
+                    { status: 402 }
+                )
+            }
+        }
+
         const rateLimit = await checkRateLimit({
             key: `generate:${ip}`,
-            limit: 20,
-            windowMs: 10 * 60 * 1000,
+            limit: GENERATE_RATE_LIMIT_MAX,
+            windowMs: GENERATE_RATE_LIMIT_WINDOW_MS,
         })
 
         if (!rateLimit.allowed) {
@@ -573,32 +600,12 @@ export async function POST(req: Request) {
             )
         }
 
-        if (notes && (typeof notes !== "string" || notes.length > 8000)) {
-            return NextResponse.json(
-                { error: "Invalid notes input" },
-                { status: 400 }
-            )
+        const parsedPayload = await parseJsonRequest(req, generateRequestSchema)
+        if (!parsedPayload.ok) {
+            return parsedPayload.response
         }
 
-        if (images !== undefined) {
-            if (!Array.isArray(images) || images.length > 8) {
-                return NextResponse.json(
-                    { error: "Invalid images input" },
-                    { status: 400 }
-                )
-            }
-
-            const hasInvalidImage = images.some((image) =>
-                typeof image !== "string" || image.length > 2_000_000
-            )
-
-            if (hasInvalidImage) {
-                return NextResponse.json(
-                    { error: "Invalid image payload" },
-                    { status: 400 }
-                )
-            }
-        }
+        const { images, notes, userProfile, projectType } = parsedPayload.data
 
         // Use provided userProfile or defaults
         const profile = userProfile || {}

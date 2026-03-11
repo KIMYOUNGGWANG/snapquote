@@ -1167,6 +1167,7 @@ export default function NewEstimatePage() {
                     <Button
                         variant="ghost"
                         className="w-full text-muted-foreground"
+                        data-testid="skip-to-manual-entry"
                         onClick={() => setStep("verifying")}
                     >
                         Skip to manual entry
@@ -1195,6 +1196,7 @@ export default function NewEstimatePage() {
                             onChange={(e) => setTranscribedText(e.target.value)}
                             className="min-h-[150px] text-lg p-4 leading-relaxed"
                             placeholder="Describe the job here..."
+                            data-testid="job-description-input"
                         />
                     </div>
 
@@ -1216,6 +1218,7 @@ export default function NewEstimatePage() {
                         className="w-full h-14 text-lg font-semibold"
                         onClick={handleGenerateEstimate}
                         disabled={!transcribedText.trim() && images.length === 0}
+                        data-testid="generate-estimate-button"
                     >
                         Generate Estimate
                         <ArrowRight className="ml-2 h-5 w-5" />
@@ -1245,7 +1248,7 @@ export default function NewEstimatePage() {
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
                     <Card>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-xl font-bold">Estimate Draft</CardTitle>
+                            <CardTitle className="text-xl font-bold" data-testid="estimate-draft-title">Estimate Draft</CardTitle>
                             <div className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium flex items-center gap-1">
                                 <CheckCircle2 className="h-3 w-3" />
                                 AI Generated

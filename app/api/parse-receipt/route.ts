@@ -1,8 +1,10 @@
 import { OpenAI } from "openai"
 import { NextResponse } from "next/server"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
+import { parseFormDataPayload } from "@/lib/server/request-validation"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
+import { parseReceiptFormSchema } from "@/lib/validation/api-schemas"
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -281,29 +283,23 @@ export async function POST(req: Request) {
         )
     }
 
-    const file = formData.get("file")
-    if (!(file instanceof File)) {
-        return NextResponse.json(
-            { error: "No file provided" },
-            { status: 400 }
-        )
+    const parsedForm = parseFormDataPayload(
+        {
+            file: formData.get("file"),
+            context: formData.get("context"),
+        },
+        parseReceiptFormSchema,
+        {
+            statusByMessage: {
+                "Image file too large": 413,
+            },
+        }
+    )
+    if (!parsedForm.ok) {
+        return parsedForm.response
     }
 
-    if (!file.type.startsWith("image/")) {
-        return NextResponse.json(
-            { error: "Invalid file type" },
-            { status: 400 }
-        )
-    }
-
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-        return NextResponse.json(
-            { error: "Image file too large" },
-            { status: 413 }
-        )
-    }
-
-    const context = toTrimmedString(formData.get("context"), 500)
+    const { file, context } = parsedForm.data
 
     try {
         const imageDataUrl = await fileToDataUrl(file)

@@ -30,34 +30,34 @@ const PLAN_OPTIONS: Array<{
             tier: "starter",
             label: "Starter",
             priceLabel: "CAD $29/mo",
-            bestFor: "Solo contractors building a quoting habit from the truck",
+            bestFor: "Solo owner-operators quoting from the truck two or more times a week",
             includes: [
                 "Up to 80 field estimates per month",
                 "60 transcription minutes for on-site scope notes",
                 "60 sent estimate emails per month",
-                "Offline capture and voice-first quote drafting",
+                "Voice-first capture plus offline quote drafting",
             ],
         },
         {
             tier: "pro",
             label: "Pro",
             priceLabel: "CAD $59/mo",
-            bestFor: "Owner-operators who want faster approvals and payment requests",
+            bestFor: "Owner-operators who want cleaner customer-facing wording, faster approvals, and deposit requests",
             includes: [
                 "Up to 250 estimates per month",
                 "180 transcription minutes for service-call volume",
                 "200 sent estimate emails per month",
-                "Receipt scan plus payment-ready quoting workflow",
+                "Receipt scan, payment-ready quotes, and better fit for higher-ticket jobs",
             ],
         },
         {
             tier: "team",
             label: "Team",
             priceLabel: "CAD $129/mo",
-            bestFor: "Small trade crews sharing workflows, volume, and automation",
+            bestFor: "2-10 tech crews standardizing field quotes across the team",
             includes: [
                 "Up to 800 estimates per month",
-                "Shared team workflows across techs",
+                "Shared quoting standards across techs",
                 "Automation included",
                 "Built for higher-volume quoting and follow-up",
             ],
@@ -192,7 +192,7 @@ export default function PricingPage() {
                     )}
 
                     <div className="rounded-lg border bg-primary/5 p-3 text-sm text-muted-foreground">
-                        Choose the plan based on how many field quotes you send each month, not how much office software you want to babysit.
+                        Pay for getting the quote out from the field, not for bloated office software you barely open.
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -221,6 +221,9 @@ export default function PricingPage() {
                         <p className="text-sm text-foreground">
                             {selectedPlan.bestFor}
                         </p>
+                        <p className="text-xs text-muted-foreground">
+                            Best chosen by quote volume, not by seat count.
+                        </p>
                         {variant?.name && (
                             <p className="text-xs text-muted-foreground">
                                 Variant: <span className="font-mono">{variant.name}</span>
@@ -245,7 +248,11 @@ export default function PricingPage() {
                     </div>
 
                     <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
-                        Best fit: repair calls, installs, replacements, change orders, and small projects you need to quote before the day gets away from you.
+                        Best fit: repair calls, installs, replacements, change orders, and small projects that should be quoted before you drive off.
+                    </div>
+
+                    <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                        SnapQuote is not trying to replace dispatch, CRM, or accounting. It is for owner-operators and small crews who need a faster field quote workflow.
                     </div>
 
                     <div className="grid grid-cols-1 gap-2">
@@ -269,7 +276,7 @@ export default function PricingPage() {
                             className="w-full"
                         >
                             <Link href="/new-estimate">
-                                Try 10 free estimates first
+                                Try 10 free field quotes first
                             </Link>
                         </Button>
                         {isAuthed && (

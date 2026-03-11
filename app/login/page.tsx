@@ -10,6 +10,23 @@ import { buildPostAuthRedirectPath, normalizeIntent, normalizeNextPath } from "@
 
 const REFERRAL_TOKEN_PATTERN = /^[a-z0-9]{8,32}$/
 
+function describeReturnTarget(nextPath: string, intent: string): string {
+    if (normalizeIntent(intent) === "payment-link") {
+        return "After sign-in, you'll return to payment link setup."
+    }
+
+    const normalizedPath = normalizeNextPath(nextPath)
+    const pathLabels: Record<string, string> = {
+        "/": "the app home",
+        "/history": "History",
+        "/new-estimate": "New Estimate",
+        "/profile": "Profile",
+    }
+
+    const pathLabel = pathLabels[normalizedPath] || normalizedPath
+    return `After sign-in, you'll return to ${pathLabel}.`
+}
+
 export default function LoginPage() {
     const [email, setEmail] = useState("")
     const [loading, setLoading] = useState(false)
@@ -112,10 +129,13 @@ export default function LoginPage() {
                 </CardHeader>
                 <CardContent>
                     {intent === "payment-link" && (
-                        <p className="text-sm text-muted-foreground mb-3">
+                        <p className="text-sm text-muted-foreground mb-3" data-testid="login-payment-link-copy">
                             Sign in to generate Stripe payment links for your estimate.
                         </p>
                     )}
+                    <p className="text-xs text-muted-foreground mb-4" data-testid="login-return-target">
+                        {describeReturnTarget(nextPath, intent)}
+                    </p>
                     <div className="space-y-3 mb-6">
                         <Button
                             type="button"

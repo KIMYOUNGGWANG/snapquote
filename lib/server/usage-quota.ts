@@ -37,6 +37,7 @@ interface ResolvedUsageContext {
     context: UsageContext | null
     status?: number
     error?: string
+    isAnonymous?: boolean
 }
 
 export interface QuotaCheckResult {
@@ -44,6 +45,7 @@ export interface QuotaCheckResult {
     status?: number
     error?: string
     context: UsageContext | null
+    isAnonymous?: boolean
     used?: number
     limit?: number
     remaining?: number
@@ -225,7 +227,7 @@ async function resolveUsageContext(
         if (options.requireAuth) {
             return { context: null, status: 401, error: "Unauthorized" }
         }
-        return { context: null }
+        return { context: null, isAnonymous: true }
     }
 
     const supabase = createAuthedSupabaseClient(token)
@@ -233,7 +235,7 @@ async function resolveUsageContext(
         if (options.requireAuth) {
             return { context: null, status: 500, error: "Supabase is not configured" }
         }
-        return { context: null }
+        return { context: null, isAnonymous: true }
     }
 
     const {
@@ -245,7 +247,7 @@ async function resolveUsageContext(
         if (options.requireAuth) {
             return { context: null, status: 401, error: "Unauthorized" }
         }
-        return { context: null }
+        return { context: null, isAnonymous: true }
     }
 
     const userId = user.id
@@ -271,7 +273,7 @@ async function resolveUsageContext(
         if (options.requireAuth) {
             return { context: null, status: 500, error: "Failed to resolve usage context" }
         }
-        return { context: null }
+        return { context: null, isAnonymous: true }
     }
 }
 
@@ -288,11 +290,12 @@ export async function enforceUsageQuota(
                 status: resolved.status || 401,
                 error: resolved.error,
                 context: null,
+                isAnonymous: resolved.isAnonymous,
             }
         }
 
         // No auth token and auth not required: keep endpoint usable, but no per-user quota enforcement.
-        return { ok: true, context: null }
+        return { ok: true, context: null, isAnonymous: resolved.isAnonymous }
     }
 
     const context = resolved.context

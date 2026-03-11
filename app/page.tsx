@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Mic, FileText, Zap, ArrowRight, Clock, Send, DollarSign, Sparkles } from "lucide-react"
+import { Mic, FileText, ArrowRight, Clock, Send, DollarSign, Sparkles } from "lucide-react"
 import dynamic from "next/dynamic"
 
 const OnboardingModal = dynamic(() => import("@/components/onboarding-modal").then(mod => mod.OnboardingModal), { ssr: false })
@@ -58,111 +58,6 @@ export default function Home() {
 
   useEffect(() => {
     if (isFirstVisit()) setShowOnboarding(true)
-
-    const loadPriceList = async () => {
-      try {
-        const items = await getPriceList()
-        const sorted = items.sort((a, b) => b.usageCount - a.usageCount)
-        setPriceListItems(sorted.slice(0, 6))
-      } catch (err) {
-        console.error("Failed to load price list:", err)
-      }
-    }
-    loadPriceList()
-
-    const checkFollowUps = async () => {
-      const items = await getEstimatesNeedingFollowUp()
-      setFollowUps(items)
-    }
-    checkFollowUps()
-  }, [])
-
-  useEffect(() => {
-    let active = true
-
-    const checkConnectPrompt = async (session: any) => {
-      if (!active || !session?.user) {
-        setShowConnectPrompt(false)
-        setShowSetupWizard(false)
-        return
-      }
-
-      const userId = session.user.id
-
-      // 1. Check if core profile is set up (TB-17)
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("business_name")
-        .eq("id", userId)
-        .single()
-
-      if (!active) return
-
-      if (!profile?.business_name) {
-        setShowSetupWizard(true)
-        setShowConnectPrompt(false)
-        return
-      } else {
-        setShowSetupWizard(false)
-      }
-
-      // 2. Check Stripe Connect Prompt if profile is ready
-      const promptKey = `${CONNECT_PROMPT_KEY_PREFIX}:${userId}`
-      if (localStorage.getItem(promptKey) === "1") return
-
-      try {
-        const response = await fetch("/api/stripe/connect/status", {
-          method: "GET",
-          cache: "no-store",
-          headers: {
-            authorization: `Bearer ${session.access_token}`,
-          },
-        })
-
-        if (!active || !response.ok) return
-
-        const data = await response.json()
-        const ready = Boolean(data?.connected && data?.detailsSubmitted && data?.chargesEnabled)
-        if (!ready) {
-          setShowConnectPrompt(true)
-        }
-        localStorage.setItem(promptKey, "1")
-      } catch (error) {
-        console.error("Failed to load Stripe Connect prompt status:", error)
-      }
-    }
-
-    // Initial session check
-    void supabase.auth.getSession().then(({ data }) => {
-      if (!active) return
-      const hasUser = Boolean(data.session?.user)
-      setIsSignedIn(hasUser)
-      setAuthResolved(true)
-      if (hasUser) void checkConnectPrompt(data.session)
-    })
-
-    // Listen for changes
-    const { data } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!active) return
-      const hasUser = Boolean(session?.user)
-      setIsSignedIn(hasUser)
-      setAuthResolved(true)
-
-      if (hasUser) {
-        void checkConnectPrompt(session)
-      } else {
-        setShowConnectPrompt(false)
-        setShowSetupWizard(false)
-      }
-    })
-
-    return () => {
-      active = false
-      data.subscription.unsubscribe()
-    }
-  }, [])
-
-  useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const referralToken = params.get("ref")?.trim().toLowerCase() || ""
     const sourceParam = params.get("src")?.trim().toLowerCase() || ""
@@ -179,6 +74,116 @@ export default function Home() {
       source: sourceParam || "home_landing",
       metadata: { path: window.location.pathname, sourceParam },
     })
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    const clearSignedInState = () => {
+      setPriceListItems([])
+      setFollowUps([])
+      setShowConnectPrompt(false)
+      setShowSetupWizard(false)
+    }
+
+    const loadSignedInDashboardData = async () => {
+      try {
+        const [items, nextFollowUps] = await Promise.all([
+          getPriceList(),
+          getEstimatesNeedingFollowUp(),
+        ])
+
+        if (!active) return
+
+        const sorted = items.sort((a, b) => b.usageCount - a.usageCount)
+        setPriceListItems(sorted.slice(0, 6))
+        setFollowUps(nextFollowUps)
+      } catch (error) {
+        console.error("Failed to load signed-in home data:", error)
+        if (!active) return
+        setPriceListItems([])
+        setFollowUps([])
+      }
+    }
+
+    const checkConnectPrompt = async (session: any) => {
+      if (!active || !session?.user) {
+        clearSignedInState()
+        return
+      }
+
+      const userId = session.user.id
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("business_name")
+        .eq("id", userId)
+        .single()
+
+      if (!active) return
+
+      if (!profile?.business_name) {
+        setShowSetupWizard(true)
+        setShowConnectPrompt(false)
+        return
+      }
+
+      setShowSetupWizard(false)
+
+      const promptKey = `${CONNECT_PROMPT_KEY_PREFIX}:${userId}`
+      if (localStorage.getItem(promptKey) === "1") {
+        setShowConnectPrompt(false)
+        return
+      }
+
+      try {
+        const response = await fetch("/api/stripe/connect/status", {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            authorization: `Bearer ${session.access_token}`,
+          },
+        })
+
+        if (!active || !response.ok) return
+
+        const data = await response.json()
+        const ready = Boolean(data?.connected && data?.detailsSubmitted && data?.chargesEnabled)
+        setShowConnectPrompt(!ready)
+        localStorage.setItem(promptKey, "1")
+      } catch (error) {
+        console.error("Failed to load Stripe Connect prompt status:", error)
+      }
+    }
+
+    const syncSession = async (session: any) => {
+      if (!active) return
+
+      const hasUser = Boolean(session?.user)
+      setIsSignedIn(hasUser)
+      setAuthResolved(true)
+
+      if (!hasUser) {
+        clearSignedInState()
+        return
+      }
+
+      await loadSignedInDashboardData()
+      if (!active) return
+      await checkConnectPrompt(session)
+    }
+
+    void supabase.auth.getSession().then(({ data }) => {
+      void syncSession(data.session)
+    })
+
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      void syncSession(session)
+    })
+
+    return () => {
+      active = false
+      data.subscription.unsubscribe()
+    }
   }, [])
 
   const handleOnboardingComplete = () => {
@@ -200,10 +205,10 @@ export default function Home() {
 
   const heroTitle = isSignedIn
     ? "Ready for the next field quote?"
-    : "Quote the job before you leave."
+    : "Quote the job before you drive off."
   const heroSubtitle = isSignedIn
     ? "Capture the scope, clean the draft, and send a professional quote before the next service call starts."
-    : "Built for owner-operators and small trade teams who need to turn 30 seconds of field notes into a quote the customer can approve today."
+    : "Built for owner-operators, small crews, and tradespeople who need to turn rough field notes or broken English into a customer-ready quote while the job is still fresh."
 
   return (
     <>
@@ -296,27 +301,93 @@ export default function Home() {
               </div>
             </header>
 
-            {/* Primary CTA */}
-            <Link href="/new-estimate" className="w-full max-w-sm mx-auto block">
-              <Button size="lg" className="w-full h-16 text-lg font-bold rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 shadow-[0_0_30px_-5px_rgba(37,99,235,0.4)] border border-blue-400/20 transition-all hover:scale-[1.02] active:scale-[0.98]">
-                <Mic className="mr-2 h-6 w-6" />
-                Create Field Quote
-              </Button>
-              <p className="text-center text-xs text-muted-foreground mt-3">
-                Tap to speak • Works offline • Review before sending
-              </p>
-            </Link>
+            {isSignedIn ? (
+              <Link href="/new-estimate" className="w-full max-w-sm mx-auto block">
+                <Button size="lg" className="w-full h-16 text-lg font-bold rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 shadow-[0_0_30px_-5px_rgba(37,99,235,0.4)] border border-blue-400/20 transition-all hover:scale-[1.02] active:scale-[0.98]">
+                  <Mic className="mr-2 h-6 w-6" />
+                  Create Field Quote
+                </Button>
+                <p className="text-center text-xs text-muted-foreground mt-3">
+                  Tap to speak • Built for weak-signal sites • Review before sending
+                </p>
+              </Link>
+            ) : (
+              <div className="w-full max-w-sm mx-auto space-y-3">
+                <Link href="/landing" className="block" data-testid="home-primary-marketing-cta">
+                  <Button size="lg" className="w-full h-16 text-lg font-bold rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 shadow-[0_0_30px_-5px_rgba(37,99,235,0.4)] border border-blue-400/20 transition-all hover:scale-[1.02] active:scale-[0.98]">
+                    See the Field Workflow
+                    <ArrowRight className="ml-2 h-5 w-5" />
+                  </Button>
+                </Link>
+                <Link href="/new-estimate" className="block" data-testid="home-try-free-cta">
+                  <Button size="lg" variant="outline" className="w-full h-14 rounded-2xl border-white/15 bg-white/5 hover:bg-white/10">
+                    Try 10 Free Field Quotes
+                  </Button>
+                </Link>
+                <p className="text-center text-xs text-muted-foreground">
+                  No login required to try a local draft. Sign in when you&apos;re ready to sync, send, and collect payment.
+                </p>
+              </div>
+            )}
 
             {!isSignedIn && (
               <div className="w-full max-w-sm mx-auto text-center">
                 <Link href="/pricing" className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
-                  See Starter, Pro, and Team pricing
+                  See plans for one truck, higher volume, or a small crew
+                </Link>
+              </div>
+            )}
+
+            {!isSignedIn && (
+              <div className="grid gap-3 max-w-sm mx-auto" data-testid="home-signed-out-workflow">
+                <div className="glass-card p-4 flex gap-3 items-start">
+                  <div className="p-2 rounded-full bg-blue-500/15 border border-blue-500/20">
+                    <Mic className="h-4 w-4 text-blue-300" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-white">Speak the scope once</p>
+                    <p className="text-xs text-gray-400">Capture rough field notes while the job is still fresh.</p>
+                  </div>
+                </div>
+                <div className="glass-card p-4 flex gap-3 items-start">
+                  <div className="p-2 rounded-full bg-blue-500/15 border border-blue-500/20">
+                    <FileText className="h-4 w-4 text-blue-300" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-white">Review a clean draft</p>
+                    <p className="text-xs text-gray-400">Turn rough or broken English into customer-ready wording.</p>
+                  </div>
+                </div>
+                <div className="glass-card p-4 flex gap-3 items-start">
+                  <div className="p-2 rounded-full bg-blue-500/15 border border-blue-500/20">
+                    <DollarSign className="h-4 w-4 text-blue-300" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-white">Send before you leave</p>
+                    <p className="text-xs text-gray-400">Save, send, and collect payment without doing quote work after dinner.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!isSignedIn && (
+              <div className="glass-card max-w-sm mx-auto p-4 space-y-3">
+                <p className="text-[11px] font-medium uppercase tracking-wider text-blue-300">
+                  Best fit
+                </p>
+                <div className="space-y-2 text-sm text-gray-300">
+                  <p>Owner-operators quoting from the truck</p>
+                  <p>Weak-signal basements, crawlspaces, and remodel jobs</p>
+                  <p>Teams that need cleaner customer-facing wording fast</p>
+                </div>
+                <Link href="/landing" className="inline-flex text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                  See the full field workflow
                 </Link>
               </div>
             )}
 
             {/* Action Required / Follow Ups */}
-            {followUps.length > 0 && (
+            {isSignedIn && followUps.length > 0 && (
               <div className="glass-card border-amber-500/20 bg-amber-500/5">
                 <div className="p-4 flex gap-4">
                   <div className="p-2 bg-amber-500/10 rounded-full h-fit">

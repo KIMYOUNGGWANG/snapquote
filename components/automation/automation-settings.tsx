@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
@@ -23,12 +23,28 @@ interface Automation {
     }
 }
 
+function getQuoteChaserDelayDays(settings?: Automation["settings"]) {
+    const firstDelayDays = Math.max(
+        1,
+        Math.round((((settings?.first_delay_hours ?? (settings?.delay_days ? settings.delay_days * 24 : 48)) / 24) * 10)) / 10
+    )
+    const secondDelayDays = Math.max(
+        firstDelayDays + 1,
+        Math.round((((settings?.second_delay_hours ?? 168) / 24) * 10)) / 10
+    )
+
+    return {
+        firstDelayDays,
+        secondDelayDays,
+    }
+}
+
 export function AutomationSettings() {
     const [automations, setAutomations] = useState<Automation[]>([])
     const [loading, setLoading] = useState(true)
-    const [firstFollowupDays, setFirstFollowupDays] = useState(2)
-    const [secondFollowupDays, setSecondFollowupDays] = useState(7)
     const [missingTable, setMissingTable] = useState(false)
+    const firstFollowupInputRef = useRef<HTMLInputElement | null>(null)
+    const secondFollowupInputRef = useRef<HTMLInputElement | null>(null)
 
     useEffect(() => {
         fetchAutomations()
@@ -130,23 +146,17 @@ export function AutomationSettings() {
 
     const quoteChaser = automations.find(a => a.type === 'quote_chaser')
     const reviewRequest = automations.find(a => a.type === 'review_request')
+    const quoteChaserDelayDays = getQuoteChaserDelayDays(quoteChaser?.settings)
 
-    useEffect(() => {
-        if (!quoteChaser?.settings) return
+    const commitQuoteChaserDelays = () => {
+        if (!quoteChaser) return
 
-        const normalizedFirstDelayDays = Math.max(
-            1,
-            Math.round(((quoteChaser.settings.first_delay_hours
-                ?? (quoteChaser.settings.delay_days ? quoteChaser.settings.delay_days * 24 : 48)) / 24) * 10) / 10
-        )
-        const normalizedSecondDelayDays = Math.max(
-            normalizedFirstDelayDays + 1,
-            Math.round(((quoteChaser.settings.second_delay_hours ?? 168) / 24) * 10) / 10
-        )
+        const firstValue = Number(firstFollowupInputRef.current?.value ?? quoteChaserDelayDays.firstDelayDays)
+        const secondValue = Number(secondFollowupInputRef.current?.value ?? quoteChaserDelayDays.secondDelayDays)
+        if (!Number.isFinite(firstValue) || !Number.isFinite(secondValue)) return
 
-        setFirstFollowupDays(normalizedFirstDelayDays)
-        setSecondFollowupDays(normalizedSecondDelayDays)
-    }, [quoteChaser?.settings, quoteChaser?.settings?.first_delay_hours, quoteChaser?.settings?.second_delay_hours, quoteChaser?.settings?.delay_days])
+        void updateQuoteChaserDelays(quoteChaser.id, firstValue, secondValue)
+    }
 
     if (loading) return <div>Loading settings...</div>
 
@@ -216,15 +226,12 @@ create policy "Users can update own automations" on automations for update using
                                 id="chaser-delay-first"
                                 type="number"
                                 className="w-20"
-                                value={firstFollowupDays}
+                                key={`${quoteChaser.id}-first-${quoteChaserDelayDays.firstDelayDays}`}
+                                defaultValue={quoteChaserDelayDays.firstDelayDays}
                                 min={1}
                                 step={0.5}
-                                onChange={(e) => setFirstFollowupDays(Number(e.target.value))}
-                                onBlur={(e) => {
-                                    const value = Number(e.target.value)
-                                    if (!Number.isFinite(value)) return
-                                    updateQuoteChaserDelays(quoteChaser.id, value, secondFollowupDays)
-                                }}
+                                ref={firstFollowupInputRef}
+                                onBlur={commitQuoteChaserDelays}
                             />
                         </div>
                         <div className="flex items-center gap-4">
@@ -233,15 +240,12 @@ create policy "Users can update own automations" on automations for update using
                                 id="chaser-delay-second"
                                 type="number"
                                 className="w-20"
-                                value={secondFollowupDays}
+                                key={`${quoteChaser.id}-second-${quoteChaserDelayDays.secondDelayDays}`}
+                                defaultValue={quoteChaserDelayDays.secondDelayDays}
                                 min={2}
                                 step={0.5}
-                                onChange={(e) => setSecondFollowupDays(Number(e.target.value))}
-                                onBlur={(e) => {
-                                    const value = Number(e.target.value)
-                                    if (!Number.isFinite(value)) return
-                                    updateQuoteChaserDelays(quoteChaser.id, firstFollowupDays, value)
-                                }}
+                                ref={secondFollowupInputRef}
+                                onBlur={commitQuoteChaserDelays}
                             />
                         </div>
                         <p className="text-xs text-muted-foreground">

@@ -29,6 +29,48 @@ beforeEach(() => {
 })
 
 describe('POST /api/generate', () => {
+  test('blocks anonymous callers after the monthly trial quota is exhausted', async () => {
+    const state = getTestState()
+    state.usageQuota.enforceResult = {
+      ok: true,
+      context: null,
+      isAnonymous: true,
+    }
+    state.rateLimit.result = (options) => {
+      if (options.key === 'generate:anonymous:127.0.0.1') {
+        return {
+          allowed: false,
+          remaining: 0,
+          resetAt: Date.now() + 60_000,
+        }
+      }
+
+      return {
+        allowed: true,
+        remaining: 999,
+        resetAt: Date.now() + 60_000,
+      }
+    }
+
+    const req = jsonRequest('http://localhost/api/generate', {
+      notes: 'replace valve',
+      images: [],
+    })
+
+    const res = await generateEstimate(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 402)
+    assert.equal(data.code, 'FREE_PLAN_LIMIT_REACHED')
+    assert.equal(data.metric, 'generate')
+    assert.match(data.error, /sign in to continue/i)
+    assert.equal(state.usageQuota.recordCalls.length, 0)
+    assert.equal(
+      state.rateLimit.calls.some((call) => call.key === 'generate:anonymous:127.0.0.1'),
+      true
+    )
+  })
+
   test('returns paywall payload when usage quota is exhausted', async () => {
     const state = getTestState()
     state.usageQuota.enforceResult = {
@@ -70,6 +112,25 @@ describe('POST /api/generate', () => {
 
     assert.equal(res.status, 400)
     assert.equal(data.error, 'Invalid image payload')
+    assert.equal(state.openai.chatCalls.length, 0)
+  })
+
+  test('rejects unexpected keys in the generate payload', async () => {
+    const state = getTestState()
+
+    const req = jsonRequest('http://localhost/api/generate', {
+      notes: 'replace valve',
+      images: [],
+      injected: true,
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await generateEstimate(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 400)
+    assert.equal(data.error, 'Invalid request payload')
     assert.equal(state.openai.chatCalls.length, 0)
   })
 

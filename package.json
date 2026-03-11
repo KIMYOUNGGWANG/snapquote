@@ -8,7 +8,11 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "node --loader ./tests/loader.mjs --test tests/api/*.test.mjs",
-    "test:watch": "node --loader ./tests/loader.mjs --test --watch tests/api/*.test.mjs"
+    "test:watch": "node --loader ./tests/loader.mjs --test --watch tests/api/*.test.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "smoke:deploy": "node ./scripts/deploy-smoke.mjs",
+    "validate:env": "node ./scripts/validate-env.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
@@ -37,6 +41,7 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",

@@ -124,6 +124,24 @@ describe("POST /api/parse-receipt", () => {
     assert.equal(data.error, "Image file too large")
   })
 
+  test("returns 400 when context exceeds the allowed length", async () => {
+    setServiceEnv()
+    const state = getTestState()
+    state.routeAuth.result = { ok: true, userId: "user-pro" }
+    mockPlanTier(state, "pro")
+
+    const formData = new FormData()
+    formData.append("file", new File([new Uint8Array([1, 2, 3])], "receipt.png", { type: "image/png" }))
+    formData.append("context", "x".repeat(501))
+
+    const req = buildMultipartRequest(formData, bearerHeader())
+    const res = await parseReceipt(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 400)
+    assert.equal(data.error, "Invalid context input")
+  })
+
   test("returns 422 when parsed result has zero usable items", async () => {
     setServiceEnv()
     const state = getTestState()
