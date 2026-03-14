@@ -96,16 +96,33 @@ export async function POST(req: Request) {
     }
 
     const userId = await resolveOptionalUserId(req)
-    const { data, error } = await supabase
+    const insertPayload = {
+        user_id: userId,
+        category: payload.type,
+        description: payload.message,
+    }
+
+    let { data, error } = await supabase
         .from("feedback")
         .insert({
-            user_id: userId,
-            category: payload.type,
-            description: payload.message,
+            ...insertPayload,
             metadata: payload.metadata,
         })
         .select("id")
         .single()
+
+    // Fallback if the production database hasn't received the migration adding the 'metadata' column yet.
+    if (error && error.code === 'PGRST204') {
+        console.warn("feedback/route: 'metadata' column not found, falling back to basic insert.")
+        const fallbackResult = await supabase
+            .from("feedback")
+            .insert(insertPayload)
+            .select("id")
+            .single()
+        
+        data = fallbackResult.data
+        error = fallbackResult.error
+    }
 
     if (error || !data?.id) {
         console.error("Feedback insert failed:", error)
