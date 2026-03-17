@@ -20,9 +20,10 @@ const PaymentOptionModal = dynamic(() => import("@/components/payment-option-mod
 import { AudioRecorder } from "@/components/audio-recorder"
 const PDFPreviewModal = dynamic(() => import("@/components/pdf-preview-modal").then(mod => mod.PDFPreviewModal), { ssr: false })
 const EmailModal = dynamic(() => import("@/components/email-modal").then(mod => mod.EmailModal), { ssr: false })
+const SmsModal = dynamic(() => import("@/components/sms-modal").then(mod => mod.SmsModal), { ssr: false })
 const ExcelImportModal = dynamic(() => import("@/components/excel-import-modal").then(mod => mod.ExcelImportModal), { ssr: false })
 const ReceiptScanner = dynamic(() => import("@/components/receipt-scanner").then(mod => mod.ReceiptScanner), { ssr: false })
-import { Mail, FileSpreadsheet, Users, PenTool, Sparkles, Receipt } from "lucide-react"
+import { Mail, FileSpreadsheet, Users, PenTool, Sparkles, Receipt, MessageSquare } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 const SignaturePad = dynamic(() => import("@/components/signature-pad").then(mod => mod.SignaturePad), { ssr: false })
 
@@ -268,6 +269,7 @@ export default function NewEstimatePage() {
     const [businessProfile, setBusinessProfile] = useState<BusinessInfo | undefined>(undefined)
     const [isPreviewOpen, setIsPreviewOpen] = useState(false)
     const [isEmailModalOpen, setIsEmailModalOpen] = useState(false)
+    const [isSmsModalOpen, setIsSmsModalOpen] = useState(false)
     const [isExcelModalOpen, setIsExcelModalOpen] = useState(false)
     const [isOffline, setIsOffline] = useState(false)
     const [pendingAudioId, setPendingAudioId] = useState<string | null>(null)
@@ -1856,6 +1858,16 @@ export default function NewEstimatePage() {
                                 <Mail className="h-4 w-4 mr-2" />
                                 📧 Send to Customer
                             </Button>
+
+                            {/* SMS Button */}
+                            <Button
+                                variant="outline"
+                                className="w-full mt-2"
+                                onClick={() => setIsSmsModalOpen(true)}
+                            >
+                                <MessageSquare className="h-4 w-4 mr-2" />
+                                💬 Send via SMS
+                            </Button>
                             <Button
                                 variant="ghost"
                                 className="w-full"
@@ -1872,88 +1884,92 @@ export default function NewEstimatePage() {
                                 )}
                             </Button>
 
-                            <PDFPreviewModal
-                                open={isPreviewOpen}
-                                onClose={() => setIsPreviewOpen(false)}
-                                createDocument={() => createEstimatePdfDocument({ includeSignature: true })}
-                            />
+                            {isPreviewOpen && (
+                                <PDFPreviewModal
+                                    open={isPreviewOpen}
+                                    onClose={() => setIsPreviewOpen(false)}
+                                    createDocument={() => createEstimatePdfDocument({ includeSignature: true })}
+                                />
+                            )}
 
-                            <EmailModal
-                                open={isEmailModalOpen}
-                                onClose={() => setIsEmailModalOpen(false)}
-                                estimateTotal={resultTotal}
-                                onSend={async (email, message) => {
-                                    try {
-                                        // Generate PDF as base64
-                                        const { pdf } = await import("@react-pdf/renderer")
-                                        const pdfDoc = await createEstimatePdfDocument({ includeSignature: true })
-                                        const blob = await pdf(pdfDoc).toBlob()
+                            {isEmailModalOpen && (
+                                <EmailModal
+                                    open={isEmailModalOpen}
+                                    onClose={() => setIsEmailModalOpen(false)}
+                                    estimateTotal={resultTotal}
+                                    onSend={async (email, message) => {
+                                        try {
+                                            // Generate PDF as base64
+                                            const { pdf } = await import("@react-pdf/renderer")
+                                            const pdfDoc = await createEstimatePdfDocument({ includeSignature: true })
+                                            const blob = await pdf(pdfDoc).toBlob()
 
-                                        // Convert blob to base64
-                                        const reader = new FileReader()
-                                        const pdfBase64 = await new Promise<string>((resolve, reject) => {
-                                            reader.onload = () => {
-                                                const result = reader.result as string
-                                                // Remove data URL prefix to get pure base64
-                                                const base64 = result.split(',')[1]
-                                                resolve(base64)
-                                            }
-                                            reader.onerror = reject
-                                            reader.readAsDataURL(blob)
-                                        })
-                                        const referralUrl = await getReferralShareUrl({ source: "estimate_email" })
-                                        const headers = await withAuthHeaders({ "Content-Type": "application/json" })
-
-                                        // Send via API with PDF attachment
-                                        const response = await fetch('/api/send-email', {
-                                            method: 'POST',
-                                            headers,
-                                            body: JSON.stringify({
-                                                email,
-                                                subject: `Estimate from ${businessProfile?.business_name || 'SnapQuote'}`,
-                                                message,
-                                                pdfBase64,
-                                                businessName: businessProfile?.business_name,
-                                                referralUrl: referralUrl || undefined,
+                                            // Convert blob to base64
+                                            const reader = new FileReader()
+                                            const pdfBase64 = await new Promise<string>((resolve, reject) => {
+                                                reader.onload = () => {
+                                                    const result = reader.result as string
+                                                    // Remove data URL prefix to get pure base64
+                                                    const base64 = result.split(',')[1]
+                                                    resolve(base64)
+                                                }
+                                                reader.onerror = reject
+                                                reader.readAsDataURL(blob)
                                             })
-                                        })
+                                            const referralUrl = await getReferralShareUrl({ source: "estimate_email" })
+                                            const headers = await withAuthHeaders({ "Content-Type": "application/json" })
 
-                                        if (!response.ok) {
-                                            const errorData = await response.json()
-                                            if (response.status === 402) {
-                                                throw new Error("Monthly email quota reached. Upgrade flow will be enabled soon.")
-                                            }
-                                            throw new Error(errorData.error || 'Failed to send email')
-                                        }
-
-                                        const data = await response.json()
-
-                                        if (data.method === 'mailto') {
-                                            // Open mailto if no email service configured
-                                            window.open(data.mailtoUrl, '_blank')
-                                            toast('📧 Email client opened. Please attach the PDF.', 'warning')
-                                        } else {
-                                            const draftMeta = getOrCreateDraftMeta()
-                                            void trackAnalyticsEvent({
-                                                event: "quote_sent",
-                                                estimateId: draftMeta.id,
-                                                estimateNumber: draftMeta.estimateNumber,
-                                                channel: "email",
-                                                metadata: {
-                                                    recipient: email,
-                                                    hasPaymentLink: includePaymentLink && Boolean(paymentLink),
-                                                },
+                                            // Send via API with PDF attachment
+                                            const response = await fetch('/api/send-email', {
+                                                method: 'POST',
+                                                headers,
+                                                body: JSON.stringify({
+                                                    email,
+                                                    subject: `Estimate from ${businessProfile?.business_name || 'SnapQuote'}`,
+                                                    message,
+                                                    pdfBase64,
+                                                    businessName: businessProfile?.business_name,
+                                                    referralUrl: referralUrl || undefined,
+                                                })
                                             })
-                                            await persistCurrentEstimateAsSent()
-                                            toast('✅ Email sent with PDF attached!', 'success')
+
+                                            if (!response.ok) {
+                                                const errorData = await response.json()
+                                                if (response.status === 402) {
+                                                    throw new Error("Monthly email quota reached. Upgrade flow will be enabled soon.")
+                                                }
+                                                throw new Error(errorData.error || 'Failed to send email')
+                                            }
+
+                                            const data = await response.json()
+
+                                            if (data.method === 'mailto') {
+                                                // Open mailto if no email service configured
+                                                window.open(data.mailtoUrl, '_blank')
+                                                toast('📧 Email client opened. Please attach the PDF.', 'warning')
+                                            } else {
+                                                const draftMeta = getOrCreateDraftMeta()
+                                                void trackAnalyticsEvent({
+                                                    event: "quote_sent",
+                                                    estimateId: draftMeta.id,
+                                                    estimateNumber: draftMeta.estimateNumber,
+                                                    channel: "email",
+                                                    metadata: {
+                                                        recipient: email,
+                                                        hasPaymentLink: includePaymentLink && Boolean(paymentLink),
+                                                    },
+                                                })
+                                                await persistCurrentEstimateAsSent()
+                                                toast('✅ Email sent with PDF attached!', 'success')
+                                            }
+                                        } catch (error: any) {
+                                            console.error('Email send error:', error)
+                                            toast(`❌ ${error.message || 'Failed to send. Try again.'}`, 'error')
+                                            throw error
                                         }
-                                    } catch (error: any) {
-                                        console.error('Email send error:', error)
-                                        toast(`❌ ${error.message || 'Failed to send. Try again.'}`, 'error')
-                                        throw error
-                                    }
-                                }}
-                            />
+                                    }}
+                                />
+                            )}
                         </CardContent>
                     </Card>
 
@@ -1965,6 +1981,55 @@ export default function NewEstimatePage() {
                         Back to Edit
                     </Button>
                 </div>
+            )}
+
+            {/* SMS Modal */}
+            {isSmsModalOpen && (
+                <SmsModal
+                    open={isSmsModalOpen}
+                    onClose={() => setIsSmsModalOpen(false)}
+                    estimateTotal={resultTotal}
+                    paymentLink={includePaymentLink ? paymentLink : null}
+                    businessName={businessProfile?.business_name}
+                    onSend={async (toPhoneNumber, message) => {
+                        try {
+                            const headers = await withAuthHeaders({ "Content-Type": "application/json" })
+                            const draftMeta = getOrCreateDraftMeta()
+                            const response = await fetch('/api/send-sms', {
+                                method: 'POST',
+                                headers,
+                                body: JSON.stringify({
+                                    toPhoneNumber,
+                                    message,
+                                    estimateId: draftMeta.id,
+                                })
+                            })
+                            if (!response.ok) {
+                                const errorData = await response.json()
+                                if (response.status === 402) {
+                                    throw new Error("Insufficient SMS credits. Top up from your account.")
+                                }
+                                throw new Error(errorData.error || 'Failed to send SMS')
+                            }
+                            const data = await response.json()
+                            void trackAnalyticsEvent({
+                                event: "quote_sent",
+                                estimateId: draftMeta.id,
+                                estimateNumber: draftMeta.estimateNumber,
+                                channel: "sms",
+                                metadata: {
+                                    creditsRemaining: data.creditsRemaining,
+                                },
+                            })
+                            await persistCurrentEstimateAsSent()
+                            toast('✅ SMS sent!', 'success')
+                        } catch (error: any) {
+                            console.error('SMS send error:', error)
+                            toast(`❌ ${error.message || 'Failed to send. Try again.'}`, 'error')
+                            throw error
+                        }
+                    }}
+                />
             )}
 
             {/* Excel Import Modal */}

@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "🚀 Bridge to Codex",
+      "label": "\ud83d\ude80 Bridge to Codex",
       "type": "shell",
       "command": "./.agent/scripts/bridge.sh ${input:workflowName}",
       "options": {
@@ -18,6 +18,20 @@
         "isDefault": true
       },
       "detail": "Generates optimized context for Codex using the selected workflow."
+    },
+    {
+      "label": "\ud83c\udf43 Bridge to Codex (Lite)",
+      "type": "shell",
+      "command": "./.agent/scripts/bridge.sh ${input:workflowName} --lite",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": [],
+      "detail": "Lightweight context (skips full skill content) for small tasks."
     }
   ],
   "inputs": [
@@ -29,6 +43,9 @@
         "develop",
         "plan",
         "fix",
+        "mobile-dev",
+        "mobile-plan",
+        "pm",
         "uiux",
         "ship",
         "cycle",
