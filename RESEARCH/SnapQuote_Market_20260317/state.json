@@ -1,0 +1,28 @@
+{
+  "session_id": "SnapQuote_Market_20260317",
+  "topic": "SnapQuote 시장성·페인킬러 검증·가격 전략",
+  "created_at": "2026-03-17T18:00:00Z",
+  "updated_at": "2026-03-17T18:30:00Z",
+  "status": "COMPLETED",
+  "current_phase": 7,
+  "progress": {
+    "phase_1": "completed",
+    "phase_2": "completed",
+    "phase_3": "completed",
+    "phase_4": "completed",
+    "phase_5": "completed",
+    "phase_6": "completed",
+    "phase_7": "completed"
+  },
+  "sources_count": 17,
+  "artifacts": {
+    "agent_results": [
+      "artifacts/agent_results/agent1_market_size.md",
+      "artifacts/agent_results/agent2_painkiller_validation.md",
+      "artifacts/agent_results/agent3_competitive_pricing.md"
+    ],
+    "executive_summary": "outputs/00_executive_summary.md",
+    "full_report": "outputs/01_full_report/full_report.md"
+  },
+  "errors": []
+}

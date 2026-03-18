@@ -29,35 +29,35 @@ const PLAN_OPTIONS: Array<{
         {
             tier: "starter",
             label: "Starter",
-            priceLabel: "CAD $29/mo",
-            bestFor: "Solo owner-operators quoting from the truck two or more times a week",
+            priceLabel: "CAD $34/mo",
+            bestFor: "Solo owner-operators who speak Spanish or Korean on site and need clean English quotes out fast",
             includes: [
                 "Up to 80 field estimates per month",
-                "60 transcription minutes for on-site scope notes",
+                "60 transcription minutes for multilingual on-site scope notes",
                 "60 sent estimate emails per month",
-                "Voice-first capture plus offline quote drafting",
+                "Spanish/Korean voice capture plus offline quote drafting",
             ],
         },
         {
             tier: "pro",
             label: "Pro",
             priceLabel: "CAD $59/mo",
-            bestFor: "Owner-operators who want cleaner customer-facing wording, faster approvals, and deposit requests",
+            bestFor: "Owner-operators who want cleaner English wording, faster approvals, and deposit requests",
             includes: [
                 "Up to 250 estimates per month",
                 "180 transcription minutes for service-call volume",
                 "200 sent estimate emails per month",
-                "Receipt scan, payment-ready quotes, and better fit for higher-ticket jobs",
+                "Receipt scan, English quote cleanup, and better fit for higher-ticket jobs",
             ],
         },
         {
             tier: "team",
             label: "Team",
             priceLabel: "CAD $129/mo",
-            bestFor: "2-10 tech crews standardizing field quotes across the team",
+            bestFor: "2-10 tech crews standardizing English quote output across multilingual field teams",
             includes: [
                 "Up to 800 estimates per month",
-                "Shared quoting standards across techs",
+                "Shared English quote standards across techs",
                 "Automation included",
                 "Built for higher-volume quoting and follow-up",
             ],
@@ -192,7 +192,7 @@ export default function PricingPage() {
                     )}
 
                     <div className="rounded-lg border bg-primary/5 p-3 text-sm text-muted-foreground">
-                        Pay for getting the quote out from the field, not for bloated office software you barely open.
+                        Pay for turning Spanish or Korean field talk into clean English quotes, not for bloated office software you barely open.
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -222,7 +222,7 @@ export default function PricingPage() {
                             {selectedPlan.bestFor}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                            Best chosen by quote volume, not by seat count.
+                            Best chosen by quote volume and language friction, not by seat count.
                         </p>
                         {variant?.name && (
                             <p className="text-xs text-muted-foreground">
@@ -248,11 +248,11 @@ export default function PricingPage() {
                     </div>
 
                     <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
-                        Best fit: repair calls, installs, replacements, change orders, and small projects that should be quoted before you drive off.
+                        Best fit: repair calls, installs, replacements, change orders, and small projects where the job is explained one way on site and sent another way to the customer.
                     </div>
 
                     <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
-                        SnapQuote is not trying to replace dispatch, CRM, or accounting. It is for owner-operators and small crews who need a faster field quote workflow.
+                        SnapQuote is not trying to replace dispatch, CRM, or accounting. It is for owner-operators and small crews who need a faster multilingual field-to-English quote workflow.
                     </div>
 
                     <div className="grid grid-cols-1 gap-2">
@@ -276,7 +276,7 @@ export default function PricingPage() {
                             className="w-full"
                         >
                             <Link href="/new-estimate">
-                                Try 10 free field quotes first
+                                Try 10 free English quote drafts first
                             </Link>
                         </Button>
                         {isAuthed && (

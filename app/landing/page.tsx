@@ -85,10 +85,10 @@ export default function LandingPage() {
     const [isMenuOpen, setIsMenuOpen] = useState(false)
 
     const voiceExamples = [
-        "Replace damaged entry door, new hardware, haul away old unit, 5 hours labor",
-        "Install customer-supplied vanity, reconnect fixture, patch minor drywall, 4 hours labor",
-        "Swap two light fixtures, add dimmer switch, test circuits, cleanup included",
-        "Repair ceiling drywall after leak, texture blend, prime and paint, 1 day labor"
+        "Bano pequeno. Cambiar vanity, reconnect drain, patch wall, 4 hours labor",
+        "욕실 타일 50 sqft, new vanity install, haul away debris, 하루 인건비",
+        "Cambiar dos luces, add dimmer, test circuit, cleanup included",
+        "천장 누수 보수, drywall patch, texture blend, paint touch-up"
     ]
 
     return (
@@ -133,26 +133,26 @@ export default function LandingPage() {
                                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                                     <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
                                 </span>
-                                For owner-operators, small crews, and non-native English trades
+                                For Spanish- and Korean-speaking owner-operators in the field
                             </div>
 
                             <h1 className="text-4xl md:text-6xl font-bold leading-tight mb-6">
-                                Quote the job
+                                Speak in Spanish or Korean.
                                 <br />
                                 <span className="bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
-                                    before you drive off.
+                                    Send the quote in English.
                                 </span>
                             </h1>
 
                             <p className="text-lg text-gray-400 mb-4 max-w-lg">
-                                Record 30 seconds of scope notes on-site. SnapQuote turns rough field language into a customer-ready estimate you can review, send, and get approved while the job is still fresh.
+                                Say the job the way you naturally explain it on site. SnapQuote rewrites rough Spanish, Korean, or mixed field language into a clean English estimate you can review, send, and get approved before you drive off.
                             </p>
 
                             {/* Voice Input Demo */}
                             <div className="bg-white/5 border border-white/10 rounded-2xl p-5 mb-8 max-w-lg">
                                 <div className="flex items-center gap-2 mb-3">
                                     <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
-                                    <span className="text-xs text-gray-400 uppercase tracking-wider">Voice Input</span>
+                                    <span className="text-xs text-gray-400 uppercase tracking-wider">Multilingual Voice Input</span>
                                 </div>
                                 <div className="text-sm text-gray-300 h-12 flex items-center">
                                     <TypewriterText texts={voiceExamples} />
@@ -164,7 +164,7 @@ export default function LandingPage() {
                                     <svg className="w-5 h-5 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
-                                    <span className="text-sm text-green-400 font-medium">Quote draft ready - scope, parts, labor, tax, and payment request</span>
+                                    <span className="text-sm text-green-400 font-medium">English quote draft ready - scope, parts, labor, tax, and payment request</span>
                                 </div>
                             </div>
 
@@ -173,7 +173,7 @@ export default function LandingPage() {
                                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                                     </svg>
-                                    Create Your First Driveway Quote
+                                    Try the Spanish/Korean Quote Flow
                                 </Link>
                                 <a href="#how-it-works" className="border border-white/10 hover:border-white/20 text-gray-300 hover:text-white px-8 py-4 rounded-2xl text-base font-medium transition-all flex items-center justify-center gap-2">
                                     See How It Works
@@ -185,7 +185,7 @@ export default function LandingPage() {
                             </div>
 
                             <p className="text-xs text-gray-500 mt-4">
-                                ✓ 10 free field quotes &nbsp;·&nbsp; ✓ Built for weak-signal job sites &nbsp;·&nbsp; ✓ Review before you send
+                                ✓ 10 free quotes/month &nbsp;·&nbsp; ✓ Speak naturally on site &nbsp;·&nbsp; ✓ Review the English draft before you send
                             </p>
                         </div>
 
@@ -215,7 +215,7 @@ export default function LandingPage() {
                             <div className="text-2xl md:text-3xl font-bold text-white">
                                 <AnimatedCounter target={30} suffix="sec" />
                             </div>
-                            <p className="text-xs text-gray-500 mt-1">Voice capture to draft</p>
+                            <p className="text-xs text-gray-500 mt-1">Native-language notes to English draft</p>
                         </div>
                         <div>
                             <div className="text-2xl md:text-3xl font-bold text-white">
@@ -243,7 +243,7 @@ export default function LandingPage() {
             <section className="py-20 px-6">
                 <div className="max-w-4xl mx-auto text-center">
                     <h2 className="text-3xl md:text-4xl font-bold mb-6">
-                        The field problems office software usually misses.
+                        The non-English field problem office software ignores.
                     </h2>
                     <div className="grid md:grid-cols-3 gap-6 mt-12">
                         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:border-red-500/30 transition-colors">
@@ -258,8 +258,8 @@ export default function LandingPage() {
                         </div>
                         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:border-red-500/30 transition-colors">
                             <div className="text-4xl mb-4">🗣️</div>
-                            <h3 className="font-semibold text-lg mb-2">Good Work, Weak Wording</h3>
-                            <p className="text-sm text-gray-400">You know the scope, parts, labor, and risk. The slow part is turning rough notes or broken English into a quote the customer trusts.</p>
+                            <h3 className="font-semibold text-lg mb-2">You Know the Work. English Slows You Down.</h3>
+                            <p className="text-sm text-gray-400">You can explain the job perfectly in Spanish, Korean, or mixed site language. The bottleneck is rewriting it into professional English the customer trusts.</p>
                         </div>
                     </div>
                 </div>
@@ -289,9 +289,9 @@ export default function LandingPage() {
                     <div className="text-center mb-16">
                         <div className="text-sm text-blue-400 font-medium mb-3 uppercase tracking-wider">How It Works</div>
                         <h2 className="text-3xl md:text-4xl font-bold">
-                            From scope note to sendable quote.
+                            From native-language scope note to English quote.
                             <br />
-                            <span className="text-gray-400">Built for service calls, not back-office workflows.</span>
+                            <span className="text-gray-400">Built for the truck, not for back-office typing.</span>
                         </h2>
                     </div>
 
@@ -306,9 +306,9 @@ export default function LandingPage() {
                                     </svg>
                                 </div>
                                 <div className="text-xs text-blue-400 font-medium mb-2">Step 1</div>
-                                <h3 className="text-xl font-bold mb-3">Talk Through the Job</h3>
+                                <h3 className="text-xl font-bold mb-3">Speak the Job Your Way</h3>
                                 <p className="text-gray-400 text-sm leading-relaxed">
-                                    Tap the mic and describe the work the way you already think: leak source, parts needed, access issues, labor, and anything the homeowner should know.
+                                    Tap the mic and describe the work in Spanish, Korean, English, or a mix of all three: scope, parts, access issues, labor, and what the customer needs to know.
                                 </p>
                             </div>
                         </div>
@@ -323,9 +323,9 @@ export default function LandingPage() {
                                     </svg>
                                 </div>
                                 <div className="text-xs text-purple-400 font-medium mb-2">Step 2</div>
-                                <h3 className="text-xl font-bold mb-3">Clean the Wording, Check the Numbers</h3>
+                                <h3 className="text-xl font-bold mb-3">Get a Clean English Draft</h3>
                                 <p className="text-gray-400 text-sm leading-relaxed">
-                                    SnapQuote organizes rough notes into scope, parts, labor, tax, and totals you can quickly correct before the customer ever sees it.
+                                    SnapQuote rewrites rough field language into clear customer-facing English with scope, parts, labor, tax, and totals you can correct before the customer sees it.
                                 </p>
                             </div>
                         </div>
@@ -340,9 +340,9 @@ export default function LandingPage() {
                                     </svg>
                                 </div>
                                 <div className="text-xs text-green-400 font-medium mb-2">Step 3</div>
-                                <h3 className="text-xl font-bold mb-3">Send and Collect</h3>
+                                <h3 className="text-xl font-bold mb-3">Send and Get Paid</h3>
                                 <p className="text-gray-400 text-sm leading-relaxed">
-                                    Send a clean PDF with your branding and payment request while you are still on site, so approval and deposit happen faster.
+                                    Send a clean English PDF with your branding and payment request while you are still on site, so approval and deposit happen faster.
                                 </p>
                             </div>
                         </div>
@@ -356,9 +356,9 @@ export default function LandingPage() {
                     <div className="text-center mb-16">
                         <div className="text-sm text-blue-400 font-medium mb-3 uppercase tracking-wider">Why SnapQuote</div>
                         <h2 className="text-3xl md:text-4xl font-bold">
-                            Built for messy field reality,
+                            Built for multilingual field reality,
                             <br />
-                            <span className="text-gray-400">not office-first software.</span>
+                            <span className="text-gray-400">not office-first quoting software.</span>
                         </h2>
                     </div>
 
@@ -373,8 +373,8 @@ export default function LandingPage() {
                         {/* Feature 2 */}
                         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:border-blue-500/20 transition-all hover:-translate-y-1">
                             <div className="text-3xl mb-4">🎤</div>
-                            <h3 className="font-bold text-lg mb-2">Voice-First Capture</h3>
-                            <p className="text-sm text-gray-400">Dirty hands, wet gloves, moving fast. Talk once and let AI organize the scope into something sendable.</p>
+                            <h3 className="font-bold text-lg mb-2">Speak in Spanish or Korean</h3>
+                            <p className="text-sm text-gray-400">Dirty hands, wet gloves, moving fast. Talk once in the language that comes naturally and let AI turn it into a sendable English quote.</p>
                         </div>
 
                         {/* Feature 3 */}
@@ -387,8 +387,8 @@ export default function LandingPage() {
                         {/* Feature 4 */}
                         <div className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:border-blue-500/20 transition-all hover:-translate-y-1">
                             <div className="text-3xl mb-4">📄</div>
-                            <h3 className="font-bold text-lg mb-2">Customer-Ready Wording</h3>
-                            <p className="text-sm text-gray-400">Turn rough phrasing into a clean customer-facing quote with your business name, scope, totals, and payment request in one place.</p>
+                            <h3 className="font-bold text-lg mb-2">English Customers See Clean English</h3>
+                            <p className="text-sm text-gray-400">Turn rough bilingual phrasing into a clean customer-facing quote with your business name, scope, totals, and payment request in one place.</p>
                         </div>
 
                         {/* Feature 5 */}
@@ -474,17 +474,17 @@ export default function LandingPage() {
                 <div className="max-w-5xl mx-auto">
                     <div className="text-center mb-16">
                         <div className="text-sm text-blue-400 font-medium mb-3 uppercase tracking-wider">Simple Pricing</div>
-                        <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                            Priced for field quote volume, not seat bloat.
+                            <h2 className="text-3xl md:text-4xl font-bold mb-4">
+                            Priced for multilingual field quoting, not seat bloat.
                         </h2>
-                        <p className="text-gray-400">Start with 10 free field quotes, then move up based on how often you quote from the truck and how many techs need the workflow.</p>
+                        <p className="text-gray-400">Start with 10 free quotes per month, then move up based on how often you need to turn Spanish or Korean field talk into clean English estimates from the truck.</p>
                     </div>
 
                     <div className="grid md:grid-cols-3 gap-6">
                         {/* Starter */}
                         <div className="bg-white/5 border border-white/10 rounded-2xl p-8">
                             <h3 className="text-lg font-bold mb-1">Starter</h3>
-                            <p className="text-sm text-gray-400 mb-6">For solo owner-operators quoting from the truck</p>
+                            <p className="text-sm text-gray-400 mb-6">For solo contractors sending clean English quotes from multilingual field notes</p>
                             <div className="text-4xl font-bold mb-1">CAD $29</div>
                             <p className="text-sm text-gray-400 mb-6">per month</p>
                             <ul className="space-y-3 text-sm text-gray-300">
@@ -502,7 +502,7 @@ export default function LandingPage() {
                                 </li>
                                 <li className="flex items-center gap-2">
                                     <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    Voice-first capture and offline mode
+                                    Spanish/Korean voice capture plus offline mode
                                 </li>
                             </ul>
                             <Link href="/new-estimate" className="block mt-8 border border-white/10 hover:border-white/20 text-center py-3 rounded-xl text-sm font-medium transition-colors">
@@ -513,7 +513,7 @@ export default function LandingPage() {
                         {/* Pro */}
                         <div className="bg-white/5 border border-white/10 rounded-2xl p-8">
                             <h3 className="text-lg font-bold mb-1">Pro</h3>
-                            <p className="text-sm text-gray-400 mb-6">For owner-operators who want cleaner wording, faster approvals, and deposits</p>
+                            <p className="text-sm text-gray-400 mb-6">For owner-operators who want English-ready quotes, faster approvals, and deposits</p>
                             <div className="text-4xl font-bold mb-1">CAD $59</div>
                             <p className="text-sm text-gray-400 mb-6">per month</p>
                             <ul className="space-y-3 text-sm text-gray-300">
@@ -531,7 +531,7 @@ export default function LandingPage() {
                                 </li>
                                 <li className="flex items-center gap-2">
                                     <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    Receipt scan, cleaner wording, and payment-ready quotes
+                                    Receipt scan, English quote cleanup, and payment-ready quotes
                                 </li>
                             </ul>
                             <Link href="/new-estimate" className="block mt-8 border border-white/10 hover:border-white/20 text-center py-3 rounded-xl text-sm font-medium transition-colors">
@@ -545,7 +545,7 @@ export default function LandingPage() {
                                 MOST POPULAR
                             </div>
                             <h3 className="text-lg font-bold mb-1">Team</h3>
-                            <p className="text-sm text-gray-400 mb-6">For 2-10 tech crews standardizing field quotes</p>
+                            <p className="text-sm text-gray-400 mb-6">For 2-10 tech crews standardizing English quote output across multilingual teams</p>
                             <div className="text-4xl font-bold mb-1">CAD $129</div>
                             <p className="text-sm text-gray-400 mb-6">per month</p>
                             <ul className="space-y-3 text-sm text-gray-300">
@@ -555,7 +555,7 @@ export default function LandingPage() {
                                 </li>
                                 <li className="flex items-center gap-2">
                                     <svg className="w-4 h-4 text-blue-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    Shared quoting standards across techs
+                                    Shared English quote standards across techs
                                 </li>
                                 <li className="flex items-center gap-2">
                                     <svg className="w-4 h-4 text-blue-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
@@ -584,7 +584,7 @@ export default function LandingPage() {
                     <div className="text-center mb-16">
                         <div className="text-sm text-blue-400 font-medium mb-3 uppercase tracking-wider">Built Around Field Interviews</div>
                         <h2 className="text-3xl md:text-4xl font-bold">
-                            The patterns this workflow was designed around.
+                            The pain patterns this workflow was built around.
                         </h2>
                     </div>
 
@@ -606,13 +606,13 @@ export default function LandingPage() {
                         <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
                             <div className="text-xs uppercase tracking-wider text-green-400 mb-4">Interview theme</div>
                             <p className="text-sm text-gray-300 mb-4 leading-relaxed">
-                                &quot;I can explain the work out loud faster than I can type it cleanly.&quot;
+                                &quot;I can explain the work in Spanish way faster than I can write it in clean English.&quot;
                             </p>
                             <div className="flex items-center gap-3">
                                 <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center text-sm font-bold text-green-400">S</div>
                                 <div>
-                                    <p className="text-sm font-medium">Voice beats typing in the field</p>
-                                    <p className="text-xs text-gray-500">Repeated feedback from service-call crews</p>
+                                    <p className="text-sm font-medium">Native-language voice beats English typing</p>
+                                    <p className="text-xs text-gray-500">Repeated feedback from multilingual service-call crews</p>
                                 </div>
                             </div>
                         </div>
@@ -638,20 +638,20 @@ export default function LandingPage() {
             <section className="py-20 px-6">
                 <div className="max-w-4xl mx-auto text-center">
                     <h2 className="text-3xl md:text-5xl font-bold mb-6">
-                        Your next quote should leave with you,
+                        Your next quote should leave in English,
                         <br />
-                        <span className="bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">not follow you home.</span>
+                        <span className="bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">even if the job was explained in Spanish or Korean.</span>
                     </h2>
                     <p className="text-lg text-gray-400 mb-10 max-w-2xl mx-auto">
-                        Start with 10 free field quotes. If SnapQuote becomes part of your service-call routine, move up to the plan that matches your truck, volume, and crew.
+                        Start with 10 free field quotes. If SnapQuote becomes part of your service-call routine, move up to the plan that matches your truck, quote volume, and crew.
                     </p>
                     <Link href="/new-estimate" className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-10 py-5 rounded-2xl text-lg font-semibold transition-all hover:shadow-2xl hover:shadow-blue-500/30 hover:-translate-y-1">
                         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                         </svg>
-                        Create Your First Driveway Quote
+                        Try the English Quote Workflow
                     </Link>
-                    <p className="text-xs text-gray-600 mt-4">Works offline · Built for owner-operators · Better than typing quotes at night</p>
+                    <p className="text-xs text-gray-600 mt-4">Works offline · Built for multilingual contractors · Better than typing quotes at night</p>
                 </div>
             </section>
 
@@ -664,7 +664,7 @@ export default function LandingPage() {
                                 <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-700 rounded-lg flex items-center justify-center text-white font-bold text-sm">SQ</div>
                                 <span className="font-bold">SnapQuote</span>
                             </div>
-                            <p className="text-sm text-gray-500">Dirty hands. Customer-ready quotes before you drive off.</p>
+                            <p className="text-sm text-gray-500">Speak in Spanish or Korean. Send in English before you drive off.</p>
                         </div>
                         <div>
                             <h4 className="font-semibold mb-3 text-sm">Product</h4>
@@ -692,7 +692,7 @@ export default function LandingPage() {
                         </div>
                     </div>
                     <div className="border-t border-white/5 mt-8 pt-8 text-center text-xs text-gray-600">
-                        © {new Date().getFullYear()} SnapQuote. Built for owner-operators who quote from the field.
+                        © {new Date().getFullYear()} SnapQuote. Built for multilingual owner-operators who quote from the field.
                     </div>
                 </div>
             </footer>
