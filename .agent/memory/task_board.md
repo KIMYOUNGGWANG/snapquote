@@ -1,43 +1,61 @@
-# 📋 Task Board
+# SnapQuote Task Board
+## Planning Session
 
-## [ ] Backlog
-- [ ] TB-16 Implement `/api/pricing/dynamic/calculate` runtime and tests to close the locked contract gap. <!-- id: 0 -->
-- [ ] SQ-01 Implement sub-quote request, guest submit, and status flows for `/api/sub-quotes/*`. <!-- id: 1 -->
-- [ ] OPS-02 Add launch operations assets: `support@snapquote.app`, status page, and backup/disaster recovery runbook. <!-- id: 2 -->
-- [ ] LEG-01 Replace placeholder legal copy with reviewed Privacy Policy, Terms of Service, and GDPR/CCPA checklist. <!-- id: 3 -->
-- [ ] UX-02 Add first-quote tutorial/demo quote and expand Setup Wizard for logo and price-list onboarding. <!-- id: 4 -->
-- [ ] GTM-01 Refresh landing and pricing messaging around "Quote before you drive off" and tighten beta lead capture. <!-- id: 5 -->
-- [ ] DATA-01 Define supplier pricing, benchmark data, and retention moat roadmap before Phase 3 build starts. <!-- id: 6 -->
+**Date:** 2026-03-19
+**Source of truth:** `docs/api-spec.md` (LOCKED), `RESEARCH/SnapQuote_Strategy_20260318/outputs/snapquote_strategy_report_2026.md`
+**Planning mode:** Runtime-aligned execution board
 
-## [ ] In Progress
+## Planning Notes
 
-## [ ] Done
-- [x] TB-01 Voice transcription runtime shipped via `POST /api/transcribe`. <!-- id: 10 -->
-- [x] TB-02 AI estimate generation shipped with Gemini/OpenAI runtime via `POST /api/generate`. <!-- id: 11 -->
-- [x] TB-03 Estimate email delivery runtime and UI shipped via `POST /api/send-email` and `components/email-modal.tsx`. <!-- id: 12 -->
-- [x] TB-04 Quote payment-link creation shipped via `POST /api/create-payment-link`. <!-- id: 13 -->
-- [x] TB-05 and TB-06 Stripe settlement and reconcile flows shipped via `/api/webhooks/stripe*`. <!-- id: 14 -->
-- [x] TB-07 and TB-14 SaaS billing usage, checkout, portal, subscription, and billing webhook flows shipped. <!-- id: 15 -->
-- [x] TB-08 and TB-09 Stripe Connect onboarding, status, dashboard link, and payment status sync shipped. <!-- id: 16 -->
-- [x] TB-10 Gemini-capable generate runtime is active in the quote pipeline. <!-- id: 17 -->
-- [x] TB-12 Offline sync runtime shipped via `POST /api/sync/crdt`. <!-- id: 18 -->
-- [x] TB-13 Premium SMS runtime and UI shipped via `POST /api/send-sms` and `components/sms-modal.tsx`. <!-- id: 19 -->
-- [x] TB-15 Quote Recovery trigger runtime shipped via `POST /api/quotes/recovery/trigger`. <!-- id: 20 -->
-- [x] TB-17 Supabase OAuth callback flow shipped in `app/auth/callback/page.tsx`. <!-- id: 21 -->
-- [x] TB-18 Feedback widget and API shipped via `components/feedback-modal.tsx` and `POST /api/feedback`. <!-- id: 22 -->
-- [x] TB-22 Receipt parsing runtime and UI shipped via `POST /api/parse-receipt` and `components/receipt-scanner.tsx`. <!-- id: 23 -->
-- [x] TB-23 Public receipt lead-gen path shipped via `POST /api/public/parse-receipt` and `POST /api/public/capture-lead`. <!-- id: 24 -->
-- [x] SEO-3 and SEO-4 discoverability routes shipped in `app/sitemap.ts` and `app/robots.ts`. <!-- id: 25 -->
-- [x] Core launch path is live: PWA install/offline UX, PDF export, history view, and payment-status polling. <!-- id: 26 -->
-- [x] OPS-01 Branch lint regression fixed in `components/setup-wizard.tsx` and `npm run lint` is green again. <!-- id: 7 -->
-- [x] PM-01 `docs/MARKET_READINESS_ROADMAP.md` checkboxes were reconciled with shipped runtime status. <!-- id: 9 -->
-- [x] QA-01 Playwright coverage for estimate, email, SMS, payment-link, offline, landing, login, pricing, and history flows is passing locally. <!-- id: 8 -->
-- [x] OPS-03 Created `docs/manual-launch-checklist.md` for live beta/public launch verification. <!-- id: 32 -->
-- [x] OPS-04 Created `docs/today-beta-pass-runbook.md` with exact command and click order for the first live beta decision pass. <!-- id: 33 -->
+- `docs/api-spec.md` already matches the locked runtime contract shared in this session.
+- `conductor/product.md` has been refreshed to match SnapQuote planning context.
+- This board tracks active runtime work only. Every checkbox item maps to at least one locked endpoint.
 
-## [ ] Verification
-- [x] `npm test` passes on the current branch. <!-- id: 27 -->
-- [x] `npm run lint` passes after the Setup Wizard copy fix. <!-- id: 28 -->
-- [x] `npm run test:e2e` passes locally on the current branch. <!-- id: 29 -->
-- [ ] Manual launch checklist in `docs/manual-launch-checklist.md` passes for email, SMS, Stripe Connect, payment completion, receipt scan, and feedback submit. <!-- id: 30 -->
-- [x] Contract audit scoped `/api/pricing/dynamic/calculate` and `/api/sub-quotes/*` out of the locked runtime and documented them in the appendix of `docs/api-spec.md`. <!-- id: 31 -->
+## Gate Status
+
+- [x] Contract lock confirmed: `docs/api-spec.md`
+- [x] Strategy input reviewed: 2026 strategy report
+- [ ] User sign-off for `/develop` handoff
+
+## P0 Revenue And Trust
+
+- [ ] `TB-07` Validate and expose `/api/billing/usage` in pricing and estimate flows so the free-tier tightening experiment can be measured.
+- [ ] `TB-14` Wire `/api/billing/stripe/checkout`, `/api/billing/stripe/portal`, and `/api/billing/subscription` into annual billing upsell and self-serve plan management.
+- [ ] `TB-12` Validate `/api/sync/crdt` and LWW sync behavior against offline editing scenarios before trust-focused messaging ships.
+- [ ] `TB-13` Operationalize `/api/send-sms` as a paid differentiator with credit enforcement, idempotency checks, and UI entry points.
+- [ ] `TB-15` Run `/api/quotes/recovery/trigger` in dry-run mode first, then productionize quote recovery for Pro and Team plans.
+- [ ] `TB-18` Close the loop on `/api/feedback` so product, bug, and feature submissions feed weekly triage.
+
+## P1 Conversion And Acquisition
+
+- [ ] `TB-01` Verify `/api/transcribe` language-hint quality for `es` and `ko` field audio in the beachhead contractor workflows.
+- [ ] `TB-02` Validate `/api/generate` multilingual normalization, warnings, and estimate output quality for Spanish and Korean notes.
+- [ ] `TB-03` Instrument `/api/send-email` around PDF delivery, watermark behavior, and referral URL usage.
+- [ ] `TB-04` Verify `/api/create-payment-link` tenant ownership checks, Stripe Connect gating, and estimate resolution paths.
+- [ ] `TB-08` Validate `/api/stripe/connect/onboard`, `/api/stripe/connect/status`, and `/api/stripe/connect/dashboard-link` in the contractor onboarding funnel.
+- [ ] `TB-09` Verify `/api/payments/stripe/status` polling and estimate settlement sync in authenticated flows.
+- [ ] `TB-22` Position `/api/parse-receipt` as a Pro or Team upsell and validate parse quality against real receipt images.
+- [ ] `TB-23` Connect `/api/public/parse-receipt` and `/api/public/capture-lead` into a measurable teaser-to-lead funnel.
+
+## P2 Settlement And Platform Reliability
+
+- [ ] `TB-05` Audit `/api/webhooks/stripe` ownership checks, paid-state transitions, and ops alert behavior.
+- [ ] `TB-06` Audit `/api/webhooks/stripe/reconcile` for missed-session recovery, gap counting, and cron auth handling.
+- [ ] `TB-17` Verify `/auth/callback` against the force-reload auth transition strategy and PKCE success path.
+- [ ] `SEO-3` Verify `/sitemap.xml` generation for current public routes and pricing pages.
+- [ ] `SEO-4` Verify `/robots.txt` output and sitemap discoverability alignment.
+
+## Runtime Baseline Already Present
+
+- [x] Core estimate runtime routes exist: `TB-01`, `TB-02`, `TB-03`, `TB-04`
+- [x] Billing and settlement routes exist: `TB-05`, `TB-06`, `TB-07`, `TB-08`, `TB-09`, `TB-14`
+- [x] Growth and retention routes exist: `TB-12`, `TB-13`, `TB-15`, `TB-18`, `TB-22`, `TB-23`
+- [x] Discoverability and auth routes exist: `TB-17`, `SEO-3`, `SEO-4`
+
+## Exit Criteria For Planning
+
+- [ ] P0 tasks have owners, success metrics, and rollout order
+- [ ] Free-tier experiment is defined with measurement points
+- [ ] Annual billing rollout is sequenced behind contract-safe UI changes
+- [ ] Offline trust work has a validation plan
+- [ ] Growth funnel tasks have source-to-conversion tracking
