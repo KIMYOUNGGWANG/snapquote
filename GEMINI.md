@@ -58,7 +58,7 @@
 ## 💼 4. Technology Stack (The Golden Stack)
 
 ### Core Stack (Default) 🚀
-- **Frontend**: Next.js 14+ (App Router), TypeScript, Tailwind CSS
+- **Frontend**: Next.js 16+ (App Router), TypeScript, Tailwind CSS
 - **UI Components**: Shadcn/UI
 - **State Management**: Zustand (+ TypeScript optimized)
 - **Data Fetching**: TanStack Query (React Query v5)
