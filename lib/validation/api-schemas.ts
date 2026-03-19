@@ -4,6 +4,7 @@ const MAX_GENERATE_NOTES_LENGTH = 8_000
 const MAX_GENERATE_IMAGES = 8
 const MAX_GENERATE_IMAGE_LENGTH = 2_000_000
 const MAX_RECEIPT_CONTEXT_LENGTH = 500
+const SOURCE_LANGUAGE_VALUES = ["auto", "en", "es", "ko"] as const
 
 const generateImageSchema = z
     .string({ error: "Invalid image payload" })
@@ -20,6 +21,7 @@ const generateUserProfileSchema = z.object({
 export const generateRequestSchema = z.object({
     notes: z.string({ error: "Invalid notes input" }).max(MAX_GENERATE_NOTES_LENGTH, "Invalid notes input").optional(),
     images: z.array(generateImageSchema, { error: "Invalid images input" }).max(MAX_GENERATE_IMAGES, "Invalid images input").optional(),
+    sourceLanguage: z.enum(SOURCE_LANGUAGE_VALUES, { error: "Invalid source language" }).optional(),
     userProfile: generateUserProfileSchema.optional(),
     projectType: z.enum(["residential", "commercial"], { error: "Invalid project type" }).optional(),
 }).strict()

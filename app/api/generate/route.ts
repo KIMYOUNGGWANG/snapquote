@@ -37,6 +37,8 @@ type ModelGenerationResult = {
     completionTokens: number
 }
 
+type SourceLanguage = "auto" | "en" | "es" | "ko"
+
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 })
@@ -359,13 +361,29 @@ function normalizeEstimate(rawEstimate: any): NormalizedEstimate {
 }
 
 // V5 LITE - Optimized System Prompt (650 tokens, 100/100 score)
+function getSourceLanguageGuidance(sourceLanguage: SourceLanguage): string {
+    if (sourceLanguage === "es") {
+        return "Source notes are primarily Spanish. Resolve trade slang into professional North American English."
+    }
+
+    if (sourceLanguage === "ko") {
+        return "Source notes are primarily Korean. Resolve field shorthand into professional North American English."
+    }
+
+    if (sourceLanguage === "en") {
+        return "Source notes are primarily English. Clean up field shorthand into professional English."
+    }
+
+    return "Source notes may mix English, Spanish, and Korean. Detect the language and normalize everything into professional English."
+}
+
 function getSystemPromptV5(userProfile: {
     city?: string
     country?: string
     taxRate?: number
     businessName?: string
     priceList?: string  // Price list formatted for prompt
-}, projectType: 'residential' | 'commercial' = 'residential') {
+}, projectType: 'residential' | 'commercial' = 'residential', sourceLanguage: SourceLanguage = "auto") {
     const city = userProfile.city || "Toronto"
     const country = userProfile.country || "Canada"
     const taxRate = userProfile.taxRate || 13
@@ -408,8 +426,9 @@ ${priceListSection}CONTEXT:
 - ${projectContext}
 
 INPUT DATA:
-- Text: Rough notes (English, Korean, mixed slang)
+- Text: Rough notes (English, Spanish, Korean, mixed slang)
 - Images: Optional site photos
+- Source language hint: ${sourceLanguage}
 
 ═══════════════════════════════════════
 CRITICAL INSTRUCTIONS
@@ -437,10 +456,15 @@ CRITICAL INSTRUCTIONS
    ✓ Identify visible Brands (Kohler, Moen), Materials (PEX, Copper), and Issues.
    ⚠️ ONLY state what is factually visible. Do not guess.
 
-3. 🌐 LANGUAGE PROCESSING (Korean/English):
+3. 🌐 LANGUAGE PROCESSING (Spanish/Korean/English):
    - The user is a professional working in North America.
    - **ASSUME ALL CURRENCY IS LOCAL (\${currencyCode}).**
-   - Translate Korean terms to Professional English.
+   - ${getSourceLanguageGuidance(sourceLanguage)}
+   - Translate Spanish or Korean trade terms into professional English.
+   - Keep customer-facing output in English for all fields.
+   - Preserve trade intent over literal wording.
+   - Common Spanish field terms may include: "fuga", "llave angular", "desague", "tomacorriente", "interruptor", "condensador", "mano de obra".
+   - Common Korean field terms may include: "누수", "배관", "수전", "차단기", "콘센트", "배수", "노무".
    - Do NOT perform currency exchange calculations.
 
 4. ✍️ PROFESSIONALIZATION (The "Expensive" Touch):
@@ -605,11 +629,11 @@ export async function POST(req: Request) {
             return parsedPayload.response
         }
 
-        const { images, notes, userProfile, projectType } = parsedPayload.data
+        const { images, notes, sourceLanguage, userProfile, projectType } = parsedPayload.data
 
         // Use provided userProfile or defaults
         const profile = userProfile || {}
-        const systemPrompt = getSystemPromptV5(profile, projectType)
+        const systemPrompt = getSystemPromptV5(profile, projectType, sourceLanguage || "auto")
 
         const provider = resolveGenerateProvider()
         const modelResult =

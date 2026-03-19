@@ -3,6 +3,39 @@ import { openai } from "@/lib/openai";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { enforceUsageQuota, recordUsage } from "@/lib/server/usage-quota";
 
+const SUPPORTED_TRANSCRIPTION_HINTS = new Set(["auto", "en", "es", "ko"])
+
+function getLanguageHint(formData: FormData): "auto" | "en" | "es" | "ko" {
+    const value = formData.get("languageHint")
+    if (typeof value !== "string") return "auto"
+
+    const normalized = value.trim().toLowerCase()
+    if (SUPPORTED_TRANSCRIPTION_HINTS.has(normalized)) {
+        return normalized as "auto" | "en" | "es" | "ko"
+    }
+
+    throw new Error("INVALID_LANGUAGE_HINT")
+}
+
+function buildTradeHint(languageHint: "auto" | "en" | "es" | "ko"): string {
+    const sharedTerms = [
+        "two 2x4", "two 2x6", "4x4", "studs", "joists", "drywall", "sheetrock", "PVC", "PEX",
+        "copper", "P-trap", "ball valve", "Moen", "Delta", "Kohler", "GFCI", "breaker",
+        "mold", "rot", "labor", "parts", "materials", "rough-in", "trim-out",
+    ]
+    const spanishTerms = [
+        "fuga", "llave angular", "desague", "tubo PVC", "cobre", "calentador", "tomacorriente",
+        "interruptor", "disyuntor", "breaker", "condensador", "evaporadora", "mano de obra",
+    ]
+    const koreanTerms = [
+        "누수", "배관", "수전", "변기", "차단기", "콘센트", "전선", "에어컨", "배수", "노무",
+    ]
+
+    if (languageHint === "es") return [...sharedTerms, ...spanishTerms].join(", ")
+    if (languageHint === "ko") return [...sharedTerms, ...koreanTerms].join(", ")
+    return [...sharedTerms, ...spanishTerms, ...koreanTerms].join(", ")
+}
+
 export async function POST(req: Request) {
     try {
         const quota = await enforceUsageQuota(req, "transcribe", { requireAuth: false })
@@ -34,6 +67,7 @@ export async function POST(req: Request) {
 
         const formData = await req.formData();
         const audioFile = formData.get("file") as File;
+        let languageHint: "auto" | "en" | "es" | "ko" = "auto"
 
         if (!audioFile) {
             return NextResponse.json({ error: "No file provided" }, { status: 400 });
@@ -47,14 +81,17 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Audio file too large" }, { status: 413 });
         }
 
-        // Trade terminology hint for better Whisper recognition
-        const TRADE_HINT = "two 2x4, two 2x6, 4x4, studs, joists, drywall, sheetrock, PVC, PEX, copper, P-trap, ball valve, Moen, Delta, Kohler, GFCI, breaker, TBD, mold, rot, labor, parts, materials, rough-in, trim-out";
+        try {
+            languageHint = getLanguageHint(formData)
+        } catch {
+            return NextResponse.json({ error: "Invalid language hint" }, { status: 400 })
+        }
 
         const transcription = await openai.audio.transcriptions.create({
             file: audioFile,
             model: "whisper-1",
-            language: "en",
-            prompt: TRADE_HINT,
+            ...(languageHint !== "auto" ? { language: languageHint } : {}),
+            prompt: buildTradeHint(languageHint),
         });
 
         let text = transcription.text;

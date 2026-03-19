@@ -3,6 +3,7 @@ import Stripe from "stripe"
 import { createHash } from "node:crypto"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
+import { resolveCallerEstimateForPaymentLink } from "@/lib/server/payment-estimate-ownership"
 import {
     createServiceSupabaseClient,
     getStripeConnectProfile,
@@ -133,6 +134,23 @@ export async function POST(req: Request) {
             )
         }
 
+        const estimateResolution = await resolveCallerEstimateForPaymentLink(supabase, {
+            estimateId: safeEstimateId,
+            estimateNumber: safeEstimateNumber,
+            userId: auth.userId,
+        })
+        if (estimateResolution && !estimateResolution.ok) {
+            return NextResponse.json(
+                { error: estimateResolution.error },
+                { status: estimateResolution.status }
+            )
+        }
+
+        const resolvedEstimateId = estimateResolution?.estimate.id || safeEstimateId
+        const resolvedEstimateNumber =
+            estimateResolution?.estimate.estimate_number?.trim() ||
+            safeEstimateNumber
+
         // Convert to cents (Stripe uses smallest currency unit)
         const amountInCents = Math.round(normalizedAmount * 100)
         const requestIdempotencyKey = normalizeIdempotencyKey(req.headers.get("idempotency-key"))
@@ -140,8 +158,8 @@ export async function POST(req: Request) {
             requestIdempotencyKey ||
             createDeterministicIdempotencyKey({
                 userId: auth.userId,
-                estimateId: safeEstimateId,
-                estimateNumber: safeEstimateNumber,
+                estimateId: resolvedEstimateId,
+                estimateNumber: resolvedEstimateNumber,
                 amountInCents,
             })
 
@@ -188,13 +206,13 @@ export async function POST(req: Request) {
         }
 
         const metadata: Record<string, string> = {
-            estimateId: safeEstimateId,
-            estimateNumber: safeEstimateNumber,
+            estimateId: resolvedEstimateId,
+            estimateNumber: resolvedEstimateNumber,
             userId: auth.userId,
         }
         const successRedirectUrl = buildPaymentSuccessRedirectUrl({
-            estimateId: safeEstimateId,
-            estimateNumber: safeEstimateNumber,
+            estimateId: resolvedEstimateId,
+            estimateNumber: resolvedEstimateNumber,
         })
 
         // Create a Payment Link with dynamic pricing

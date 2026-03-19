@@ -1,0 +1,142 @@
+[
+  {
+    "id": "plumbing-angle-stop-01",
+    "trade": "plumbing",
+    "spanishNotes": "Cambio la llave angular debajo del lavamanos y reviso la fuga en el desague.",
+    "englishTargets": ["angle stop", "drain leak"],
+    "englishIntent": "Replace the angle stop under the sink and repair the drain leak."
+  },
+  {
+    "id": "plumbing-water-heater-02",
+    "trade": "plumbing",
+    "spanishNotes": "El calentador no prende, reviso el piloto y cambio la valvula si hace falta.",
+    "englishTargets": ["water heater", "pilot", "valve"],
+    "englishIntent": "Diagnose the water heater, inspect the pilot, and replace the valve if needed."
+  },
+  {
+    "id": "plumbing-toilet-reset-03",
+    "trade": "plumbing",
+    "spanishNotes": "Quito el inodoro, cambio el wax ring y vuelvo a sellar la base.",
+    "englishTargets": ["toilet", "wax ring", "reseal"],
+    "englishIntent": "Pull and reset the toilet with a new wax ring and reseal the base."
+  },
+  {
+    "id": "plumbing-ptrap-04",
+    "trade": "plumbing",
+    "spanishNotes": "Hay fuga en la trampa abajo del fregadero; cambio la pieza y hago prueba de agua.",
+    "englishTargets": ["P-trap", "water test"],
+    "englishIntent": "Replace the leaking P-trap under the sink and perform a water test."
+  },
+  {
+    "id": "plumbing-copper-line-05",
+    "trade": "plumbing",
+    "spanishNotes": "La linea de cobre esta picada, corto la seccion mala y sueldo tramo nuevo.",
+    "englishTargets": ["copper line", "replace section", "solder"],
+    "englishIntent": "Cut out the damaged copper line and solder in a new section."
+  },
+  {
+    "id": "electrical-gfci-06",
+    "trade": "electrical",
+    "spanishNotes": "El tomacorriente GFCI no resetea; reviso linea y cambio el receptaculo.",
+    "englishTargets": ["GFCI receptacle", "line check"],
+    "englishIntent": "Troubleshoot the GFCI receptacle, inspect the line, and replace the outlet."
+  },
+  {
+    "id": "electrical-breaker-07",
+    "trade": "electrical",
+    "spanishNotes": "El breaker de la cocina se bota; reviso carga y cambio el interruptor si esta malo.",
+    "englishTargets": ["breaker", "load check"],
+    "englishIntent": "Check the kitchen circuit load and replace the faulty breaker if required."
+  },
+  {
+    "id": "electrical-light-switch-08",
+    "trade": "electrical",
+    "spanishNotes": "Cambio el apagador del bano y reviso si la caja tiene cable flojo.",
+    "englishTargets": ["light switch", "loose wiring"],
+    "englishIntent": "Replace the bathroom light switch and inspect the box for loose wiring."
+  },
+  {
+    "id": "electrical-subpanel-09",
+    "trade": "electrical",
+    "spanishNotes": "Instalo subpanel pequeno para el garage con breakers nuevos y etiquetado.",
+    "englishTargets": ["subpanel", "breakers", "labeling"],
+    "englishIntent": "Install a small garage subpanel with new breakers and circuit labeling."
+  },
+  {
+    "id": "electrical-ceiling-fan-10",
+    "trade": "electrical",
+    "spanishNotes": "Quito el foco viejo y monto abanico de techo con control y balanceo.",
+    "englishTargets": ["ceiling fan", "mount", "balance"],
+    "englishIntent": "Remove the existing light fixture and install a ceiling fan with balancing."
+  },
+  {
+    "id": "hvac-capacitor-11",
+    "trade": "hvac",
+    "spanishNotes": "La condensadora zumba pero no arranca; reviso capacitor y contacto.",
+    "englishTargets": ["condenser", "capacitor", "contactor"],
+    "englishIntent": "Diagnose the outdoor condenser, inspect the capacitor, and test the contactor."
+  },
+  {
+    "id": "hvac-drain-line-12",
+    "trade": "hvac",
+    "spanishNotes": "La linea de drenaje del aire esta tapada; limpio la linea y pongo tratamiento.",
+    "englishTargets": ["AC drain line", "clear blockage", "treatment"],
+    "englishIntent": "Clear the air conditioner drain line blockage and apply drain treatment."
+  },
+  {
+    "id": "hvac-thermostat-13",
+    "trade": "hvac",
+    "spanishNotes": "Cambio termostato programable y pruebo frio y calor.",
+    "englishTargets": ["programmable thermostat", "cooling test", "heating test"],
+    "englishIntent": "Replace the programmable thermostat and test both cooling and heating."
+  },
+  {
+    "id": "hvac-evaporator-clean-14",
+    "trade": "hvac",
+    "spanishNotes": "Limpio evaporadora, reviso filtros y tomo lectura de temperatura.",
+    "englishTargets": ["evaporator coil", "filters", "temperature reading"],
+    "englishIntent": "Clean the evaporator section, inspect the filters, and record temperature readings."
+  },
+  {
+    "id": "hvac-duct-repair-15",
+    "trade": "hvac",
+    "spanishNotes": "Hay fuga de aire en el ducto del atico; sello uniones y cambio aislamiento roto.",
+    "englishTargets": ["duct leak", "seal joints", "insulation"],
+    "englishIntent": "Seal the attic duct leakage points and replace damaged insulation."
+  },
+  {
+    "id": "general-drywall-16",
+    "trade": "general_repair",
+    "spanishNotes": "Parche de drywall por dano de agua, textura ligera y pintura base.",
+    "englishTargets": ["drywall patch", "water damage", "texture", "primer"],
+    "englishIntent": "Patch the water-damaged drywall, apply light texture, and prime the area."
+  },
+  {
+    "id": "general-door-adjust-17",
+    "trade": "general_repair",
+    "spanishNotes": "La puerta pega abajo; ajusto bisagras, corto un poco y vuelvo a pintar borde.",
+    "englishTargets": ["door adjustment", "hinges", "trim", "paint edge"],
+    "englishIntent": "Adjust the door hinges, trim the sticking edge, and repaint the cut edge."
+  },
+  {
+    "id": "general-tile-reset-18",
+    "trade": "general_repair",
+    "spanishNotes": "Reemplazo loseta quebrada en la cocina y vuelvo a poner boquilla.",
+    "englishTargets": ["tile replacement", "grout"],
+    "englishIntent": "Replace the cracked kitchen tile and re-grout the repaired area."
+  },
+  {
+    "id": "general-fence-post-19",
+    "trade": "general_repair",
+    "spanishNotes": "Poste de cerca suelto; saco concreto viejo, pongo poste nuevo y relleno concreto.",
+    "englishTargets": ["fence post", "concrete removal", "new concrete"],
+    "englishIntent": "Remove the failed fence post, install a new post, and pour fresh concrete."
+  },
+  {
+    "id": "general-window-seal-20",
+    "trade": "general_repair",
+    "spanishNotes": "La ventana mete agua; quito sellador viejo y aplico caulk nuevo por fuera.",
+    "englishTargets": ["window leak", "remove old sealant", "new caulk"],
+    "englishIntent": "Remove failed exterior sealant and recaulk the leaking window."
+  }
+]
