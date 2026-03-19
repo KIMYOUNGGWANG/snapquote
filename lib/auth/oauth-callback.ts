@@ -49,3 +49,19 @@ export function buildLoginErrorRedirectPath(nextPath: string, intent: string, er
     params.set("oauth_error", normalizeOAuthError(errorMessage))
     return `/login?${params.toString()}`
 }
+
+export function resolveOAuthCallbackState(searchParams: URLSearchParams) {
+    const nextPath = normalizeNextPath(searchParams.get("next"))
+    const intent = normalizeIntent(searchParams.get("intent"))
+
+    return {
+        nextPath,
+        intent,
+        postAuthRedirectPath: buildPostAuthRedirectPath(nextPath, intent),
+        timeoutRedirectPath: buildLoginErrorRedirectPath(
+            nextPath,
+            intent,
+            "Sign in timed out. Please try again."
+        ),
+    }
+}

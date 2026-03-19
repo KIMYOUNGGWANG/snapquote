@@ -9,10 +9,12 @@ import { Loader2, Sparkles, ArrowRight } from "lucide-react"
 import {
     createBillingCheckoutSession,
     createBillingPortalSession,
+    getBillingUsageSnapshot,
     getBillingSubscriptionStatus,
     getPricingOffer,
     trackPricingEvent,
     type BillingPaidPlanTier,
+    type BillingUsageSnapshot,
     type BillingSubscriptionStatusResponse,
     type PricingOfferResponse,
 } from "@/lib/pricing"
@@ -64,14 +66,18 @@ const PLAN_OPTIONS: Array<{
         },
     ]
 
+type BillingInterval = "monthly" | "annual"
+
 export default function PricingPage() {
     const router = useRouter()
     const [loading, setLoading] = useState(true)
     const [offer, setOffer] = useState<PricingOfferResponse | null>(null)
     const [subscription, setSubscription] = useState<BillingSubscriptionStatusResponse | null>(null)
+    const [usageSnapshot, setUsageSnapshot] = useState<BillingUsageSnapshot | null>(null)
     const [checkoutLoading, setCheckoutLoading] = useState(false)
     const [portalLoading, setPortalLoading] = useState(false)
     const [selectedPlanTier, setSelectedPlanTier] = useState<BillingPaidPlanTier>("starter")
+    const [billingInterval, setBillingInterval] = useState<BillingInterval>("monthly")
     const [isAuthed, setIsAuthed] = useState(false)
 
     useEffect(() => {
@@ -79,13 +85,15 @@ export default function PricingPage() {
 
         const load = async () => {
             setLoading(true)
-            const [offerData, subscriptionData] = await Promise.all([
+            const [offerData, subscriptionData, usageData] = await Promise.all([
                 getPricingOffer(),
                 getBillingSubscriptionStatus(),
+                getBillingUsageSnapshot(),
             ])
             if (cancelled) return
             setOffer(offerData)
             setSubscription(subscriptionData)
+            setUsageSnapshot(usageData.authorized ? usageData.snapshot : null)
 
             const { data: authData } = await supabase.auth.getSession()
             if (cancelled) return
@@ -132,6 +140,33 @@ export default function PricingPage() {
 
     const variant = offer?.ok && offer.variant ? offer.variant : null
     const selectedPlan = PLAN_OPTIONS.find((plan) => plan.tier === selectedPlanTier) || PLAN_OPTIONS[0]
+    const billingConfig = offer?.ok ? offer.billing.plans[selectedPlanTier] : null
+    const usageRows = usageSnapshot ? [
+        {
+            label: "AI Generate",
+            used: usageSnapshot.usage.generate,
+            limit: usageSnapshot.limits.generate,
+            percent: usageSnapshot.usageRatePct.generate,
+        },
+        {
+            label: "Voice Transcribe",
+            used: usageSnapshot.usage.transcribe,
+            limit: usageSnapshot.limits.transcribe,
+            percent: usageSnapshot.usageRatePct.transcribe,
+        },
+        {
+            label: "Email Sends",
+            used: usageSnapshot.usage.send_email,
+            limit: usageSnapshot.limits.send_email,
+            percent: usageSnapshot.usageRatePct.send_email,
+        },
+    ] : []
+    const annualEnabled = Boolean(billingConfig?.annualEnabled)
+    const annualDiscountPct = offer?.ok ? offer.billing.annualDiscountPct : 20
+    const currentBillingInterval =
+        subscription?.priceId && offer?.ok
+            ? (Object.values(offer.billing.plans).some((plan) => plan.annualPriceId === subscription.priceId) ? "annual" : "monthly")
+            : null
 
     const isSubscribed = Boolean(subscription?.subscribed)
 
@@ -150,10 +185,16 @@ export default function PricingPage() {
                 metadata: {
                     variant: variant?.name || null,
                     selectedPlanTier,
+                    billingInterval,
                 },
             })
 
-            const checkout = await createBillingCheckoutSession({ planTier: selectedPlanTier })
+            const checkout = await createBillingCheckoutSession({
+                planTier: selectedPlanTier,
+                ...(billingInterval === "annual" && billingConfig?.annualPriceId
+                    ? { priceId: billingConfig.annualPriceId }
+                    : {}),
+            })
             window.location.href = checkout.url
         } catch (error: any) {
             toast(`❌ ${error?.message || "Failed to start checkout."}`, "error")
@@ -210,6 +251,51 @@ export default function PricingPage() {
                         ))}
                     </div>
 
+                    <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <p className="text-sm font-medium">Billing cadence</p>
+                                <p className="text-xs text-muted-foreground">
+                                    Use annual billing when the plan is configured to reduce churn and push self-serve upgrades through Stripe Checkout.
+                                </p>
+                            </div>
+                            {annualEnabled ? (
+                                <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
+                                    Save up to {annualDiscountPct}%
+                                </span>
+                            ) : null}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                            <Button
+                                type="button"
+                                variant={billingInterval === "monthly" ? "default" : "outline"}
+                                onClick={() => setBillingInterval("monthly")}
+                                disabled={checkoutLoading || portalLoading}
+                                className="w-full"
+                            >
+                                Monthly
+                            </Button>
+                            <Button
+                                type="button"
+                                variant={billingInterval === "annual" ? "default" : "outline"}
+                                onClick={() => setBillingInterval("annual")}
+                                disabled={checkoutLoading || portalLoading || !annualEnabled}
+                                className="w-full"
+                            >
+                                Annual
+                            </Button>
+                        </div>
+
+                        <p className="text-xs text-muted-foreground">
+                            {billingInterval === "annual"
+                                ? annualEnabled
+                                    ? "Stripe Checkout will use the annual billing price for this plan."
+                                    : "Annual billing is not configured for this plan yet."
+                                : "Stripe Checkout will use the monthly billing price for this plan."}
+                        </p>
+                    </div>
+
                     <div className="space-y-1">
                         <p className="text-sm text-muted-foreground">Selected plan</p>
                         <p className="text-2xl font-semibold">
@@ -230,13 +316,71 @@ export default function PricingPage() {
                             </p>
                         )}
                         {subscription && (
-                            <p className="text-xs text-muted-foreground">
-                                Current plan:{" "}
-                                <span className="font-medium uppercase">{subscription.planTier}</span>
-                                {subscription.status ? ` (${subscription.status})` : ""}
-                            </p>
+                            <div className="space-y-1 text-xs text-muted-foreground">
+                                <p>
+                                    Current plan:{" "}
+                                    <span className="font-medium uppercase">{subscription.planTier}</span>
+                                    {subscription.status ? ` (${subscription.status})` : ""}
+                                    {currentBillingInterval ? ` · ${currentBillingInterval}` : ""}
+                                </p>
+                                {subscription.currentPeriodEnd && (
+                                    <p>
+                                        Renews or ends on: <span className="font-medium">{new Date(subscription.currentPeriodEnd).toLocaleDateString()}</span>
+                                    </p>
+                                )}
+                                {subscription.cancelAtPeriodEnd && (
+                                    <p className="text-amber-700">
+                                        Cancel at period end is enabled. Use the billing portal to resume or change plans.
+                                    </p>
+                                )}
+                            </div>
                         )}
                     </div>
+
+                    {usageSnapshot && (
+                        <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <p className="text-sm font-medium">Live monthly usage</p>
+                                    <p className="text-xs text-muted-foreground">
+                                        Measured from {usageSnapshot.periodStart} UTC month start.
+                                    </p>
+                                </div>
+                                <span className="text-xs font-medium uppercase text-muted-foreground">
+                                    {usageSnapshot.planTier}
+                                </span>
+                            </div>
+
+                            <div className="space-y-2">
+                                {usageRows.map((row) => {
+                                    const width = Math.min(100, Math.max(0, row.percent))
+                                    const color = row.percent >= 100
+                                        ? "bg-red-500"
+                                        : row.percent >= 80
+                                            ? "bg-amber-500"
+                                            : "bg-emerald-500"
+
+                                    return (
+                                        <div key={row.label} className="space-y-1">
+                                            <div className="flex items-center justify-between text-xs">
+                                                <span>{row.label}</span>
+                                                <span>{row.used}/{row.limit}</span>
+                                            </div>
+                                            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                                                <div className={`h-full transition-all ${color}`} style={{ width: `${width}%` }} />
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+
+                            {usageSnapshot.planTier === "free" && (
+                                <p className="text-xs text-muted-foreground">
+                                    You have {usageSnapshot.remaining.generate} free quote drafts left this month. This page now surfaces live usage so free-tier changes can be measured before rollout.
+                                </p>
+                            )}
+                        </div>
+                    )}
 
                     <div className="rounded-lg border bg-muted/30 p-3 text-sm">
                         <p className="font-medium mb-2">What you get</p>
@@ -258,7 +402,7 @@ export default function PricingPage() {
                     <div className="grid grid-cols-1 gap-2">
                         <Button
                             onClick={handleUpgradeClick}
-                            disabled={loading || checkoutLoading || isSubscribed}
+                            disabled={loading || checkoutLoading || isSubscribed || (billingInterval === "annual" && !annualEnabled)}
                             className="w-full justify-between"
                         >
                             {loading
@@ -267,7 +411,7 @@ export default function PricingPage() {
                                 ? "Opening checkout..."
                                 : isSubscribed
                                     ? "Subscription already active"
-                                    : !isAuthed ? "Log in to Subscribe" : `Upgrade to ${selectedPlan.label}`}
+                                    : !isAuthed ? "Log in to Subscribe" : `Upgrade to ${selectedPlan.label} ${billingInterval === "annual" ? "Annually" : "Monthly"}`}
                             {!loading && !isSubscribed && <ArrowRight className="h-4 w-4" />}
                         </Button>
                         <Button
@@ -286,7 +430,7 @@ export default function PricingPage() {
                                 disabled={loading || portalLoading || !subscription?.customerId}
                                 className="w-full"
                             >
-                                {portalLoading ? "Opening portal..." : "Manage billing"}
+                                {portalLoading ? "Opening portal..." : "Manage billing in Stripe"}
                             </Button>
                         )}
                     </div>

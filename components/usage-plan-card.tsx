@@ -5,37 +5,7 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, Gauge, Sparkles } from "lucide-react"
-import { withAuthHeaders } from "@/lib/auth-headers"
-
-interface UsageSnapshot {
-    planTier: "free" | "pro"
-    periodStart: string
-    usage: {
-        generate: number
-        transcribe: number
-        send_email: number
-    }
-    limits: {
-        generate: number
-        transcribe: number
-        send_email: number
-    }
-    remaining: {
-        generate: number
-        transcribe: number
-        send_email: number
-    }
-    usageRatePct: {
-        generate: number
-        transcribe: number
-        send_email: number
-    }
-    estimatedCosts: {
-        openai: number
-        resend: number
-        total: number
-    }
-}
+import { getBillingUsageSnapshot, type BillingUsageSnapshot } from "@/lib/billing-usage"
 
 function ProgressBar({ value }: { value: number }) {
     const clamped = Math.min(100, Math.max(0, value))
@@ -51,40 +21,15 @@ function ProgressBar({ value }: { value: number }) {
 export function UsagePlanCard() {
     const router = useRouter()
     const [loading, setLoading] = useState(true)
-    const [snapshot, setSnapshot] = useState<UsageSnapshot | null>(null)
+    const [snapshot, setSnapshot] = useState<BillingUsageSnapshot | null>(null)
     const [isAuthed, setIsAuthed] = useState(true)
 
     const loadSnapshot = useCallback(async () => {
         setLoading(true)
         try {
-            const headers = await withAuthHeaders()
-            const accessToken = headers.authorization
-
-            if (!accessToken) {
-                setIsAuthed(false)
-                setSnapshot(null)
-                return
-            }
-
-            const response = await fetch("/api/billing/usage", {
-                method: "GET",
-                headers,
-            })
-
-            if (response.status === 401) {
-                setIsAuthed(false)
-                setSnapshot(null)
-                return
-            }
-
-            if (!response.ok) {
-                setSnapshot(null)
-                return
-            }
-
-            const data = (await response.json()) as UsageSnapshot
-            setSnapshot(data)
-            setIsAuthed(true)
+            const result = await getBillingUsageSnapshot()
+            setIsAuthed(result.authorized)
+            setSnapshot(result.snapshot)
         } catch (error) {
             console.error("Failed to load usage snapshot:", error)
             setSnapshot(null)

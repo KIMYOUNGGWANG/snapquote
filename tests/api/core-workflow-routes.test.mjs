@@ -134,6 +134,25 @@ describe('POST /api/generate', () => {
     assert.equal(state.openai.chatCalls.length, 0)
   })
 
+  test('rejects unsupported source language hints', async () => {
+    const state = getTestState()
+
+    const req = jsonRequest('http://localhost/api/generate', {
+      notes: 'replace valve',
+      images: [],
+      sourceLanguage: 'fr',
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await generateEstimate(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 400)
+    assert.equal(data.error, 'Invalid source language')
+    assert.equal(state.openai.chatCalls.length, 0)
+  })
+
   test('uses Gemini provider when GEMINI_API_KEY is configured', async () => {
     const state = getTestState()
     process.env.GEMINI_API_KEY = 'gm_test_key'
@@ -266,6 +285,134 @@ describe('POST /api/generate', () => {
     assert.equal(state.usageQuota.recordCalls[0].input.promptTokens, 123)
     assert.equal(state.usageQuota.recordCalls[0].input.completionTokens, 45)
   })
+
+  test('adds multilingual source language guidance for Spanish beta input', async () => {
+    const state = getTestState()
+    state.openai.chatCompletionsCreate = async () => ({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              items: [
+                { description: 'Angle stop replacement', quantity: 1, unit_price: 125 },
+              ],
+              summary_note: 'English output from Spanish notes',
+            }),
+          },
+        },
+      ],
+      usage: {
+        prompt_tokens: 88,
+        completion_tokens: 19,
+      },
+    })
+
+    const req = jsonRequest('http://localhost/api/generate', {
+      notes: 'Cambio la llave angular debajo del lavamanos y reviso la fuga del desague',
+      images: [],
+      sourceLanguage: 'es',
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await generateEstimate(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.summary_note, 'English output from Spanish notes')
+    assert.equal(state.openai.chatCalls.length, 1)
+    assert.match(state.openai.chatCalls[0].messages[0].content, /Source language hint: es/)
+    assert.match(state.openai.chatCalls[0].messages[0].content, /Source notes are primarily Spanish/i)
+    assert.match(state.openai.chatCalls[0].messages[0].content, /customer-facing output in English/i)
+  })
+
+  test('adds multilingual source language guidance for Korean beta input', async () => {
+    const state = getTestState()
+    state.openai.chatCompletionsCreate = async () => ({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              items: [
+                { description: 'Breaker inspection and receptacle reset', quantity: 1, unit_price: 180 },
+              ],
+              summary_note: 'English output from Korean notes',
+              warnings: ['High-value estimate - please verify'],
+            }),
+          },
+        },
+      ],
+      usage: {
+        prompt_tokens: 91,
+        completion_tokens: 22,
+      },
+    })
+
+    const req = jsonRequest('http://localhost/api/generate', {
+      notes: '차단기 점검하고 콘센트 교체, 누수 확인 필요',
+      images: [],
+      sourceLanguage: 'ko',
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await generateEstimate(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.summary_note, 'English output from Korean notes')
+    assert.deepEqual(data.warnings, ['High-value estimate - please verify'])
+    assert.equal(state.openai.chatCalls.length, 1)
+    assert.match(state.openai.chatCalls[0].messages[0].content, /Source language hint: ko/)
+    assert.match(state.openai.chatCalls[0].messages[0].content, /Source notes are primarily Korean/i)
+    assert.match(state.openai.chatCalls[0].messages[0].content, /Common Korean field terms may include/i)
+    assert.match(state.openai.chatCalls[0].messages[0].content, /customer-facing output in English/i)
+  })
+
+  test('uses mixed-language auto guidance and trims warning noise from generated output', async () => {
+    const state = getTestState()
+    state.openai.chatCompletionsCreate = async () => ({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              items: [
+                { description: 'Angle stop replacement', quantity: 1, unit_price: 0 },
+              ],
+              summary_note: 'Mixed-language notes normalized into English',
+              warnings: ['  Price TBD for specialty part  ', '', 'High-value estimate - please verify'],
+            }),
+          },
+        },
+      ],
+      usage: {
+        prompt_tokens: 94,
+        completion_tokens: 24,
+      },
+    })
+
+    const req = jsonRequest('http://localhost/api/generate', {
+      notes: 'Cambio la llave angular, 누수 체크하고 breaker reset',
+      images: [],
+      sourceLanguage: 'auto',
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await generateEstimate(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.summary_note, 'Mixed-language notes normalized into English')
+    assert.deepEqual(data.warnings, [
+      'Price TBD for specialty part',
+      'High-value estimate - please verify',
+    ])
+    assert.equal(state.openai.chatCalls.length, 1)
+    assert.match(state.openai.chatCalls[0].messages[0].content, /Source language hint: auto/)
+    assert.match(state.openai.chatCalls[0].messages[0].content, /may mix English, Spanish, and Korean/i)
+    assert.match(state.openai.chatCalls[0].messages[0].content, /Do NOT perform currency exchange calculations/i)
+  })
 })
 
 describe('POST /api/transcribe', () => {
@@ -327,6 +474,105 @@ describe('POST /api/transcribe', () => {
     assert.equal(state.usageQuota.recordCalls.length, 1)
     assert.equal(state.usageQuota.recordCalls[0].metric, 'transcribe')
   })
+
+  test('passes Spanish language hints through to Whisper', async () => {
+    const state = getTestState()
+    state.openai.audioTranscriptionsCreate = async () => ({
+      text: 'Cambio la llave angular y reviso el desague',
+    })
+
+    const formData = new FormData()
+    formData.append('file', new File([new Uint8Array([1, 2, 3])], 'clip.wav', { type: 'audio/wav' }))
+    formData.append('languageHint', 'es')
+
+    const req = new Request('http://localhost/api/transcribe', {
+      method: 'POST',
+      body: formData,
+      headers: bearerHeader(),
+    })
+
+    const res = await transcribeAudio(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.text, 'Cambio la llave angular y reviso el desague')
+    assert.equal(state.openai.audioCalls.length, 1)
+    assert.equal(state.openai.audioCalls[0].language, 'es')
+    assert.match(state.openai.audioCalls[0].prompt, /llave angular/i)
+    assert.match(state.openai.audioCalls[0].prompt, /desague/i)
+  })
+
+  test('passes Korean language hints through to Whisper with trade-specific prompt terms', async () => {
+    const state = getTestState()
+    state.openai.audioTranscriptionsCreate = async () => ({
+      text: '배관 누수 확인하고 차단기 점검했습니다',
+    })
+
+    const formData = new FormData()
+    formData.append('file', new File([new Uint8Array([1, 2, 3])], 'clip.wav', { type: 'audio/wav' }))
+    formData.append('languageHint', 'ko')
+
+    const req = new Request('http://localhost/api/transcribe', {
+      method: 'POST',
+      body: formData,
+      headers: bearerHeader(),
+    })
+
+    const res = await transcribeAudio(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.text, '배관 누수 확인하고 차단기 점검했습니다')
+    assert.equal(state.openai.audioCalls.length, 1)
+    assert.equal(state.openai.audioCalls[0].language, 'ko')
+    assert.match(state.openai.audioCalls[0].prompt, /누수/)
+    assert.match(state.openai.audioCalls[0].prompt, /차단기/)
+  })
+
+  test('keeps language unset in auto mode while still using multilingual trade prompt coverage', async () => {
+    const state = getTestState()
+    state.openai.audioTranscriptionsCreate = async () => ({
+      text: 'mixed field note',
+    })
+
+    const formData = new FormData()
+    formData.append('file', new File([new Uint8Array([1, 2, 3])], 'clip.wav', { type: 'audio/wav' }))
+    formData.append('languageHint', 'auto')
+
+    const req = new Request('http://localhost/api/transcribe', {
+      method: 'POST',
+      body: formData,
+      headers: bearerHeader(),
+    })
+
+    const res = await transcribeAudio(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.text, 'mixed field note')
+    assert.equal(state.openai.audioCalls.length, 1)
+    assert.equal('language' in state.openai.audioCalls[0], false)
+    assert.match(state.openai.audioCalls[0].prompt, /llave angular/i)
+    assert.match(state.openai.audioCalls[0].prompt, /누수/)
+  })
+
+  test('rejects unsupported language hints', async () => {
+    const formData = new FormData()
+    formData.append('file', new File([new Uint8Array([1, 2, 3])], 'clip.wav', { type: 'audio/wav' }))
+    formData.append('languageHint', 'fr')
+
+    const req = new Request('http://localhost/api/transcribe', {
+      method: 'POST',
+      body: formData,
+      headers: bearerHeader(),
+    })
+
+    const res = await transcribeAudio(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 400)
+    assert.equal(data.error, 'Invalid language hint')
+  })
 })
 
 describe('POST /api/send-email', () => {
@@ -375,6 +621,13 @@ describe('POST /api/send-email', () => {
     process.env.RESEND_API_KEY = 're_test_key'
 
     const state = getTestState()
+    state.usageQuota.enforceResult = {
+      ok: true,
+      context: {
+        id: 'usage-context',
+        planTier: 'free',
+      },
+    }
     state.resend.send = async () => ({
       id: 'email_123',
       error: null,
@@ -406,6 +659,47 @@ describe('POST /api/send-email', () => {
     assert.equal(sendPayload.to[0], 'customer@example.com')
     assert.equal(sendPayload.attachments.length, 1)
     assert.ok(sendPayload.html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'))
+    assert.match(sendPayload.html, /Made with/i)
+    assert.match(sendPayload.html, /Try it free/i)
+    assert.match(sendPayload.html, /https:\/\/snapquote\.app\/\?ref=test|https:\/\/snapquote\.app\?ref=test/i)
+    assert.match(sendPayload.html, /SnapQuote AI Estimator/i)
+  })
+
+  test('uses paid watermark treatment without free referral CTA for paid plans', async () => {
+    process.env.RESEND_API_KEY = 're_test_key'
+
+    const state = getTestState()
+    state.usageQuota.enforceResult = {
+      ok: true,
+      context: {
+        id: 'usage-context',
+        planTier: 'pro',
+      },
+    }
+    state.resend.send = async () => ({
+      id: 'email_456',
+      error: null,
+    })
+
+    const req = jsonRequest('http://localhost/api/send-email', {
+      to: 'customer@example.com',
+      subject: 'Your estimate',
+      message: 'Attached is your estimate.',
+      clientName: 'Alex',
+      businessName: 'SnapQuote Pro',
+      referralUrl: 'https://snapquote.app?ref=test',
+    })
+
+    const res = await sendEmail(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.success, true)
+    assert.equal(state.resend.sendCalls.length, 1)
+
+    const sendPayload = state.resend.sendCalls[0]
+    assert.match(sendPayload.html, /Powered by/i)
+    assert.doesNotMatch(sendPayload.html, /Try it free/i)
   })
 })
 
@@ -422,9 +716,28 @@ describe('POST /api/create-payment-link', () => {
       detailsSubmitted = true,
       chargesEnabled = true,
       payoutsEnabled = true,
+      estimate = null,
     } = options
 
     state.supabase.queryResolver = async (query) => {
+      if (query.table === 'estimates' && query.action === 'select' && query.mode === 'maybeSingle') {
+        if (!estimate) {
+          return { data: null, error: null }
+        }
+
+        const idFilter = query.filters.find((filter) => filter.column === 'id')
+        const numberFilter = query.filters.find((filter) => filter.column === 'estimate_number')
+        const userFilter = query.filters.find((filter) => filter.column === 'user_id')
+
+        const matchesId = !idFilter || idFilter.value === estimate.id
+        const matchesNumber = !numberFilter || numberFilter.value === estimate.estimate_number
+        const matchesUser = !userFilter || userFilter.value === estimate.user_id
+
+        return matchesId && matchesNumber && matchesUser
+          ? { data: estimate, error: null }
+          : { data: null, error: null }
+      }
+
       if (query.table === 'profiles' && query.action === 'select' && query.mode === 'maybeSingle') {
         return {
           data: {
@@ -486,12 +799,23 @@ describe('POST /api/create-payment-link', () => {
     setCreatePaymentLinkEnv()
 
     const state = getTestState()
-    mockConnectedStripeProfile(state)
-    state.stripe.paymentLinksCreate = async (payload) => ({
-      id: 'plink_001',
-      url: 'https://pay.stripe.com/test-link',
-      payload,
+    mockConnectedStripeProfile(state, {
+      estimate: {
+        id: '11111111-1111-4111-8111-111111111111',
+        user_id: 'user-1',
+        estimate_number: 'EST-249',
+        status: 'sent',
+      },
     })
+    let capturedPayload = null
+    state.stripe.paymentLinksCreate = async (payload) => {
+      capturedPayload = payload
+      return {
+        id: 'plink_001',
+        url: 'https://pay.stripe.com/test-link',
+        payload,
+      }
+    }
     state.stripe.accountRetrieve = async () => ({
       id: 'acct_connected_1',
       details_submitted: true,
@@ -516,13 +840,24 @@ describe('POST /api/create-payment-link', () => {
     assert.equal(data.url, 'https://pay.stripe.com/test-link')
     assert.equal(state.stripe.instances.length, 1)
     assert.equal(state.stripe.accountRetrieveCalls[0], 'acct_connected_1')
+    assert.equal(capturedPayload.metadata.userId, 'user-1')
+    assert.equal(capturedPayload.metadata.estimateId, '11111111-1111-4111-8111-111111111111')
+    assert.equal(capturedPayload.metadata.estimateNumber, 'EST-249')
   })
 
   test('uses deterministic idempotency key by default', async () => {
     setCreatePaymentLinkEnv()
 
     const state = getTestState()
-    mockConnectedStripeProfile(state, { accountId: 'acct_connected_2' })
+    mockConnectedStripeProfile(state, {
+      accountId: 'acct_connected_2',
+      estimate: {
+        id: '22222222-2222-4222-8222-222222222222',
+        user_id: 'user-1',
+        estimate_number: 'EST-100',
+        status: 'sent',
+      },
+    })
     let capturedRequestOptions = null
     state.stripe.paymentLinksCreate = async (payload, requestOptions) => {
       capturedRequestOptions = requestOptions
@@ -562,7 +897,15 @@ describe('POST /api/create-payment-link', () => {
     setCreatePaymentLinkEnv()
 
     const state = getTestState()
-    mockConnectedStripeProfile(state, { accountId: 'acct_connected_3' })
+    mockConnectedStripeProfile(state, {
+      accountId: 'acct_connected_3',
+      estimate: {
+        id: '33333333-3333-4333-8333-333333333333',
+        user_id: 'user-1',
+        estimate_number: 'EST-100',
+        status: 'sent',
+      },
+    })
     let capturedRequestOptions = null
     state.stripe.paymentLinksCreate = async (payload, requestOptions) => {
       capturedRequestOptions = requestOptions
@@ -598,6 +941,57 @@ describe('POST /api/create-payment-link', () => {
     assert.ok(capturedRequestOptions)
     assert.equal(capturedRequestOptions.idempotencyKey, 'client-key-001')
     assert.equal(capturedRequestOptions.stripeAccount, 'acct_connected_3')
+  })
+
+  test('returns 404 when referenced estimate is not owned by caller tenant', async () => {
+    setCreatePaymentLinkEnv()
+
+    const state = getTestState()
+    mockConnectedStripeProfile(state)
+
+    const req = jsonRequest('http://localhost/api/create-payment-link', {
+      amount: 100,
+      estimateId: '44444444-4444-4444-8444-444444444444',
+      estimateNumber: 'EST-404',
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await createPaymentLink(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 404)
+    assert.equal(data.error, 'Estimate not found.')
+    assert.equal(state.stripe.accountRetrieveCalls.length, 0)
+  })
+
+  test('returns 400 when estimateId and estimateNumber do not refer to the same record', async () => {
+    setCreatePaymentLinkEnv()
+
+    const state = getTestState()
+    mockConnectedStripeProfile(state, {
+      estimate: {
+        id: '55555555-5555-4555-8555-555555555555',
+        user_id: 'user-1',
+        estimate_number: 'EST-REAL',
+        status: 'sent',
+      },
+    })
+
+    const req = jsonRequest('http://localhost/api/create-payment-link', {
+      amount: 100,
+      estimateId: '55555555-5555-4555-8555-555555555555',
+      estimateNumber: 'EST-WRONG',
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await createPaymentLink(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 400)
+    assert.equal(data.error, 'Estimate reference mismatch.')
+    assert.equal(state.stripe.accountRetrieveCalls.length, 0)
   })
 
   test('returns 403 when Stripe Connect is not linked', async () => {

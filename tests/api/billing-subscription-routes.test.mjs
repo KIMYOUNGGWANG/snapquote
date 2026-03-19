@@ -12,8 +12,11 @@ const RELEVANT_ENV_KEYS = [
   "STRIPE_SECRET_KEY",
   "STRIPE_BILLING_WEBHOOK_SECRET",
   "STRIPE_BILLING_PRICE_STARTER_MONTHLY",
+  "STRIPE_BILLING_PRICE_STARTER_ANNUAL",
   "STRIPE_BILLING_PRICE_PRO_MONTHLY",
+  "STRIPE_BILLING_PRICE_PRO_ANNUAL",
   "STRIPE_BILLING_PRICE_TEAM_MONTHLY",
+  "STRIPE_BILLING_PRICE_TEAM_ANNUAL",
   "NEXT_PUBLIC_APP_URL",
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_ANON_KEY",
@@ -30,8 +33,11 @@ function setBillingEnv() {
   process.env.STRIPE_SECRET_KEY = "sk_test_billing"
   process.env.STRIPE_BILLING_WEBHOOK_SECRET = "whsec_billing"
   process.env.STRIPE_BILLING_PRICE_STARTER_MONTHLY = "price_starter_monthly_456"
+  process.env.STRIPE_BILLING_PRICE_STARTER_ANNUAL = "price_starter_annual_456"
   process.env.STRIPE_BILLING_PRICE_PRO_MONTHLY = "price_pro_monthly_123"
+  process.env.STRIPE_BILLING_PRICE_PRO_ANNUAL = "price_pro_annual_123"
   process.env.STRIPE_BILLING_PRICE_TEAM_MONTHLY = "price_team_monthly_789"
+  process.env.STRIPE_BILLING_PRICE_TEAM_ANNUAL = "price_team_annual_789"
   process.env.NEXT_PUBLIC_APP_URL = "https://snapquote.app"
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co"
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon"
@@ -91,6 +97,52 @@ describe("POST /api/billing/stripe/checkout", () => {
     assert.equal(state.stripe.checkoutSessionsCreateCalls[0].mode, "subscription")
     assert.equal(state.stripe.checkoutSessionsCreateCalls[0].line_items[0].price, "price_team_monthly_789")
     assert.equal(state.stripe.checkoutSessionsCreateCalls[0].metadata.planTier, "team")
+  })
+
+  test("accepts annual price override when it matches the selected plan tier", async () => {
+    setBillingEnv()
+    const state = getTestState()
+    state.supabase.user = { id: "user-1", email: "owner@example.com" }
+    state.stripe.checkoutSessionsCreate = async () => ({
+      id: "cs_test_annual_123",
+      url: "https://checkout.stripe.com/c/pay/cs_test_annual_123",
+    })
+    state.stripe.customersCreate = async () => ({ id: "cus_test_annual_123" })
+
+    const req = jsonRequest(
+      "http://localhost/api/billing/stripe/checkout",
+      {
+        planTier: "pro",
+        priceId: "price_pro_annual_123",
+      },
+      { headers: bearerHeader() }
+    )
+
+    const res = await billingCheckoutPost(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.planTier, "pro")
+    assert.equal(state.stripe.checkoutSessionsCreateCalls[0].line_items[0].price, "price_pro_annual_123")
+  })
+
+  test("rejects annual price override when it belongs to another plan tier", async () => {
+    setBillingEnv()
+
+    const req = jsonRequest(
+      "http://localhost/api/billing/stripe/checkout",
+      {
+        planTier: "starter",
+        priceId: "price_team_annual_789",
+      },
+      { headers: bearerHeader() }
+    )
+
+    const res = await billingCheckoutPost(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 400)
+    assert.match(data.error.message, /priceId does not match selected planTier/)
   })
 
   test("returns conflict when active subscription already exists", async () => {

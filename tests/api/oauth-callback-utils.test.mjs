@@ -7,6 +7,7 @@ import {
   normalizeIntent,
   normalizeNextPath,
   normalizeOAuthError,
+  resolveOAuthCallbackState,
 } from "../../lib/auth/oauth-callback.ts"
 
 describe("OAuth callback helpers", () => {
@@ -41,5 +42,19 @@ describe("OAuth callback helpers", () => {
 
     const long = normalizeOAuthError("x".repeat(500))
     assert.equal(long.length, 180)
+  })
+
+  test("resolveOAuthCallbackState preserves next path and intent for timeout recovery", () => {
+    const state = resolveOAuthCallbackState(
+      new URLSearchParams("next=/new-estimate?from=login&intent=payment-link")
+    )
+
+    assert.equal(state.nextPath, "/new-estimate?from=login")
+    assert.equal(state.intent, "payment-link")
+    assert.equal(state.postAuthRedirectPath, "/new-estimate?from=login&intent=payment-link")
+    assert.equal(
+      state.timeoutRedirectPath,
+      "/login?next=%2Fnew-estimate%3Ffrom%3Dlogin&intent=payment-link&oauth_error=Sign+in+timed+out.+Please+try+again."
+    )
   })
 })

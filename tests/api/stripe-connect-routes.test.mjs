@@ -25,6 +25,25 @@ beforeEach(() => {
 })
 
 describe('Stripe Connect API routes', () => {
+  test('POST /api/stripe/connect/onboard returns unauthorized when auth guard fails', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+
+    const state = getTestState()
+    state.routeAuth.result = {
+      ok: false,
+      response: new Response(
+        JSON.stringify({ error: { message: 'Unauthorized', code: 401 } }),
+        { status: 401, headers: { 'content-type': 'application/json' } }
+      ),
+    }
+
+    const req = new Request('http://localhost/api/stripe/connect/onboard', { method: 'POST' })
+    const res = await stripeConnectOnboardPost(req)
+    assert.equal(res.status, 401)
+  })
+
   test('GET /api/stripe/connect/status returns unauthorized when auth guard fails', async () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test'
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'

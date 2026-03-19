@@ -128,7 +128,7 @@ export function SmsModal({
 
                     <div className="p-3 bg-muted rounded-lg text-sm text-muted-foreground flex items-start gap-2">
                         <Info className="h-4 w-4 mt-0.5 shrink-0" />
-                        <span>1 SMS credit used per message. Credits can be topped up from your account.</span>
+                        <span>1 SMS credit is used per message. SMS follow-up is a paid feature and duplicate sends are protected automatically.</span>
                     </div>
                 </div>
 

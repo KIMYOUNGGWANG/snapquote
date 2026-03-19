@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button'
 import { supabase } from '@/lib/supabase'
 import { toast } from '@/components/toast'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { AlertCircle, Terminal } from 'lucide-react'
+import { triggerQuoteRecovery, type QuoteRecoveryResult } from '@/lib/quote-recovery'
+import { AlertCircle, Loader2, Terminal } from 'lucide-react'
 
 interface Automation {
     id: string
@@ -43,6 +44,10 @@ export function AutomationSettings() {
     const [automations, setAutomations] = useState<Automation[]>([])
     const [loading, setLoading] = useState(true)
     const [missingTable, setMissingTable] = useState(false)
+    const [recoveryRunning, setRecoveryRunning] = useState(false)
+    const [recoveryPreviewed, setRecoveryPreviewed] = useState(false)
+    const [recoveryResults, setRecoveryResults] = useState<QuoteRecoveryResult[]>([])
+    const [recoveryMode, setRecoveryMode] = useState<'preview' | 'live' | null>(null)
     const firstFollowupInputRef = useRef<HTMLInputElement | null>(null)
     const secondFollowupInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -158,6 +163,38 @@ export function AutomationSettings() {
         void updateQuoteChaserDelays(quoteChaser.id, firstValue, secondValue)
     }
 
+    const runQuoteRecovery = async (dryRun: boolean) => {
+        setRecoveryRunning(true)
+        setRecoveryMode(dryRun ? 'preview' : 'live')
+        try {
+            const data = await triggerQuoteRecovery({ dryRun })
+            setRecoveryResults(data.results)
+
+            if (dryRun) {
+                setRecoveryPreviewed(true)
+                toast(
+                    data.processedCount > 0
+                        ? `Preview ready: ${data.processedCount} quote${data.processedCount > 1 ? 's' : ''} eligible for follow-up.`
+                        : 'Preview ready: no quotes currently eligible for follow-up.',
+                    'success'
+                )
+                return
+            }
+
+            toast(
+                data.processedCount > 0
+                    ? `Quote Recovery sent ${data.processedCount} follow-up${data.processedCount > 1 ? 's' : ''}.`
+                    : 'Quote Recovery run finished with no eligible quotes.',
+                'success'
+            )
+        } catch (error: any) {
+            console.error('Quote recovery trigger failed:', error)
+            toast(error?.message || 'Failed to run Quote Recovery.', 'error')
+        } finally {
+            setRecoveryRunning(false)
+        }
+    }
+
     if (loading) return <div>Loading settings...</div>
 
     return (
@@ -251,6 +288,70 @@ create policy "Users can update own automations" on automations for update using
                         <p className="text-xs text-muted-foreground">
                             Recommended: 2 days and 7 days. Second follow-up is sent only if still not paid.
                         </p>
+
+                        <div className="rounded-lg border bg-muted/40 p-4 space-y-3">
+                            <div className="space-y-1">
+                                <p className="text-sm font-medium">Quote Recovery Copilot</p>
+                                <p className="text-xs text-muted-foreground">
+                                    Preview the next recovery batch before sending. Live runs are limited to Pro and Team accounts.
+                                </p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => void runQuoteRecovery(true)}
+                                    disabled={recoveryRunning}
+                                >
+                                    {recoveryRunning && recoveryMode === 'preview' ? (
+                                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                                    ) : null}
+                                    Preview Next Batch
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={() => void runQuoteRecovery(false)}
+                                    disabled={recoveryRunning || !recoveryPreviewed}
+                                >
+                                    {recoveryRunning && recoveryMode === 'live' ? (
+                                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                                    ) : null}
+                                    Run Now
+                                </Button>
+                            </div>
+
+                            {!recoveryPreviewed && (
+                                <p className="text-xs text-muted-foreground">
+                                    Run one preview first to review message tone and contact channel selection.
+                                </p>
+                            )}
+
+                            {recoveryResults.length > 0 && (
+                                <div className="space-y-2 rounded-md border bg-background p-3">
+                                    <p className="text-xs font-medium text-muted-foreground">
+                                        {recoveryMode === 'live' ? 'Latest live run' : 'Latest preview'}
+                                    </p>
+                                    <div className="space-y-2">
+                                        {recoveryResults.map((result) => (
+                                            <div key={`${recoveryMode}-${result.estimateId}`} className="rounded border p-2 text-sm">
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <span className="font-medium">{result.estimateNumber}</span>
+                                                    <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                                                        {result.action.replace('_', ' ')}
+                                                    </span>
+                                                </div>
+                                                <p className="mt-1 text-xs text-muted-foreground">
+                                                    {result.messagePreview}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </CardContent>
                 )}
             </Card>

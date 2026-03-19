@@ -2,20 +2,39 @@ import Stripe from "stripe"
 
 export type PaidBillingPlanTier = "starter" | "pro" | "team"
 export type BillingPlanTier = "free" | PaidBillingPlanTier
+export type BillingInterval = "monthly" | "annual"
 
-const PLAN_PRICE_ENV_KEYS: Record<PaidBillingPlanTier, readonly string[]> = {
-    starter: [
-        "STRIPE_BILLING_PRICE_STARTER_MONTHLY",
-        "STRIPE_PRICE_STARTER_MONTHLY",
-    ],
-    pro: [
-        "STRIPE_BILLING_PRICE_PRO_MONTHLY",
-        "STRIPE_PRICE_PRO_MONTHLY",
-    ],
-    team: [
-        "STRIPE_BILLING_PRICE_TEAM_MONTHLY",
-        "STRIPE_PRICE_TEAM_MONTHLY",
-    ],
+const PLAN_PRICE_ENV_KEYS: Record<PaidBillingPlanTier, Record<BillingInterval, readonly string[]>> = {
+    starter: {
+        monthly: [
+            "STRIPE_BILLING_PRICE_STARTER_MONTHLY",
+            "STRIPE_PRICE_STARTER_MONTHLY",
+        ],
+        annual: [
+            "STRIPE_BILLING_PRICE_STARTER_ANNUAL",
+            "STRIPE_PRICE_STARTER_ANNUAL",
+        ],
+    },
+    pro: {
+        monthly: [
+            "STRIPE_BILLING_PRICE_PRO_MONTHLY",
+            "STRIPE_PRICE_PRO_MONTHLY",
+        ],
+        annual: [
+            "STRIPE_BILLING_PRICE_PRO_ANNUAL",
+            "STRIPE_PRICE_PRO_ANNUAL",
+        ],
+    },
+    team: {
+        monthly: [
+            "STRIPE_BILLING_PRICE_TEAM_MONTHLY",
+            "STRIPE_PRICE_TEAM_MONTHLY",
+        ],
+        annual: [
+            "STRIPE_BILLING_PRICE_TEAM_ANNUAL",
+            "STRIPE_PRICE_TEAM_ANNUAL",
+        ],
+    },
 }
 
 const SUPPORTED_SUBSCRIPTION_STATUSES = new Set<Stripe.Subscription.Status>([
@@ -49,26 +68,55 @@ export function normalizeBillingPlanTier(value: unknown): BillingPlanTier {
     return normalizePaidPlanTier(value) || "free"
 }
 
-export function getBillingPlanPriceId(planTier: PaidBillingPlanTier): string | null {
-    return getPriceIdByEnvKeys(PLAN_PRICE_ENV_KEYS[planTier])
+export function normalizeBillingInterval(value: unknown): BillingInterval | null {
+    if (typeof value !== "string") return null
+    const trimmed = value.trim()
+    if (trimmed === "monthly" || trimmed === "annual") return trimmed
+    return null
+}
+
+export function getBillingPlanPriceId(
+    planTier: PaidBillingPlanTier,
+    interval: BillingInterval = "monthly"
+): string | null {
+    return getPriceIdByEnvKeys(PLAN_PRICE_ENV_KEYS[planTier][interval])
 }
 
 export function getBillingProPriceId(): string | null {
     return getBillingPlanPriceId("pro")
 }
 
-export function resolvePlanTierByPriceId(priceId: string): PaidBillingPlanTier | null {
+export function getBillingPlanPriceConfig(planTier: PaidBillingPlanTier): Record<BillingInterval, string | null> {
+    return {
+        monthly: getBillingPlanPriceId(planTier, "monthly"),
+        annual: getBillingPlanPriceId(planTier, "annual"),
+    }
+}
+
+export function resolveBillingPrice(priceId: string): { planTier: PaidBillingPlanTier; interval: BillingInterval } | null {
     const normalizedPriceId = priceId.trim()
     if (!normalizedPriceId) return null
 
-    if (normalizedPriceId === getBillingPlanPriceId("starter")) return "starter"
-    if (normalizedPriceId === getBillingPlanPriceId("pro")) return "pro"
-    if (normalizedPriceId === getBillingPlanPriceId("team")) return "team"
+    const planTiers: PaidBillingPlanTier[] = ["starter", "pro", "team"]
+    const intervals: BillingInterval[] = ["monthly", "annual"]
+
+    for (const planTier of planTiers) {
+        for (const interval of intervals) {
+            if (normalizedPriceId === getBillingPlanPriceId(planTier, interval)) {
+                return { planTier, interval }
+            }
+        }
+    }
+
     return null
 }
 
+export function resolvePlanTierByPriceId(priceId: string): PaidBillingPlanTier | null {
+    return resolveBillingPrice(priceId)?.planTier || null
+}
+
 export function isAllowedBillingPriceId(priceId: string): boolean {
-    return Boolean(resolvePlanTierByPriceId(priceId))
+    return Boolean(resolveBillingPrice(priceId))
 }
 
 export function normalizeSubscriptionStatus(value: unknown): Stripe.Subscription.Status | null {

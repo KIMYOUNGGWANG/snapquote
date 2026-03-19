@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import { recordOpsAlert } from '@/lib/ops-alerts'
+import { resolveEstimateForSettlement } from '@/lib/server/payment-estimate-ownership'
 
 export async function POST(req: Request) {
     // Validate required environment variables
@@ -94,72 +95,27 @@ export async function POST(req: Request) {
 
         let estimateId = session.metadata?.estimateId?.trim() || ''
         let estimateNumber = session.metadata?.estimateNumber?.trim() || ''
+        let userId = session.metadata?.userId?.trim() || ''
 
         // Fallback: some flows preserve metadata on payment_intent instead of session metadata.
-        if ((!estimateId || !estimateNumber) && typeof session.payment_intent === 'string') {
+        if ((!estimateId || !estimateNumber || !userId) && typeof session.payment_intent === 'string') {
             try {
                 const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent)
                 estimateId = estimateId || paymentIntent.metadata?.estimateId?.trim() || ''
                 estimateNumber = estimateNumber || paymentIntent.metadata?.estimateNumber?.trim() || ''
+                userId = userId || paymentIntent.metadata?.userId?.trim() || ''
             } catch (error) {
                 console.error('Failed to retrieve payment_intent metadata:', error)
             }
         }
 
-        let targetEstimateId = estimateId
-
-        // Fallback: find latest estimate by estimate number when ID is not available.
-        if (!targetEstimateId && estimateNumber) {
-            const { data: estimateByNumber, error: findError } = await supabase
-                .from('estimates')
-                .select('id')
-                .eq('estimate_number', estimateNumber)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle()
-
-            if (findError) {
-                console.error('Failed to find estimate by estimate_number:', findError)
-                await recordOpsAlert({
-                    source: 'stripe_webhook',
-                    severity: 'error',
-                    alertKey: 'stripe_webhook_estimate_lookup_failed',
-                    message: 'Failed to find estimate by estimate_number during webhook handling',
-                    context: {
-                        eventId: event.id,
-                        estimateNumber,
-                        error: findError.message,
-                    },
-                })
-                return new NextResponse('Database Error', { status: 500 })
-            }
-
-            targetEstimateId = estimateByNumber?.id || ''
-        }
-
-        if (!targetEstimateId) {
-            console.warn('⚠️ No estimateId/estimateNumber found for paid session')
-            await recordOpsAlert({
-                source: 'stripe_webhook',
-                severity: 'warning',
-                alertKey: 'stripe_webhook_missing_estimate_reference',
-                message: 'Paid checkout session missing estimate reference metadata',
-                context: {
-                    eventId: event.id,
-                    sessionId: session.id,
-                },
-            })
-            return new NextResponse('Received', { status: 200 })
-        }
-
-        const { data: targetEstimate, error: estimateFetchError } = await supabase
-            .from('estimates')
-            .select('id, user_id, estimate_number, status')
-            .eq('id', targetEstimateId)
-            .maybeSingle()
-
-        if (estimateFetchError) {
-            console.error('Failed to fetch target estimate for payment update:', estimateFetchError)
+        const settlementResolution = await resolveEstimateForSettlement(supabase, {
+            estimateId,
+            estimateNumber,
+            userId,
+        })
+        if (!settlementResolution.ok && settlementResolution.reason === 'lookup_error') {
+            console.error('Failed to fetch target estimate for payment update:', settlementResolution.message)
             await recordOpsAlert({
                 source: 'stripe_webhook',
                 severity: 'error',
@@ -167,36 +123,43 @@ export async function POST(req: Request) {
                 message: 'Failed to load target estimate before payment status update',
                 context: {
                     eventId: event.id,
-                    targetEstimateId,
-                    error: estimateFetchError.message,
+                    estimateId,
+                    estimateNumber,
+                    userId,
+                    error: settlementResolution.message,
                 },
             })
             return new NextResponse('Database Error', { status: 500 })
         }
 
-        if (!targetEstimate) {
-            console.warn(`⚠️ Target estimate not found: ${targetEstimateId}`)
+        if (!settlementResolution.ok) {
+            console.warn(`⚠️ Stripe settlement skipped: ${settlementResolution.reason}`)
             await recordOpsAlert({
                 source: 'stripe_webhook',
                 severity: 'warning',
-                alertKey: 'stripe_webhook_target_estimate_not_found',
-                message: 'Target estimate was not found during webhook handling',
+                alertKey: `stripe_webhook_${settlementResolution.reason}`,
+                message: 'Stripe webhook skipped settlement because metadata did not resolve to an owned estimate',
                 context: {
                     eventId: event.id,
-                    targetEstimateId,
+                    sessionId: session.id,
+                    estimateId,
+                    estimateNumber,
+                    userId,
+                    reason: settlementResolution.reason,
                 },
             })
             return new NextResponse('Received', { status: 200 })
         }
 
-        console.log(`💰 Payment succeeded for estimate: ${targetEstimateId}`)
+        const targetEstimate = settlementResolution.estimate
+        console.log(`💰 Payment succeeded for estimate: ${targetEstimate.id}`)
 
         let statusTransitioned = false
 
         const { data: updatedEstimate, error } = await supabase
             .from('estimates')
             .update({ status: 'paid' })
-            .eq('id', targetEstimateId)
+            .eq('id', targetEstimate.id)
             .neq('status', 'paid')
             .select('id')
             .maybeSingle()
@@ -210,7 +173,7 @@ export async function POST(req: Request) {
                 message: 'Failed to update estimate status to paid',
                 context: {
                     eventId: event.id,
-                    targetEstimateId,
+                    targetEstimateId: targetEstimate.id,
                     error: error.message,
                 },
             })
@@ -248,7 +211,7 @@ export async function POST(req: Request) {
                 message: 'Failed to insert payment_completed analytics event',
                 context: {
                     eventId: event.id,
-                    targetEstimateId,
+                    targetEstimateId: targetEstimate.id,
                     error: analyticsError.message,
                 },
             })

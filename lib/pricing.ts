@@ -1,4 +1,5 @@
 import { withAuthHeaders } from "@/lib/auth-headers"
+export { getBillingUsageSnapshot, type BillingUsageSnapshot } from "@/lib/billing-usage"
 
 export type PricingEventName = "pricing_viewed" | "upgrade_clicked" | "waitlist_joined"
 export type BillingPlanTier = "free" | "starter" | "pro" | "team"
@@ -9,11 +10,27 @@ export type PricingOfferResponse =
         ok: true
         experiment: null
         variant: null
+        billing: {
+            annualDiscountPct: number
+            plans: Record<BillingPaidPlanTier, {
+                monthlyPriceId: string | null
+                annualPriceId: string | null
+                annualEnabled: boolean
+            }>
+        }
       }
     | {
         ok: true
         experiment: { id: string; name: string; currency: string }
         variant: { name: string; priceMonthly?: number; ctaLabel?: string }
+        billing: {
+            annualDiscountPct: number
+            plans: Record<BillingPaidPlanTier, {
+                monthlyPriceId: string | null
+                annualPriceId: string | null
+                annualEnabled: boolean
+            }>
+        }
       }
 
 export interface BillingSubscriptionStatusResponse {

@@ -78,6 +78,7 @@ describe('POST /api/webhooks/stripe', () => {
           metadata: {
             estimateId: 'estimate_1',
             estimateNumber: 'EST-1',
+            userId: 'user_1',
           },
         },
       },
@@ -132,9 +133,218 @@ describe('POST /api/webhooks/stripe', () => {
     )
     assert.ok(updateCall)
   })
+
+  test('falls back to payment intent metadata for async payment success events', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+
+    const state = getTestState()
+
+    state.stripe.constructEvent = () => ({
+      id: 'evt_async_paid',
+      type: 'checkout.session.async_payment_succeeded',
+      data: {
+        object: {
+          id: 'cs_async_paid',
+          metadata: {},
+          payment_intent: 'pi_async_paid',
+        },
+      },
+    })
+    state.stripe.paymentIntentsRetrieve = async () => ({
+      metadata: {
+        estimateId: 'estimate_async_paid',
+        estimateNumber: 'EST-ASYNC-1',
+        userId: 'user_async',
+      },
+    })
+
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'estimates' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return {
+          data: {
+            id: 'estimate_async_paid',
+            user_id: 'user_async',
+            estimate_number: 'EST-ASYNC-1',
+            status: 'sent',
+          },
+          error: null,
+        }
+      }
+
+      if (query.table === 'estimates' && query.action === 'update' && query.mode === 'maybeSingle') {
+        return {
+          data: { id: 'estimate_async_paid' },
+          error: null,
+        }
+      }
+
+      if (query.table === 'analytics_events' && query.action === 'upsert') {
+        return {
+          data: [],
+          error: null,
+        }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = new Request('http://localhost/api/webhooks/stripe', {
+      method: 'POST',
+      body: JSON.stringify({ fake: true }),
+      headers: {
+        'stripe-signature': 'sig_test',
+      },
+    })
+
+    const res = await stripeWebhook(req)
+    const text = await res.text()
+
+    assert.equal(res.status, 200)
+    assert.equal(text, 'Received')
+    assert.equal(
+      state.supabase.queryCalls.some(
+        (query) => query.table === 'estimates' && query.action === 'update'
+      ),
+      true
+    )
+  })
+
+  test('skips settlement when Stripe metadata userId does not match estimate owner', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+
+    const state = getTestState()
+
+    state.stripe.constructEvent = () => ({
+      id: 'evt_mismatch',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: 'cs_mismatch',
+          metadata: {
+            estimateId: 'estimate_2',
+            estimateNumber: 'EST-2',
+            userId: 'user_attacker',
+          },
+        },
+      },
+    })
+
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'estimates' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return {
+          data: {
+            id: 'estimate_2',
+            user_id: 'user_owner',
+            estimate_number: 'EST-2',
+            status: 'sent',
+          },
+          error: null,
+        }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = new Request('http://localhost/api/webhooks/stripe', {
+      method: 'POST',
+      body: JSON.stringify({ fake: true }),
+      headers: {
+        'stripe-signature': 'sig_test',
+      },
+    })
+
+    const res = await stripeWebhook(req)
+    const text = await res.text()
+
+    assert.equal(res.status, 200)
+    assert.equal(text, 'Received')
+    assert.equal(
+      state.supabase.queryCalls.some(
+        (query) => query.table === 'estimates' && query.action === 'update'
+      ),
+      false
+    )
+    assert.equal(state.opsAlerts.calls.at(-1)?.alertKey, 'stripe_webhook_ownership_mismatch')
+  })
+
+  test('returns 500 and records ops alert when estimate lookup fails during settlement', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+
+    const state = getTestState()
+
+    state.stripe.constructEvent = () => ({
+      id: 'evt_lookup_error',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: 'cs_lookup_error',
+          metadata: {
+            estimateId: 'estimate_broken',
+            estimateNumber: 'EST-BROKEN',
+            userId: 'user_1',
+          },
+        },
+      },
+    })
+
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'estimates' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return {
+          data: null,
+          error: { message: 'database unavailable' },
+        }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = new Request('http://localhost/api/webhooks/stripe', {
+      method: 'POST',
+      body: JSON.stringify({ fake: true }),
+      headers: {
+        'stripe-signature': 'sig_test',
+      },
+    })
+
+    const res = await stripeWebhook(req)
+    const text = await res.text()
+
+    assert.equal(res.status, 500)
+    assert.match(text, /Database Error/)
+    assert.equal(state.opsAlerts.calls.at(-1)?.alertKey, 'stripe_webhook_target_estimate_fetch_failed')
+  })
 })
 
 describe('GET /api/payments/stripe/status', () => {
+  test('returns unauthorized when auth guard fails', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+
+    const state = getTestState()
+    state.routeAuth.result = {
+      ok: false,
+      response: new Response(
+        JSON.stringify({ error: { message: 'Unauthorized', code: 401 } }),
+        { status: 401, headers: { 'content-type': 'application/json' } }
+      ),
+    }
+
+    const req = new Request('http://localhost/api/payments/stripe/status?paymentLinkId=plink_auth_required', {
+      method: 'GET',
+    })
+
+    const res = await stripePaymentStatusGet(req)
+    assert.equal(res.status, 401)
+  })
+
   test('returns 400 when paymentLinkId is missing', async () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test'
 
@@ -269,6 +479,7 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
             metadata: {
               estimateId: 'estimate_paid_1',
               estimateNumber: 'EST-PAID-1',
+              userId: 'user_1',
             },
           },
         ],
@@ -321,5 +532,141 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
     assert.equal(data.paidSessions, 1)
     assert.equal(data.matched, 1)
     assert.equal(data.updated, 1)
+  })
+
+  test('skips reconcile when session metadata is missing userId', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+    process.env.CRON_SECRET = 'cron_secret'
+
+    const state = getTestState()
+    state.stripe.sessionsListPages = [
+      {
+        data: [
+          {
+            id: 'cs_paid_missing_user',
+            payment_status: 'paid',
+            metadata: {
+              estimateId: 'estimate_paid_2',
+              estimateNumber: 'EST-PAID-2',
+            },
+          },
+        ],
+        has_more: false,
+      },
+    ]
+
+    const req = new Request('http://localhost/api/webhooks/stripe/reconcile?lookbackHours=24', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer cron_secret',
+      },
+    })
+
+    const res = await stripeReconcileGet(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.scanned, 1)
+    assert.equal(data.paidSessions, 1)
+    assert.equal(data.matched, 0)
+    assert.equal(data.missingMetadata, 1)
+    assert.equal(
+      state.supabase.queryCalls.some((query) => query.table === 'estimates' && query.action === 'update'),
+      false
+    )
+    assert.equal(state.opsAlerts.calls.at(-1)?.alertKey, 'stripe_reconcile_reference_gaps')
+  })
+
+  test('accepts x-cron-secret auth and records processing errors in reconcile stats', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+    process.env.CRON_SECRET = 'cron_secret'
+
+    const state = getTestState()
+    state.stripe.sessionsListPages = [
+      {
+        data: [
+          {
+            id: 'cs_paid_error',
+            payment_status: 'paid',
+            metadata: {
+              estimateId: 'estimate_paid_error',
+              estimateNumber: 'EST-PAID-ERR',
+              userId: 'user_1',
+            },
+          },
+        ],
+        has_more: false,
+      },
+    ]
+
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'estimates' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return {
+          data: {
+            id: 'estimate_paid_error',
+            user_id: 'user_1',
+            estimate_number: 'EST-PAID-ERR',
+          },
+          error: null,
+        }
+      }
+
+      if (query.table === 'estimates' && query.action === 'update' && query.mode === 'execute') {
+        return {
+          data: [],
+          error: { message: 'update failed' },
+        }
+      }
+
+      return { data: [], error: null }
+    }
+
+    const req = new Request('http://localhost/api/webhooks/stripe/reconcile?lookbackHours=24', {
+      method: 'GET',
+      headers: {
+        'x-cron-secret': 'cron_secret',
+      },
+    })
+
+    const res = await stripeReconcileGet(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.scanned, 1)
+    assert.equal(data.paidSessions, 1)
+    assert.equal(data.matched, 1)
+    assert.equal(data.updated, 0)
+    assert.equal(data.errors, 1)
+    assert.equal(state.opsAlerts.calls.at(-1)?.alertKey, 'stripe_reconcile_errors_detected')
+  })
+
+  test('returns 500 and records ops alert when Stripe session listing fails', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+    process.env.CRON_SECRET = 'cron_secret'
+
+    const state = getTestState()
+    state.stripe.sessionsListPages = [Promise.reject(new Error('stripe unavailable'))]
+
+    const req = new Request('http://localhost/api/webhooks/stripe/reconcile?lookbackHours=24', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer cron_secret',
+      },
+    })
+
+    const res = await stripeReconcileGet(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 500)
+    assert.equal(data.error, 'Failed to list Stripe sessions')
+    assert.equal(state.opsAlerts.calls.at(-1)?.alertKey, 'stripe_reconcile_list_failed')
   })
 })

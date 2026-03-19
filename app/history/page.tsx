@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle } from "lucide-react"
+import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle, MessageSquare } from "lucide-react"
 import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
 import { getEstimates, deleteEstimate, getProfile, updateEstimateStatus, updateEstimate, type LocalEstimate, type EstimateItem, type BusinessInfo } from "@/lib/estimates-storage"
@@ -12,10 +12,12 @@ import { generateQuickBooksCSV, downloadCSV } from "@/lib/export-service"
 const ConfirmDialog = dynamic(() => import("@/components/confirm-dialog").then(mod => mod.ConfirmDialog), { ssr: false })
 const PDFPreviewModal = dynamic(() => import("@/components/pdf-preview-modal").then(mod => mod.PDFPreviewModal), { ssr: false })
 const FollowUpModal = dynamic(() => import("@/components/follow-up-modal").then(mod => mod.FollowUpModal), { ssr: false })
+const SmsModal = dynamic(() => import("@/components/sms-modal").then(mod => mod.SmsModal), { ssr: false })
 import { Badge } from "@/components/ui/badge"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
 import { useAuthGuard } from "@/lib/use-auth-guard"
+import { sendEstimateSms } from "@/lib/send-sms"
 
 type TabType = 'drafts' | 'sent' | 'paid'
 
@@ -37,6 +39,7 @@ export default function HistoryPage() {
     const [estimateToDelete, setEstimateToDelete] = useState<string | null>(null)
     const [previewEstimate, setPreviewEstimate] = useState<LocalEstimate | null>(null)
     const [followUpEstimate, setFollowUpEstimate] = useState<LocalEstimate | null>(null)
+    const [smsEstimate, setSmsEstimate] = useState<LocalEstimate | null>(null)
     const [businessProfile, setBusinessProfile] = useState<BusinessInfo | undefined>(undefined)
     const [downloadingEstimateId, setDownloadingEstimateId] = useState<string | null>(null)
     const paymentStatusSyncInFlightRef = useRef(false)
@@ -244,6 +247,33 @@ export default function HistoryPage() {
             setDeleteDialogOpen(false)
         }
     }
+
+    const handleSendSms = useCallback(async (estimate: LocalEstimate, toPhoneNumber: string, message: string) => {
+        const data = await sendEstimateSms({
+            estimateId: estimate.id,
+            toPhoneNumber,
+            message,
+        })
+
+        if (estimate.status !== "sent" && estimate.status !== "paid") {
+            await updateEstimateStatus(estimate.id, "sent")
+        }
+
+        void trackAnalyticsEvent({
+            event: "quote_sent",
+            estimateId: estimate.id,
+            estimateNumber: estimate.estimateNumber,
+            channel: "sms",
+            metadata: {
+                creditsRemaining: data.creditsRemaining,
+                deduped: data.deduped ?? false,
+                source: "history",
+            },
+        })
+
+        await loadData()
+        toast("✅ SMS sent!", "success")
+    }, [loadData])
 
     const createEstimatePdfDocument = useCallback(async (estimate: LocalEstimate) => {
         const { EstimatePDF } = await import("@/components/estimate-pdf")
@@ -542,6 +572,16 @@ export default function HistoryPage() {
                                             Follow-up
                                         </Button>
                                     )}
+                                    {estimate.status !== 'paid' && (
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={() => setSmsEstimate(estimate)}
+                                        >
+                                            <MessageSquare className="h-3 w-3 mr-1" />
+                                            SMS
+                                        </Button>
+                                    )}
                                     <Button
                                         variant="destructive"
                                         size="sm"
@@ -609,6 +649,18 @@ export default function HistoryPage() {
                         estimateNumber={followUpEstimate.estimateNumber}
                         totalAmount={followUpEstimate.totalAmount}
                         businessName={businessProfile?.business_name || ""}
+                    />
+                )
+            }
+            {
+                smsEstimate && (
+                    <SmsModal
+                        open={!!smsEstimate}
+                        onClose={() => setSmsEstimate(null)}
+                        estimateTotal={smsEstimate.totalAmount}
+                        paymentLink={smsEstimate.paymentLink || businessProfile?.payment_link || null}
+                        businessName={businessProfile?.business_name}
+                        onSend={(toPhoneNumber, message) => handleSendSms(smsEstimate, toPhoneNumber, message)}
                     />
                 )
             }

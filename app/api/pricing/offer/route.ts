@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { createAuthedSupabaseClient, parseBearerToken } from "@/lib/server/supabase-auth"
+import { getBillingPlanPriceConfig, type PaidBillingPlanTier } from "@/lib/server/stripe-billing"
 
 const DEFAULT_EXPERIMENT_NAME = "pricing_v1"
 
@@ -9,6 +10,23 @@ type PricingVariantConfig = {
     priceMonthly?: number
     ctaLabel?: string
     [key: string]: unknown
+}
+
+function resolveBillingOptions() {
+    const planTiers: PaidBillingPlanTier[] = ["starter", "pro", "team"]
+    const plans = Object.fromEntries(planTiers.map((planTier) => {
+        const config = getBillingPlanPriceConfig(planTier)
+        return [planTier, {
+            monthlyPriceId: config.monthly,
+            annualPriceId: config.annual,
+            annualEnabled: Boolean(config.annual),
+        }]
+    }))
+
+    return {
+        annualDiscountPct: 20,
+        plans,
+    }
 }
 
 function normalizeExperimentName(value: unknown): string {
@@ -110,6 +128,7 @@ export async function GET(req: Request) {
             ok: true,
             experiment: null,
             variant: null,
+            billing: resolveBillingOptions(),
         })
     }
 
@@ -139,6 +158,6 @@ export async function GET(req: Request) {
             currency,
         },
         variant,
+        billing: resolveBillingOptions(),
     })
 }
-

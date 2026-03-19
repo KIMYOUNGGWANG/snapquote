@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import { recordOpsAlert } from '@/lib/ops-alerts'
+import { resolveEstimateForSettlement } from '@/lib/server/payment-estimate-ownership'
 
 const DEFAULT_LOOKBACK_HOURS = 72
 const MAX_LOOKBACK_HOURS = 24 * 30
@@ -112,12 +113,30 @@ async function reconcilePaidSessions(req: Request) {
     let cursor: string | undefined
 
     while (hasMore && stats.scanned < MAX_SCANNED_SESSIONS) {
-        const page = await stripe.checkout.sessions.list({
-            limit: 100,
-            created: { gte: sinceUnix },
-            status: 'complete',
-            ...(cursor ? { starting_after: cursor } : {}),
-        })
+        let page: Awaited<ReturnType<typeof stripe.checkout.sessions.list>>
+
+        try {
+            page = await stripe.checkout.sessions.list({
+                limit: 100,
+                created: { gte: sinceUnix },
+                status: 'complete',
+                ...(cursor ? { starting_after: cursor } : {}),
+            })
+        } catch (error) {
+            await recordOpsAlert({
+                source: 'stripe_reconcile',
+                severity: 'error',
+                alertKey: 'stripe_reconcile_list_failed',
+                message: 'Failed to list Stripe checkout sessions during reconcile',
+                context: {
+                    lookbackHours,
+                    sinceUnix,
+                    cursor,
+                    error: error instanceof Error ? error.message : String(error),
+                },
+            })
+            return NextResponse.json({ error: 'Failed to list Stripe sessions' }, { status: 500 })
+        }
 
         if (page.data.length === 0) break
 
@@ -130,16 +149,19 @@ async function reconcilePaidSessions(req: Request) {
 
             let estimateId = session.metadata?.estimateId?.trim() || ''
             let estimateNumber = session.metadata?.estimateNumber?.trim() || ''
+            let userId = session.metadata?.userId?.trim() || ''
 
-            if (!estimateId || !estimateNumber) {
+            if (!estimateId || !estimateNumber || !userId) {
                 try {
                     if (typeof session.payment_intent === 'string') {
                         const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent)
                         estimateId = estimateId || paymentIntent.metadata?.estimateId?.trim() || ''
                         estimateNumber = estimateNumber || paymentIntent.metadata?.estimateNumber?.trim() || ''
+                        userId = userId || paymentIntent.metadata?.userId?.trim() || ''
                     } else if (session.payment_intent && typeof session.payment_intent !== 'string') {
                         estimateId = estimateId || session.payment_intent.metadata?.estimateId?.trim() || ''
                         estimateNumber = estimateNumber || session.payment_intent.metadata?.estimateNumber?.trim() || ''
+                        userId = userId || session.payment_intent.metadata?.userId?.trim() || ''
                     }
                 } catch (error) {
                     stats.errors += 1
@@ -147,53 +169,30 @@ async function reconcilePaidSessions(req: Request) {
                 }
             }
 
-            if (!estimateId && !estimateNumber) {
-                stats.missingMetadata += 1
-                continue
-            }
-
-            let targetEstimateId = estimateId
-
-            if (!targetEstimateId && estimateNumber) {
-                const { data: estimateByNumber, error: findError } = await supabase
-                    .from('estimates')
-                    .select('id')
-                    .eq('estimate_number', estimateNumber)
-                    .order('created_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle()
-
-                if (findError) {
-                    stats.errors += 1
-                    console.error('Stripe reconcile: estimate lookup failed', findError)
-                    continue
-                }
-
-                targetEstimateId = estimateByNumber?.id || ''
-            }
-
-            if (!targetEstimateId) {
-                stats.missingEstimate += 1
-                continue
-            }
-
-            const { data: targetEstimate, error: estimateError } = await supabase
-                .from('estimates')
-                .select('id, user_id, estimate_number')
-                .eq('id', targetEstimateId)
-                .maybeSingle()
-
-            if (estimateError) {
+            const settlementResolution = await resolveEstimateForSettlement(supabase, {
+                estimateId,
+                estimateNumber,
+                userId,
+            })
+            if (!settlementResolution.ok && settlementResolution.reason === 'lookup_error') {
                 stats.errors += 1
-                console.error('Stripe reconcile: failed to load target estimate', estimateError)
+                console.error('Stripe reconcile: failed to load target estimate', settlementResolution.message)
                 continue
             }
 
-            if (!targetEstimate) {
-                stats.missingEstimate += 1
+            if (!settlementResolution.ok) {
+                if (
+                    settlementResolution.reason === 'missing_user_id' ||
+                    settlementResolution.reason === 'missing_reference'
+                ) {
+                    stats.missingMetadata += 1
+                } else {
+                    stats.missingEstimate += 1
+                }
                 continue
             }
 
+            const targetEstimate = settlementResolution.estimate
             stats.matched += 1
 
             const { data: updatedRows, error: updateError } = await supabase

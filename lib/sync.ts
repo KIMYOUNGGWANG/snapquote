@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import { getEstimates, saveEstimate, LocalEstimate } from './estimates-storage' // Correct imports
 import { toast } from '@/components/toast' // Use existing toast component
+import { resolveLwwSyncAction } from './sync-resolution'
 
 async function resolveClientId(userId: string, estimate: LocalEstimate): Promise<string | null> {
     const clientName = estimate.clientName?.trim()
@@ -106,15 +107,18 @@ export async function syncEstimates() {
                 continue
             }
 
-            // Conflict Resolution via Timestamp
-            const localDate = new Date(local.updatedAt || local.createdAt).getTime()
-            const cloudDate = new Date(cloud.updated_at || cloud.created_at).getTime()
+            const syncAction = resolveLwwSyncAction({
+                localUpdatedAt: local.updatedAt,
+                localCreatedAt: local.createdAt,
+                cloudUpdatedAt: cloud.updated_at,
+                cloudCreatedAt: cloud.created_at,
+            })
 
-            if (localDate > cloudDate + 1000) { // Add 1s buffer for precision 
+            if (syncAction === 'push') {
                 // Local is newer: PUSH
                 await pushEstimateToCloud(user.id, local)
                 pushedToCloudCount++
-            } else if (cloudDate > localDate + 1000) {
+            } else if (syncAction === 'pull') {
                 // Cloud is newer: PULL (will be handled by the pull loop below)
             } else {
                 // Same? Just ensure local synced flag is true if it was false
@@ -128,10 +132,16 @@ export async function syncEstimates() {
         for (const cloud of cloudEstimatesRaw || []) {
             const local = localEstimates.find(l => l.id === cloud.id)
 
-            const cloudDate = new Date(cloud.updated_at || cloud.created_at).getTime()
-            const localDate = local ? new Date(local.updatedAt || local.createdAt).getTime() : 0
+            const syncAction = local
+                ? resolveLwwSyncAction({
+                    localUpdatedAt: local.updatedAt,
+                    localCreatedAt: local.createdAt,
+                    cloudUpdatedAt: cloud.updated_at,
+                    cloudCreatedAt: cloud.created_at,
+                })
+                : 'pull'
 
-            if (!local || cloudDate > localDate + 1000) {
+            if (!local || syncAction === 'pull') {
                 // Convert cloud shape to local shape
                 const localEst = convertCloudToLocal(cloud)
                 await saveEstimate(localEst)
@@ -278,4 +288,3 @@ function convertCloudToLocal(c: any): LocalEstimate {
         }))
     }
 }
-
