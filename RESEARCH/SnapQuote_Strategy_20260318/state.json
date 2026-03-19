@@ -1,0 +1,61 @@
+{
+  "session_id": "SnapQuote_Strategy_20260318",
+  "topic": "SnapQuote 종합 전략 리서치: 시장 확장, 매출성장, 경쟁사 분석, 제품 로드맵",
+  "created_at": "2026-03-18T21:00:00Z",
+  "updated_at": "2026-03-18T21:00:00Z",
+  "status": "COMPLETED",
+  "current_phase": 7,
+  "requirements": {
+    "focus": ["시장 확장 기회", "매출성장 전략", "경쟁사 분석", "제품 로드맵 우선순위"],
+    "output_format": "single_comprehensive_report",
+    "audience": "창업자/주주 + 제품/마케팅 팀 (전략+실행 통합)",
+    "sources": {"required_types": ["industry_reports", "news", "community", "user_reviews"], "min_quality": "C"},
+    "special_requirements": ["하나의 통합 리포트 파일"]
+  },
+  "plan": {
+    "subtopics": [
+      "1. 시장 확장: 비영어권 계약직 종사자 시장 규모 및 진출 기회",
+      "2. 매출성장: 가격 전략, 무료→유료 전환 최적화, LTV 향상",
+      "3. 경쟁사 분석: 견적 소프트웨어 시장 경쟁자 포지셔닝 및 차별화",
+      "4. 제품 로드맵: 다음 분기 우선순위 기능 및 사용자 요구사항"
+    ],
+    "search_queries": {
+      "market_expansion": [
+        "field service estimating software Hispanic contractors market 2026",
+        "non-English speaking contractors mobile estimating app 2026",
+        "Korean contractors Canada US construction estimating software 2026",
+        "trade contractor market size non-English speaking 2025 2026"
+      ],
+      "revenue_growth": [
+        "SaaS freemium conversion rate construction software 2026",
+        "field service software pricing strategy 2025 2026",
+        "estimating software upsell strategy contractors",
+        "SaaS free to paid conversion optimization B2B 2026"
+      ],
+      "competitive_analysis": [
+        "construction estimating software competitors 2026 comparison",
+        "Jobber Housecall Pro CompanyCam alternatives 2026",
+        "AI estimating software for contractors market landscape 2026",
+        "contractor quoting app Houzz Pro BuildBook comparison 2026"
+      ],
+      "product_roadmap": [
+        "contractor estimating software feature requests 2026",
+        "field service mobile app must-have features contractors 2026",
+        "AI quote generation contractors pain points 2026",
+        "trade business management software user feedback 2026"
+      ]
+    }
+  },
+  "progress": {
+    "phase_1": "completed",
+    "phase_2": "completed",
+    "phase_3": "in_progress",
+    "phase_4": "pending",
+    "phase_5": "pending",
+    "phase_6": "pending",
+    "phase_7": "pending"
+  },
+  "sources_count": 0,
+  "artifacts": {},
+  "errors": []
+}
