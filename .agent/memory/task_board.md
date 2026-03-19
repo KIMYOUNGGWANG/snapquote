@@ -15,7 +15,7 @@
 
 - [x] Contract lock confirmed: `docs/api-spec.md`
 - [x] Strategy input reviewed: 2026 strategy report
-- [ ] User sign-off for `/develop` handoff
+- [x] User sign-off for `/develop` handoff
 
 ## P0 Revenue And Trust
 
@@ -54,8 +54,14 @@
 
 ## Exit Criteria For Planning
 
-- [ ] P0 tasks have owners, success metrics, and rollout order
-- [ ] Free-tier experiment is defined with measurement points
-- [ ] Annual billing rollout is sequenced behind contract-safe UI changes
-- [ ] Offline trust work has a validation plan
-- [ ] Growth funnel tasks have source-to-conversion tracking
+- [x] P0 tasks have owners, success metrics, and rollout order
+- [x] Free-tier experiment is defined with measurement points
+- [x] Annual billing rollout is sequenced behind contract-safe UI changes
+- [x] Offline trust work has a validation plan
+- [x] Growth funnel tasks have source-to-conversion tracking
+
+## Delivery Summary
+
+- [x] `38bfe14` `feat: wire runtime revenue and reliability flows`
+- [x] `309d18e` `feat: harden multilingual intake and sms idempotency`
+- [x] `eb85ac1` `feat: add guided demo quote onboarding`
