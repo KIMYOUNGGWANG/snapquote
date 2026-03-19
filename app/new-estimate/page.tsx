@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { FreeTierQuotaBanner } from "@/components/free-tier-quota-banner"
 import Image from "next/image"
 import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
@@ -15,7 +16,10 @@ import type { BusinessInfo } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
+import type { BillingUsageSnapshot } from "@/lib/billing-usage"
 import { copyReferralShareUrl, getReferralShareUrl } from "@/lib/referrals"
+import { createDemoEstimateDraft, DUPLICATE_ESTIMATE_KEY } from "@/lib/demo-estimate"
+import { sendEstimateSms } from "@/lib/send-sms"
 const PaymentOptionModal = dynamic(() => import("@/components/payment-option-modal").then(mod => mod.PaymentOptionModal), { ssr: false })
 import { AudioRecorder } from "@/components/audio-recorder"
 const PDFPreviewModal = dynamic(() => import("@/components/pdf-preview-modal").then(mod => mod.PDFPreviewModal), { ssr: false })
@@ -85,9 +89,22 @@ type ReceiptScanResult = {
 }
 
 type Step = "input" | "transcribing" | "verifying" | "generating" | "result"
+type SourceLanguage = "auto" | "en" | "es" | "ko"
 
 const ESTIMATE_CATEGORIES: EstimateCategory[] = ["PARTS", "LABOR", "SERVICE", "OTHER"]
 const ESTIMATE_UNITS: EstimateUnit[] = ["ea", "LS", "hr", "day", "SF", "LF", "%", "other"]
+const SOURCE_LANGUAGE_OPTIONS: Array<{ value: SourceLanguage; label: string; hint: string }> = [
+    { value: "auto", label: "Auto", hint: "Detect mixed site language" },
+    { value: "es", label: "Spanish Beta", hint: "Best for Spanish field notes" },
+    { value: "ko", label: "Korean", hint: "Translate Korean job notes" },
+    { value: "en", label: "English", hint: "Clean up English shorthand" },
+]
+const SOURCE_LANGUAGE_EXAMPLES: Record<SourceLanguage, string> = {
+    auto: "\"Cambio la llave angular under the sink, check leak around the P-trap, then test water pressure.\"",
+    es: "\"Cambio la llave angular debajo del lavamanos, arreglo la fuga en el desague y reviso la presion del agua.\"",
+    ko: "\"싱크대 아래 앵글밸브 교체하고 배수 누수 잡고 수압 테스트합니다.\"",
+    en: "\"Replace the angle stop under the sink, fix the drain leak, and pressure-test the line.\"",
+}
 
 function isRecord(value: unknown): value is Record<string, any> {
     return value !== null && typeof value === "object"
@@ -274,6 +291,7 @@ export default function NewEstimatePage() {
     const [isOffline, setIsOffline] = useState(false)
     const [pendingAudioId, setPendingAudioId] = useState<string | null>(null)
     const [projectType, setProjectType] = useState<'residential' | 'commercial'>('residential')
+    const [sourceLanguage, setSourceLanguage] = useState<SourceLanguage>("auto")
     const [paymentLink, setPaymentLink] = useState<string | null>(null)
     const [paymentLinkId, setPaymentLinkId] = useState<string | null>(null)
     const [paymentLinkType, setPaymentLinkType] = useState<'full' | 'deposit' | 'custom' | null>('full')
@@ -283,6 +301,8 @@ export default function NewEstimatePage() {
     const [isCopyingReferral, setIsCopyingReferral] = useState(false)
     const [isDownloadingPdf, setIsDownloadingPdf] = useState(false)
     const [isReceiptScannerOpen, setIsReceiptScannerOpen] = useState(false)
+    const [showDemoTutorial, setShowDemoTutorial] = useState(false)
+    const [billingUsageSnapshot, setBillingUsageSnapshot] = useState<BillingUsageSnapshot | null>(null)
 
     const fileInputRef = useRef<HTMLInputElement>(null)
     const draftMetaRef = useRef<{ id: string; estimateNumber: string } | null>(null)
@@ -309,12 +329,60 @@ export default function NewEstimatePage() {
         setPaymentLinkType(null)
     }, [])
 
+    const loadDraftIntoComposer = useCallback((draft: Record<string, any>, options?: { tutorial?: boolean; toastMessage?: string }) => {
+        resetDraftMeta()
+        resetPaymentLinkState()
+        setEstimate(normalizeEstimatePayload(draft))
+        setClientName(draft.clientName || "")
+        setClientAddress(draft.clientAddress || "")
+        setTaxRate(typeof draft.taxRate === "number" ? draft.taxRate : 13)
+        setAudioBlob(null)
+        setImages([])
+        setPreviewUrls([])
+        setTranscribedText("")
+        setStep("result")
+        setShowDemoTutorial(Boolean(options?.tutorial))
+
+        if (options?.toastMessage) {
+            toast(options.toastMessage, "success")
+        }
+    }, [resetPaymentLinkState])
+
     const redirectToLoginForPaymentLink = useCallback(() => {
         const params = new URLSearchParams({
             next: "/new-estimate",
             intent: "payment-link",
         })
         router.push(`/login?${params.toString()}`)
+    }, [router])
+
+    const handleLoadDemoQuote = useCallback(() => {
+        loadDraftIntoComposer(createDemoEstimateDraft(), {
+            tutorial: true,
+            toastMessage: "Demo quote loaded. Edit it before sending.",
+        })
+        router.replace("/new-estimate?tutorial=1")
+    }, [loadDraftIntoComposer, router])
+
+    const handleExitDemoTutorial = useCallback(() => {
+        resetDraftMeta()
+        resetPaymentLinkState()
+        setEstimate(null)
+        setClientName("")
+        setClientAddress("")
+        setImages([])
+        setPreviewUrls([])
+        setTranscribedText("")
+        setAudioBlob(null)
+        setShowDemoTutorial(false)
+        setStep("input")
+        setTaxRate(businessProfile?.tax_rate || 13)
+        router.replace("/new-estimate")
+    }, [businessProfile?.tax_rate, resetPaymentLinkState, router])
+
+    const handleDismissDemoTutorial = useCallback(() => {
+        setShowDemoTutorial(false)
+        router.replace("/new-estimate")
     }, [router])
 
     const fileToDataUrl = (file: File): Promise<string> => {
@@ -328,6 +396,9 @@ export default function NewEstimatePage() {
 
     // Load business profile and check for duplicate data
     useEffect(() => {
+        const tutorialMode = new URLSearchParams(window.location.search).get("tutorial") === "1"
+        setShowDemoTutorial(tutorialMode)
+
         const profile = getProfile()
         if (profile) {
             setBusinessProfile(profile)
@@ -335,24 +406,29 @@ export default function NewEstimatePage() {
         }
 
         // Check for duplicate estimate from history page
-        const duplicateData = localStorage.getItem('duplicate_estimate')
+        const duplicateData = localStorage.getItem(DUPLICATE_ESTIMATE_KEY)
         if (duplicateData) {
             try {
                 const data = JSON.parse(duplicateData)
-                resetDraftMeta()
-                setEstimate(normalizeEstimatePayload(data))
-                setClientName(data.clientName || '')
-                setClientAddress(data.clientAddress || '')
-                if (data.taxRate) setTaxRate(data.taxRate)
-                setStep('result')
-                localStorage.removeItem('duplicate_estimate')
-                toast('📋 Estimate duplicated! Edit and save.', 'success')
+                loadDraftIntoComposer(data, {
+                    tutorial: tutorialMode,
+                    toastMessage: tutorialMode ? "Demo quote loaded. Edit it before sending." : "Estimate duplicated! Edit and save.",
+                })
+                localStorage.removeItem(DUPLICATE_ESTIMATE_KEY)
             } catch (e) {
                 console.error('Failed to load duplicate data:', e)
-                localStorage.removeItem('duplicate_estimate')
+                localStorage.removeItem(DUPLICATE_ESTIMATE_KEY)
             }
+            return
         }
-    }, [])
+
+        if (tutorialMode) {
+            loadDraftIntoComposer(createDemoEstimateDraft(), {
+                tutorial: true,
+                toastMessage: "Demo quote loaded. Edit it before sending.",
+            })
+        }
+    }, [loadDraftIntoComposer])
 
     // Offline detection and online recovery for pending audio
     useEffect(() => {
@@ -372,6 +448,7 @@ export default function NewEstimatePage() {
                         try {
                             const formData = new FormData()
                             formData.append("file", audio.blob, "recording.webm")
+                            formData.append("languageHint", sourceLanguage)
 
                             const response = await fetch("/api/transcribe", {
                                 method: "POST",
@@ -414,7 +491,7 @@ export default function NewEstimatePage() {
             window.removeEventListener('online', handleOnline)
             window.removeEventListener('offline', handleOffline)
         }
-    }, [pendingAudioId])
+    }, [pendingAudioId, sourceLanguage])
 
     useEffect(() => {
         if (handledPaymentIntentRef.current) return
@@ -436,6 +513,45 @@ export default function NewEstimatePage() {
 
         router.replace("/new-estimate")
     }, [router])
+
+    useEffect(() => {
+        let isCancelled = false
+
+        const loadBillingUsageSnapshot = async () => {
+            try {
+                const headers = await withAuthHeaders()
+                if (!headers.authorization) {
+                    if (!isCancelled) setBillingUsageSnapshot(null)
+                    return
+                }
+
+                const response = await fetch("/api/billing/usage", {
+                    method: "GET",
+                    headers,
+                    cache: "no-store",
+                })
+
+                if (!response.ok) {
+                    if (!isCancelled) setBillingUsageSnapshot(null)
+                    return
+                }
+
+                const snapshot = await response.json() as BillingUsageSnapshot
+                if (!isCancelled) {
+                    setBillingUsageSnapshot(snapshot.planTier === "free" ? snapshot : null)
+                }
+            } catch (error) {
+                console.error("Failed to load free tier usage banner:", error)
+                if (!isCancelled) setBillingUsageSnapshot(null)
+            }
+        }
+
+        void loadBillingUsageSnapshot()
+
+        return () => {
+            isCancelled = true
+        }
+    }, [])
 
     const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || [])
@@ -485,6 +601,7 @@ export default function NewEstimatePage() {
         try {
             const formData = new FormData()
             formData.append("file", blob, "recording.webm")
+            formData.append("languageHint", sourceLanguage)
             const headers = await withAuthHeaders()
 
             const response = await fetch("/api/transcribe", {
@@ -533,6 +650,7 @@ export default function NewEstimatePage() {
                 body: JSON.stringify({
                     images: base64Images,
                     notes: transcribedText,
+                    sourceLanguage,
                     projectType,
                     userProfile: businessProfile ? {
                         city: businessProfile.address?.split(',')[0] || "Toronto",
@@ -1059,6 +1177,14 @@ export default function NewEstimatePage() {
                 </CardTitle>
             </CardHeader>
 
+            {billingUsageSnapshot ? (
+                <FreeTierQuotaBanner
+                    used={billingUsageSnapshot.usage.generate}
+                    limit={billingUsageSnapshot.limits.generate}
+                    periodStart={billingUsageSnapshot.periodStart}
+                />
+            ) : null}
+
             {/* STEP 1: INPUT */}
             {step === "input" && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
@@ -1081,6 +1207,29 @@ export default function NewEstimatePage() {
                         </Button>
                     </div>
 
+                    <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/30 p-4">
+                        <div className="space-y-1">
+                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Voice language</p>
+                            <p className="text-sm text-muted-foreground">
+                                Pick the language you speak on site. Spanish beta pushes harder on trade-term cleanup before the English quote is generated.
+                            </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            {SOURCE_LANGUAGE_OPTIONS.map((option) => (
+                                <Button
+                                    key={option.value}
+                                    type="button"
+                                    variant={sourceLanguage === option.value ? "default" : "outline"}
+                                    className="h-auto min-h-14 flex-col items-start gap-1 px-3 py-3 text-left"
+                                    onClick={() => setSourceLanguage(option.value)}
+                                >
+                                    <span className="text-sm font-semibold">{option.label}</span>
+                                    <span className="text-[11px] leading-4 text-current/80">{option.hint}</span>
+                                </Button>
+                            ))}
+                        </div>
+                    </div>
+
                     {/* CHEAT SHEET (Practice Mode) */}
                     {/* Only show if no logic (simplified for now: always show or manage via state if needed) */}
                     <div className="glass-card p-4 relative overflow-hidden group border-blue-500/30 shadow-[0_0_20px_-10px_rgba(59,130,246,0.5)]">
@@ -1094,10 +1243,22 @@ export default function NewEstimatePage() {
                                     Try saying this:
                                 </p>
                                 <p className="text-sm font-medium text-white italic leading-relaxed">
-                                    &quot;Bathroom renovation. <span className="text-blue-400">50 sqft tile</span>. Install new vanity. <span className="text-blue-400">Labor is $400</span>. Client is <span className="text-blue-400">Mike</span>.&quot;
+                                    {SOURCE_LANGUAGE_EXAMPLES[sourceLanguage]}
+                                </p>
+                                <p className="text-xs text-blue-100/70">
+                                    Output stays in professional English even if you record in Spanish or Korean.
                                 </p>
                             </div>
                         </div>
+                        <Button
+                            variant="outline"
+                            className="mt-4 w-full border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20"
+                            onClick={handleLoadDemoQuote}
+                            data-testid="load-demo-quote-button"
+                        >
+                            <Sparkles className="mr-2 h-4 w-4" />
+                            Load Demo Quote
+                        </Button>
                     </div>
 
                     {/* Voice Input (Primary) */}
@@ -1107,7 +1268,7 @@ export default function NewEstimatePage() {
                             onAudioRemoved={() => setAudioBlob(null)}
                         />
                         <p className="text-sm text-muted-foreground text-center">
-                            Tap to record job details.
+                            Tap to record in Spanish, Korean, English, or mixed site language.
                         </p>
                     </div>
 
@@ -1191,7 +1352,9 @@ export default function NewEstimatePage() {
                     <div className="space-y-2">
                         <div className="flex items-center justify-between">
                             <label className="text-sm font-medium">Job Description</label>
-                            <span className="text-xs text-muted-foreground">Edit if needed</span>
+                            <span className="text-xs text-muted-foreground">
+                                {sourceLanguage === "es" ? "Spanish beta to English" : sourceLanguage === "ko" ? "Korean to English" : "Edit if needed"}
+                            </span>
                         </div>
                         <Textarea
                             value={transcribedText}
@@ -1248,6 +1411,34 @@ export default function NewEstimatePage() {
             {/* STEP 5: RESULT */}
             {step === "result" && estimate && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                    {showDemoTutorial && (
+                        <Card className="border-blue-500/30 bg-blue-500/5" data-testid="demo-tutorial-banner">
+                            <CardContent className="pt-5 space-y-3">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-semibold text-blue-300">First-quote tutorial</p>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            This sample stays fully editable. Replace the customer, tune the pricing, then save or send it.
+                                        </p>
+                                    </div>
+                                    <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-blue-300" />
+                                </div>
+                                <div className="grid gap-2 text-xs text-muted-foreground">
+                                    <p>1. Update the scope and totals to match the real job.</p>
+                                    <p>2. Replace the demo customer details before sharing.</p>
+                                    <p>3. Use Save, PDF, Email, or SMS once the draft is ready.</p>
+                                </div>
+                                <div className="flex gap-2">
+                                    <Button size="sm" onClick={handleDismissDemoTutorial} className="flex-1">
+                                        Keep Editing
+                                    </Button>
+                                    <Button size="sm" variant="outline" onClick={handleExitDemoTutorial} className="flex-1">
+                                        Start Blank
+                                    </Button>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
                     <Card>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                             <CardTitle className="text-xl font-bold" data-testid="estimate-draft-title">Estimate Draft</CardTitle>
@@ -1993,25 +2184,12 @@ export default function NewEstimatePage() {
                     businessName={businessProfile?.business_name}
                     onSend={async (toPhoneNumber, message) => {
                         try {
-                            const headers = await withAuthHeaders({ "Content-Type": "application/json" })
                             const draftMeta = getOrCreateDraftMeta()
-                            const response = await fetch('/api/send-sms', {
-                                method: 'POST',
-                                headers,
-                                body: JSON.stringify({
-                                    toPhoneNumber,
-                                    message,
-                                    estimateId: draftMeta.id,
-                                })
+                            const data = await sendEstimateSms({
+                                toPhoneNumber,
+                                message,
+                                estimateId: draftMeta.id,
                             })
-                            if (!response.ok) {
-                                const errorData = await response.json()
-                                if (response.status === 402) {
-                                    throw new Error("Insufficient SMS credits. Top up from your account.")
-                                }
-                                throw new Error(errorData.error || 'Failed to send SMS')
-                            }
-                            const data = await response.json()
                             void trackAnalyticsEvent({
                                 event: "quote_sent",
                                 estimateId: draftMeta.id,

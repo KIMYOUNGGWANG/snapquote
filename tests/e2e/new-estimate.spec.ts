@@ -50,3 +50,14 @@ test("manual estimate flow renders a generated draft with mocked AI output", asy
     await expect(page.getByRole("button", { name: /save estimate/i })).toBeVisible()
     await expect(page.getByRole("button", { name: /download pdf/i })).toBeVisible()
 })
+
+test("demo quote button loads a tutorial draft for first-time practice", async ({ page }) => {
+    await page.goto("/new-estimate")
+
+    await page.getByTestId("load-demo-quote-button").click()
+
+    await expect(page.getByTestId("demo-tutorial-banner")).toBeVisible()
+    await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+    await expect(page.locator('input[value="Vanity drain assembly and shutoff parts package"]').first()).toBeVisible()
+    await expect(page.locator('input[value="Demo Customer"]').first()).toBeVisible()
+})
