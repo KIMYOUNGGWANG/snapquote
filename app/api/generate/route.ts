@@ -2,8 +2,12 @@ import { OpenAI } from "openai"
 import { NextResponse } from "next/server"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { parseJsonRequest } from "@/lib/server/request-validation"
+import { requireAuthenticatedUser } from "@/lib/server/route-auth"
+import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
+import { resolveEffectivePlanTier } from "@/lib/server/effective-plan"
 import { enforceUsageQuota, recordUsage } from "@/lib/server/usage-quota"
 import { generateRequestSchema } from "@/lib/validation/api-schemas"
+import { ANONYMOUS_GENERATE_LIMIT } from "@/lib/free-tier"
 
 type UserMessageContentPart =
     | { type: "text"; text: string }
@@ -29,6 +33,7 @@ type NormalizedEstimate = {
     closing_note: string
     warnings: string[]
     upsellOptions?: NormalizedUpsellOption[]
+    photoAnalysis?: NormalizedPhotoEstimateAnalysis
 }
 
 type ModelGenerationResult = {
@@ -38,6 +43,19 @@ type ModelGenerationResult = {
 }
 
 type SourceLanguage = "auto" | "en" | "es" | "ko"
+type GenerateWorkflow = "standard" | "photo_estimate"
+type PricingConfidence = "low" | "medium" | "high"
+type NormalizedPhotoEstimateAnalysis = {
+    observations: string[]
+    suggestedScope: string[]
+    materialSuggestions: Array<{
+        label: string
+        quantity: number
+        unit: string
+        reason: string
+    }>
+    pricingConfidence: PricingConfidence
+}
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -48,8 +66,8 @@ const GEMINI_GENERATE_MODEL = process.env.GEMINI_GENERATE_MODEL?.trim() || "gemi
 const GENERATE_PROVIDER = process.env.GENERATE_AI_PROVIDER?.trim().toLowerCase() || "auto"
 const GENERATE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000
 const GENERATE_RATE_LIMIT_MAX = 20
-const ANONYMOUS_GENERATE_LIMIT = 10
 const ANONYMOUS_GENERATE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+const PRO_TIERS = new Set(["pro", "team"])
 
 function toFiniteNumber(value: unknown, fallback = 0): number {
     if (typeof value === "number" && Number.isFinite(value)) return value
@@ -118,6 +136,68 @@ function normalizeUpsellOptions(rawOptions: unknown): NormalizedUpsellOption[] {
             }
         })
         .filter((option): option is NormalizedUpsellOption => option !== null)
+}
+
+function normalizePricingConfidence(value: unknown): PricingConfidence {
+    if (typeof value !== "string") return "medium"
+    const normalized = value.trim().toLowerCase()
+    if (normalized === "low" || normalized === "medium" || normalized === "high") {
+        return normalized
+    }
+    return "medium"
+}
+
+function normalizeStringList(input: unknown, maxItems: number, maxLength: number): string[] {
+    if (!Array.isArray(input)) return []
+
+    return input
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim().slice(0, maxLength))
+        .filter(Boolean)
+        .slice(0, maxItems)
+}
+
+function normalizePhotoEstimateAnalysis(rawAnalysis: unknown): NormalizedPhotoEstimateAnalysis | undefined {
+    const analysis = rawAnalysis && typeof rawAnalysis === "object" ? rawAnalysis as Record<string, unknown> : null
+    if (!analysis) return undefined
+
+    const observations = normalizeStringList(analysis.observations, 6, 180)
+    const suggestedScope = normalizeStringList(analysis.suggestedScope, 6, 180)
+    const materialSuggestions = (Array.isArray(analysis.materialSuggestions) ? analysis.materialSuggestions : [])
+        .map((suggestion: any) => {
+            const label = typeof suggestion?.label === "string" ? suggestion.label.trim().slice(0, 120) : ""
+            if (!label) return null
+
+            const quantity = Math.max(0, toFiniteNumber(suggestion?.quantity, 1))
+            const unit =
+                typeof suggestion?.unit === "string" && suggestion.unit.trim()
+                    ? suggestion.unit.trim().slice(0, 30)
+                    : "ea"
+            const reason =
+                typeof suggestion?.reason === "string" && suggestion.reason.trim()
+                    ? suggestion.reason.trim().slice(0, 180)
+                    : "Visible condition from the jobsite photo."
+
+            return {
+                label,
+                quantity,
+                unit,
+                reason,
+            }
+        })
+        .filter((suggestion): suggestion is NonNullable<typeof suggestion> => suggestion !== null)
+        .slice(0, 8)
+
+    if (observations.length === 0 && suggestedScope.length === 0 && materialSuggestions.length === 0) {
+        return undefined
+    }
+
+    return {
+        observations,
+        suggestedScope,
+        materialSuggestions,
+        pricingConfidence: normalizePricingConfidence(analysis.pricingConfidence),
+    }
 }
 
 function parsePotentialJsonContent(input: string): any {
@@ -348,6 +428,7 @@ function normalizeEstimate(rawEstimate: any): NormalizedEstimate {
             .map((warning: string) => warning.trim())
         : []
     const upsellOptions = normalizeUpsellOptions(rawEstimate?.upsellOptions)
+    const photoAnalysis = normalizePhotoEstimateAnalysis(rawEstimate?.photoAnalysis)
 
     return {
         items: normalizedItems,
@@ -357,6 +438,7 @@ function normalizeEstimate(rawEstimate: any): NormalizedEstimate {
         closing_note: typeof rawEstimate?.closing_note === "string" ? rawEstimate.closing_note : "",
         warnings,
         ...(upsellOptions.length > 0 ? { upsellOptions } : {}),
+        ...(photoAnalysis ? { photoAnalysis } : {}),
     }
 }
 
@@ -383,7 +465,7 @@ function getSystemPromptV5(userProfile: {
     taxRate?: number
     businessName?: string
     priceList?: string  // Price list formatted for prompt
-}, projectType: 'residential' | 'commercial' = 'residential', sourceLanguage: SourceLanguage = "auto") {
+}, projectType: 'residential' | 'commercial' = 'residential', sourceLanguage: SourceLanguage = "auto", workflow: GenerateWorkflow = "standard", photoContext = "") {
     const city = userProfile.city || "Toronto"
     const country = userProfile.country || "Canada"
     const taxRate = userProfile.taxRate || 13
@@ -414,6 +496,22 @@ RULES:
         : `TYPE: RESIDENTIAL
    - MATERIALS: Use residential specs (Romex, Wood Studs, PVC, Drywall).
    - TONE: Homeowner friendly, warm but professional.`
+    const photoEstimateContext = workflow === "photo_estimate"
+        ? `
+PHOTO ESTIMATE MODE:
+- This request is specifically for jobsite photo estimating.
+- Use the photos as your primary evidence, and use notes only to clarify trade or room context.
+- If the photo does not prove a condition, do not state it as fact.
+- Add a "photoAnalysis" object with:
+  - "observations": short factual site observations from the images
+  - "suggestedScope": short scope bullets the contractor should review
+  - "materialSuggestions": likely materials with quantity, unit, and reason
+  - "pricingConfidence": "low" | "medium" | "high"
+- Prefer line items that cover visible materials, labor, cleanup, and verification steps.
+- Add warnings for any hidden conditions, measurements, or code assumptions that still need on-site verification.
+${photoContext ? `- Extra jobsite context: ${photoContext}` : "- No extra jobsite context was provided."}
+`
+        : ""
 
     return `
 You are an expert North American Trade Estimator.
@@ -424,6 +522,7 @@ ${priceListSection}CONTEXT:
 - Tax Rate: ${taxRate}%
 - Business: ${businessName}
 - ${projectContext}
+${photoEstimateContext}
 
 INPUT DATA:
 - Text: Rough notes (English, Spanish, Korean, mixed slang)
@@ -565,15 +664,107 @@ Response must be raw JSON. Use the new professional format:
         }
       ]
     }
-  ]
+  ]${workflow === "photo_estimate" ? `,
+  "photoAnalysis": {
+    "observations": ["Observed condition from the photos"],
+    "suggestedScope": ["Scope bullet the contractor should review"],
+    "materialSuggestions": [
+      {
+        "label": "Suggested material",
+        "quantity": 1,
+        "unit": "ea",
+        "reason": "Why the photo suggests this material"
+      }
+    ],
+    "pricingConfidence": "medium"
+  }` : ""}
 }
 
 TONE: Professional, confident, sales-oriented. Sound like a trusted expert.
 `.trim()
 }
 
+async function resolveGeneratePlanTier(
+    userId: string
+): Promise<{ ok: true; planTier: string } | { ok: false; status: number; error: string }> {
+    const supabase = createServiceSupabaseClient()
+    if (!supabase) {
+        return {
+            ok: false,
+            status: 500,
+            error: "Supabase service configuration is missing.",
+        }
+    }
+
+    const { data, error } = await supabase
+        .from("profiles")
+        .select("plan_tier, stripe_subscription_status, referral_trial_ends_at, referral_bonus_ends_at")
+        .eq("id", userId)
+        .maybeSingle()
+
+    if (error) {
+        return {
+            ok: false,
+            status: 500,
+            error: error.message || "Failed to resolve plan tier",
+        }
+    }
+
+    return {
+        ok: true,
+        planTier: resolveEffectivePlanTier(data || {}),
+    }
+}
+
 export async function POST(req: Request) {
     try {
+        const parsedPayload = await parseJsonRequest(req, generateRequestSchema)
+        if (!parsedPayload.ok) {
+            return parsedPayload.response
+        }
+
+        const {
+            images,
+            notes,
+            sourceLanguage,
+            userProfile,
+            projectType,
+            workflow = "standard",
+            photoContext,
+        } = parsedPayload.data
+
+        if (workflow === "photo_estimate" && (!images || images.length === 0)) {
+            return NextResponse.json(
+                { error: "At least one jobsite photo is required for photo estimate mode." },
+                { status: 400 }
+            )
+        }
+
+        if (workflow === "photo_estimate") {
+            const auth = await requireAuthenticatedUser(req)
+            if (!auth.ok) {
+                return NextResponse.json(
+                    { error: "Log in required for photo estimate mode." },
+                    { status: 401 }
+                )
+            }
+
+            const planTierResult = await resolveGeneratePlanTier(auth.userId)
+            if (!planTierResult.ok) {
+                return NextResponse.json(
+                    { error: planTierResult.error },
+                    { status: planTierResult.status }
+                )
+            }
+
+            if (!PRO_TIERS.has(planTierResult.planTier)) {
+                return NextResponse.json(
+                    { error: "Photo estimate mode requires a Pro or Team plan." },
+                    { status: 402 }
+                )
+            }
+        }
+
         const quota = await enforceUsageQuota(req, "generate", { requireAuth: false })
         if (!quota.ok) {
             return NextResponse.json(
@@ -589,7 +780,7 @@ export async function POST(req: Request) {
         }
 
         const ip = getClientIp(req)
-        if (quota.isAnonymous) {
+        if (quota.isAnonymous && workflow !== "photo_estimate") {
             const anonymousQuota = await checkRateLimit({
                 key: `generate:anonymous:${ip}`,
                 limit: ANONYMOUS_GENERATE_LIMIT,
@@ -624,16 +815,15 @@ export async function POST(req: Request) {
             )
         }
 
-        const parsedPayload = await parseJsonRequest(req, generateRequestSchema)
-        if (!parsedPayload.ok) {
-            return parsedPayload.response
-        }
-
-        const { images, notes, sourceLanguage, userProfile, projectType } = parsedPayload.data
-
         // Use provided userProfile or defaults
         const profile = userProfile || {}
-        const systemPrompt = getSystemPromptV5(profile, projectType, sourceLanguage || "auto")
+        const systemPrompt = getSystemPromptV5(
+            profile,
+            projectType,
+            sourceLanguage || "auto",
+            workflow,
+            photoContext || ""
+        )
 
         const provider = resolveGenerateProvider()
         const modelResult =

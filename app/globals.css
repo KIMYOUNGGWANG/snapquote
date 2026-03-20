@@ -4,79 +4,71 @@
 
 @layer base {
   :root {
-    /* Deep Navy Theme - Default */
-    --background: 240 10% 3.9%;
-    /* #0a0a0f */
+    --background: 218 39% 8%;
     --foreground: 0 0% 98%;
 
-    --card: 240 10% 6%;
+    --card: 218 32% 12%;
     --card-foreground: 0 0% 98%;
 
-    --popover: 240 10% 3.9%;
+    --popover: 218 39% 8%;
     --popover-foreground: 0 0% 98%;
 
-    --primary: 217 91% 60%;
-    /* Blue-500 equivalent */
+    --primary: 198 93% 60%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 48 100% 50%;
-    /* Safety Yellow */
-    --secondary-foreground: 0 0% 0%;
+    --secondary: 33 94% 61%;
+    --secondary-foreground: 218 39% 8%;
 
-    --muted: 240 10% 12%;
-    /* Darker gray for separation */
-    --muted-foreground: 240 5% 65%;
+    --muted: 220 23% 16%;
+    --muted-foreground: 218 18% 72%;
 
-    --accent: 217 91% 60%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 195 50% 18%;
+    --accent-foreground: 0 0% 98%;
 
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 240 10% 14%;
-    /* Subtle dark border */
-    --input: 240 10% 14%;
-    --ring: 217 91% 60%;
+    --border: 217 24% 22%;
+    --input: 217 24% 22%;
+    --ring: 198 93% 60%;
 
     --radius: 0.75rem;
 
-    /* Chart Colors */
-    --chart-1: 217 91% 60%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
+    --chart-1: 198 93% 60%;
+    --chart-2: 172 66% 48%;
+    --chart-3: 209 45% 30%;
+    --chart-4: 33 94% 61%;
+    --chart-5: 12 77% 63%;
   }
 
   .dark {
-    /* Same as root because we are enforcing dark mode */
-    --background: 240 10% 3.9%;
+    --background: 218 39% 8%;
     --foreground: 0 0% 98%;
 
-    --card: 240 10% 6%;
+    --card: 218 32% 12%;
     --card-foreground: 0 0% 98%;
 
-    --popover: 240 10% 3.9%;
+    --popover: 218 39% 8%;
     --popover-foreground: 0 0% 98%;
 
-    --primary: 217 91% 60%;
+    --primary: 198 93% 60%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 48 100% 50%;
-    --secondary-foreground: 0 0% 0%;
+    --secondary: 33 94% 61%;
+    --secondary-foreground: 218 39% 8%;
 
-    --muted: 240 10% 12%;
-    --muted-foreground: 240 5% 65%;
+    --muted: 220 23% 16%;
+    --muted-foreground: 218 18% 72%;
 
-    --accent: 217 91% 60%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 195 50% 18%;
+    --accent-foreground: 0 0% 98%;
 
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 240 10% 14%;
+    --border: 217 24% 22%;
     --input: 240 10% 14%;
-    --ring: 217 91% 60%;
+    --ring: 198 93% 60%;
   }
 }
 
@@ -87,19 +79,54 @@
 
   body {
     @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at top, rgba(56, 189, 248, 0.16), transparent 34%),
+      radial-gradient(circle at 85% 14%, rgba(251, 146, 60, 0.14), transparent 24%),
+      linear-gradient(180deg, rgba(8, 15, 28, 0.98) 0%, rgba(8, 15, 28, 1) 100%);
+    font-family: "Avenir Next", "Segoe UI", sans-serif;
   }
 }
 
 @layer utilities {
   .glass-panel {
-    @apply bg-white/5 border border-white/10 backdrop-blur-lg;
+    @apply border border-white/12 bg-white/6 backdrop-blur-xl;
   }
 
   .glass-card {
-    @apply bg-white/5 border border-white/10 backdrop-blur-md rounded-xl hover:bg-white/10 transition-colors;
+    @apply rounded-2xl border border-white/10 bg-white/6 backdrop-blur-lg transition-all duration-300 hover:border-white/20 hover:bg-white/10;
   }
 
   .text-glow {
     text-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+  }
+
+  .app-shell {
+    @apply relative isolate overflow-hidden;
+  }
+
+  .premium-panel {
+    @apply rounded-[28px] border border-white/10 bg-slate-950/55 shadow-[0_24px_80px_-32px_rgba(8,145,178,0.45)] backdrop-blur-xl;
+  }
+
+  .premium-card {
+    @apply rounded-3xl border border-white/10 bg-white/[0.055] shadow-[0_20px_60px_-32px_rgba(15,23,42,0.85)] backdrop-blur-xl transition-all duration-300;
+  }
+
+  .premium-card-hover {
+    @apply hover:-translate-y-0.5 hover:border-sky-300/25 hover:bg-white/[0.08];
+  }
+
+  .section-eyebrow {
+    @apply inline-flex items-center gap-2 rounded-full border border-sky-400/20 bg-sky-400/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-sky-200;
+  }
+
+  .mesh-border {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 0 0 1px rgba(148, 163, 184, 0.08);
+  }
+
+  .ambient-orb {
+    @apply pointer-events-none absolute rounded-full blur-3xl;
   }
 }

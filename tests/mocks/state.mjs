@@ -48,6 +48,10 @@ function defaultQueryResolver(query) {
     return { data: { id: `${query.table}-updated` }, error: null }
   }
 
+  if (query.action === 'delete') {
+    return { data: [], error: null }
+  }
+
   if (query.mode === 'execute') {
     return { data: [], error: null }
   }
@@ -110,6 +114,11 @@ function createQueryBuilder(state, table) {
     update(payload) {
       query.action = 'update'
       query.payload = payload
+      return builder
+    },
+
+    delete() {
+      query.action = 'delete'
       return builder
     },
 

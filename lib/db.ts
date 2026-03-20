@@ -1,5 +1,6 @@
 import { openDB, DBSchema } from 'idb';
 import type { PriceListItem, PriceCategory, PriceUnit } from '@/types';
+import { emitOfflineQueueChanged } from './offline-events.ts';
 
 interface SnapQuoteDB extends DBSchema {
     estimates: {
@@ -171,7 +172,9 @@ export async function saveEstimateToDB(estimate: any) {
         status: estimate.status || 'draft',
         updatedAt: estimate.updatedAt || estimate.createdAt || now,
     };
-    return db.put('estimates', estimateWithStatus);
+    const result = await db.put('estimates', estimateWithStatus);
+    emitOfflineQueueChanged();
+    return result;
 }
 
 export async function getEstimatesFromDB() {
@@ -208,6 +211,7 @@ export async function savePendingAudio(audio: { id: string; blob: Blob; mimeType
         processed: false,
     };
     await db.put('pendingAudio', pendingAudio);
+    emitOfflineQueueChanged();
     return audio.id;
 }
 
@@ -232,12 +236,14 @@ export async function markAudioProcessed(id: string, transcription: string): Pro
     const audio = await db.get('pendingAudio', id);
     if (audio) {
         await db.put('pendingAudio', { ...audio, processed: true, transcription });
+        emitOfflineQueueChanged();
     }
 }
 
 export async function deletePendingAudio(id: string): Promise<void> {
     const db = await initDB();
     await db.delete('pendingAudio', id);
+    emitOfflineQueueChanged();
 }
 
 export async function clearProcessedAudio(): Promise<void> {
@@ -246,6 +252,7 @@ export async function clearProcessedAudio(): Promise<void> {
     for (const audio of processed) {
         await db.delete('pendingAudio', audio.id);
     }
+    emitOfflineQueueChanged();
 }
 
 // ============ PRICE LIST ============

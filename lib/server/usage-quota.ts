@@ -1,5 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { createAuthedSupabaseClient, parseBearerToken } from "@/lib/server/supabase-auth"
+import {
+    FREE_PLAN_GENERATE_LIMIT,
+    FREE_PLAN_SEND_EMAIL_LIMIT,
+    FREE_PLAN_TRANSCRIBE_LIMIT,
+} from "@/lib/free-tier"
+import { resolveEffectivePlanTier } from "@/lib/server/effective-plan"
 
 export type UsageMetric = "generate" | "transcribe" | "send_email"
 type PlanTier = "free" | "starter" | "pro" | "team"
@@ -64,9 +70,9 @@ export interface UsageRecordInput {
 
 const PLAN_LIMITS: Record<PlanTier, Record<UsageMetric, number>> = {
     free: {
-        generate: 10,
-        transcribe: 15,
-        send_email: 10,
+        generate: FREE_PLAN_GENERATE_LIMIT,
+        transcribe: FREE_PLAN_TRANSCRIBE_LIMIT,
+        send_email: FREE_PLAN_SEND_EMAIL_LIMIT,
     },
     starter: {
         generate: 80,
@@ -130,7 +136,7 @@ async function ensureProfileRow(supabase: SupabaseClient, userId: string): Promi
 async function loadPlanTier(supabase: SupabaseClient, userId: string): Promise<PlanTier> {
     const { data, error } = await supabase
         .from("profiles")
-        .select("plan_tier")
+        .select("plan_tier, stripe_subscription_status, referral_trial_ends_at, referral_bonus_ends_at")
         .eq("id", userId)
         .maybeSingle()
 
@@ -138,7 +144,7 @@ async function loadPlanTier(supabase: SupabaseClient, userId: string): Promise<P
         return "free"
     }
 
-    return toPlanTier(data?.plan_tier)
+    return toPlanTier(resolveEffectivePlanTier(data || {}))
 }
 
 async function getOrCreateUsageRow(

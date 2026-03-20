@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle, MessageSquare } from "lucide-react"
+import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle, MessageSquare, RefreshCw, Link2 } from "lucide-react"
 import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
 import { getEstimates, deleteEstimate, getProfile, updateEstimateStatus, updateEstimate, type LocalEstimate, type EstimateItem, type BusinessInfo } from "@/lib/estimates-storage"
@@ -18,6 +18,15 @@ import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
 import { useAuthGuard } from "@/lib/use-auth-guard"
 import { sendEstimateSms } from "@/lib/send-sms"
+import { formatPendingSyncSummary, summarizePendingSync } from "@/lib/offline-sync"
+import { getBillingSubscriptionStatus, type BillingSubscriptionStatusResponse } from "@/lib/pricing"
+import {
+    getQuickBooksStatus,
+    startQuickBooksConnect,
+    syncEstimateToQuickBooks,
+    type QuickBooksStatusResponse,
+} from "@/lib/quickbooks"
+import { hasPdfBrandingAccess, hasPdfTemplateAccess } from "@/lib/pdf-branding"
 
 type TabType = 'drafts' | 'sent' | 'paid'
 
@@ -42,7 +51,22 @@ export default function HistoryPage() {
     const [smsEstimate, setSmsEstimate] = useState<LocalEstimate | null>(null)
     const [businessProfile, setBusinessProfile] = useState<BusinessInfo | undefined>(undefined)
     const [downloadingEstimateId, setDownloadingEstimateId] = useState<string | null>(null)
+    const [subscription, setSubscription] = useState<BillingSubscriptionStatusResponse | null>(null)
+    const [quickBooksStatus, setQuickBooksStatus] = useState<QuickBooksStatusResponse | null>(null)
+    const [quickBooksLoading, setQuickBooksLoading] = useState(true)
+    const [quickBooksConnecting, setQuickBooksConnecting] = useState(false)
+    const [syncingQuickBooksEstimateId, setSyncingQuickBooksEstimateId] = useState<string | null>(null)
     const paymentStatusSyncInFlightRef = useRef(false)
+
+    const loadQuickBooks = useCallback(async () => {
+        setQuickBooksLoading(true)
+        try {
+            const status = await getQuickBooksStatus()
+            setQuickBooksStatus(status)
+        } finally {
+            setQuickBooksLoading(false)
+        }
+    }, [])
 
     const syncSentEstimatePaymentStatuses = useCallback(async (sourceEstimates?: LocalEstimate[]) => {
         if (paymentStatusSyncInFlightRef.current) return
@@ -111,8 +135,15 @@ export default function HistoryPage() {
     }, [])
 
     const loadData = useCallback(async () => {
-        const localEstimates = await getEstimates()
+        const [localEstimates, status, subscriptionStatus] = await Promise.all([
+            getEstimates(),
+            getQuickBooksStatus(),
+            getBillingSubscriptionStatus(),
+        ])
         setEstimates(localEstimates)
+        setQuickBooksStatus(status)
+        setSubscription(subscriptionStatus)
+        setQuickBooksLoading(false)
         const profile = getProfile()
         if (profile) setBusinessProfile(profile)
         setLoading(false)
@@ -159,6 +190,7 @@ export default function HistoryPage() {
     const draftsCount = estimates.filter(e => e.status === 'draft' || !e.status).length
     const sentCount = estimates.filter(e => e.status === 'sent').length
     const paidCount = estimates.filter(e => e.status === 'paid').length
+    const pendingSyncSummary = summarizePendingSync(estimates, 0)
 
     // Count items with price TBD
     const getPriceTBDCount = (estimate: LocalEstimate): number => {
@@ -238,6 +270,83 @@ export default function HistoryPage() {
         toast("📊 Exported to CSV!", "success")
     }
 
+    const handleConnectQuickBooks = useCallback(async () => {
+        if (quickBooksStatus && !quickBooksStatus.eligible) {
+            toast("🔒 QuickBooks sync requires Pro or Team.", "info")
+            return
+        }
+
+        setQuickBooksConnecting(true)
+        try {
+            const result = await startQuickBooksConnect("/history")
+            if (!result?.url) {
+                toast("❌ Failed to start QuickBooks connect.", "error")
+                return
+            }
+
+            window.location.href = result.url
+        } finally {
+            setQuickBooksConnecting(false)
+        }
+    }, [quickBooksStatus])
+
+    const handleSyncQuickBooks = useCallback(async (estimate: LocalEstimate) => {
+        if (!quickBooksStatus?.connected) {
+            toast("🔗 Connect QuickBooks first.", "info")
+            return
+        }
+
+        if (!estimate.clientName?.trim() || !estimate.items?.length) {
+            toast("⚠️ Add a client name and at least one line item first.", "error")
+            return
+        }
+
+        setSyncingQuickBooksEstimateId(estimate.id)
+
+        try {
+            const response = await syncEstimateToQuickBooks({
+                estimateId: estimate.id,
+                estimateNumber: estimate.estimateNumber,
+                clientName: estimate.clientName,
+                clientAddress: estimate.clientAddress,
+                summaryNote: estimate.summary_note,
+                taxAmount: estimate.taxAmount,
+                totalAmount: estimate.totalAmount,
+                type: estimate.type === "invoice" ? "invoice" : "estimate",
+                items: estimate.items.map((item) => ({
+                    id: item.id,
+                    description: item.description,
+                    quantity: item.quantity,
+                    unit_price: item.unit_price,
+                    total: item.total,
+                    category: item.category,
+                    unit: item.unit,
+                })),
+            })
+
+            if (!response) {
+                toast("❌ Failed to sync to QuickBooks.", "error")
+                return
+            }
+
+            await updateEstimate(estimate.id, {
+                quickbooksInvoiceId: response.invoiceId,
+                quickbooksCustomerId: response.customerId,
+                quickbooksDocNumber: response.docNumber,
+                quickbooksInvoiceStatus: response.status,
+                quickbooksSyncedAt: response.syncedAt,
+            })
+
+            const refreshed = await getEstimates()
+            setEstimates(refreshed)
+            await loadQuickBooks()
+
+            toast(response.deduped ? "🔁 QuickBooks invoice already linked." : "✅ Synced to QuickBooks.", "success")
+        } finally {
+            setSyncingQuickBooksEstimateId(null)
+        }
+    }, [loadQuickBooks, quickBooksStatus])
+
     const handleConfirmDelete = async () => {
         if (estimateToDelete) {
             await deleteEstimate(estimateToDelete)
@@ -277,6 +386,14 @@ export default function HistoryPage() {
 
     const createEstimatePdfDocument = useCallback(async (estimate: LocalEstimate) => {
         const { EstimatePDF } = await import("@/components/estimate-pdf")
+        const pdfBusinessProfile = businessProfile
+            ? {
+                ...businessProfile,
+                logo_url: hasPdfBrandingAccess(subscription?.planTier) ? businessProfile.logo_url : "",
+                estimate_template_url: hasPdfTemplateAccess(subscription?.planTier) ? businessProfile.estimate_template_url : "",
+            }
+            : undefined
+
         return (
             <EstimatePDF
                 items={estimate.items || []}
@@ -287,14 +404,14 @@ export default function HistoryPage() {
                     name: estimate.clientName,
                     address: estimate.clientAddress
                 }}
-                business={businessProfile}
-                templateUrl={businessProfile?.estimate_template_url}
+                business={pdfBusinessProfile}
+                templateUrl={pdfBusinessProfile?.estimate_template_url}
                 photos={estimate.attachments?.photos}
                 type={estimate.type}
                 paymentLink={estimate.paymentLink || businessProfile?.payment_link}
             />
         )
-    }, [businessProfile])
+    }, [businessProfile, subscription?.planTier])
 
     const handleDownloadPdf = useCallback(async (estimate: LocalEstimate) => {
         setDownloadingEstimateId(estimate.id)
@@ -330,6 +447,118 @@ export default function HistoryPage() {
                     📊 Export CSV
                 </Button>
             </div>
+
+            {pendingSyncSummary.unsyncedEstimateCount > 0 && (
+                <Card className="border-amber-300 bg-amber-50/70">
+                    <CardContent className="flex items-center justify-between gap-3 py-4">
+                        <div>
+                            <p className="text-sm font-semibold text-amber-900">Local changes waiting to sync</p>
+                            <p className="text-sm text-amber-800">
+                                {formatPendingSyncSummary(pendingSyncSummary)}
+                            </p>
+                        </div>
+                        <Badge variant="outline" className="border-amber-300 bg-white text-amber-900">
+                            {pendingSyncSummary.unsyncedEstimateCount} queued
+                        </Badge>
+                    </CardContent>
+                </Card>
+            )}
+
+            <Card className="border-primary/20">
+                <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between gap-3">
+                        <div>
+                            <CardTitle className="text-lg flex items-center gap-2">
+                                <Link2 className="h-5 w-5" />
+                                QuickBooks Sync
+                            </CardTitle>
+                            <p className="text-sm text-muted-foreground">
+                                Push won estimates into QuickBooks Online. CSV export stays available as a fallback.
+                            </p>
+                        </div>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => void loadQuickBooks()}
+                            disabled={quickBooksLoading}
+                        >
+                            {quickBooksLoading ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <RefreshCw className="h-4 w-4" />
+                            )}
+                        </Button>
+                    </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {quickBooksLoading ? (
+                        <div className="rounded-lg border p-4 text-sm text-muted-foreground flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Loading QuickBooks status...
+                        </div>
+                    ) : !quickBooksStatus ? (
+                        <div className="rounded-lg border p-4 text-sm text-muted-foreground">
+                            QuickBooks status is unavailable right now.
+                        </div>
+                    ) : (
+                        <>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="rounded-lg border p-3">
+                                    <p className="text-xs text-muted-foreground">Plan access</p>
+                                    <p className="text-2xl font-semibold capitalize">
+                                        {quickBooksStatus.eligible ? quickBooksStatus.planTier : "Upgrade"}
+                                    </p>
+                                </div>
+                                <div className="rounded-lg border p-3">
+                                    <p className="text-xs text-muted-foreground">Synced invoices</p>
+                                    <p className="text-2xl font-semibold">{quickBooksStatus.syncStats.syncedInvoices}</p>
+                                </div>
+                            </div>
+
+                            <div className="rounded-lg border p-3 space-y-2">
+                                <p className="text-sm font-medium">
+                                    {quickBooksStatus.connected ? "Connected to QuickBooks Online" : "Not connected"}
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                    {quickBooksStatus.connected
+                                        ? `Company ID ${quickBooksStatus.realmId || "linked"}.`
+                                        : quickBooksStatus.eligible
+                                            ? "Connect your QuickBooks company to create invoices directly from SnapQuote."
+                                            : "Upgrade to Pro or Team to unlock direct QuickBooks invoice sync."}
+                                </p>
+                                {quickBooksStatus.syncStats.latestSyncedAt && (
+                                    <p className="text-xs text-muted-foreground">
+                                        Last synced {new Date(quickBooksStatus.syncStats.latestSyncedAt).toLocaleString()}
+                                    </p>
+                                )}
+                                {quickBooksStatus.reconnectRequired && (
+                                    <p className="text-xs text-amber-700">
+                                        Your QuickBooks token needs a fresh reconnect.
+                                    </p>
+                                )}
+                                <div className="flex flex-wrap gap-2">
+                                    <Button
+                                        type="button"
+                                        onClick={() => void handleConnectQuickBooks()}
+                                        disabled={quickBooksConnecting || !quickBooksStatus.eligible}
+                                    >
+                                        {quickBooksConnecting ? (
+                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        ) : (
+                                            <Link2 className="h-4 w-4 mr-2" />
+                                        )}
+                                        {quickBooksStatus.connected ? "Reconnect QuickBooks" : "Connect QuickBooks"}
+                                    </Button>
+                                    <Button variant="outline" type="button" onClick={handleExportCSV}>
+                                        📊 Export CSV
+                                    </Button>
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </CardContent>
+            </Card>
 
             {/* Tab Navigation */}
             <div className="flex p-1 bg-muted rounded-lg">
@@ -422,6 +651,16 @@ export default function HistoryPage() {
                                             <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300">
                                                 <AlertCircle className="h-3 w-3 mr-1" />
                                                 {priceTBDCount} TBD
+                                            </Badge>
+                                        )}
+                                        {estimate.synced === false && (
+                                            <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300">
+                                                Pending sync
+                                            </Badge>
+                                        )}
+                                        {estimate.quickbooksInvoiceId && (
+                                            <Badge variant="outline" className="bg-sky-50 text-sky-800 border-sky-300">
+                                                QB {estimate.quickbooksInvoiceStatus || "linked"}
                                             </Badge>
                                         )}
                                         <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${estimate.status === 'paid'
@@ -582,6 +821,19 @@ export default function HistoryPage() {
                                             SMS
                                         </Button>
                                     )}
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => void handleSyncQuickBooks(estimate)}
+                                        disabled={!quickBooksStatus?.connected || syncingQuickBooksEstimateId === estimate.id}
+                                    >
+                                        {syncingQuickBooksEstimateId === estimate.id ? (
+                                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                        ) : (
+                                            <Link2 className="h-3 w-3 mr-1" />
+                                        )}
+                                        {estimate.quickbooksInvoiceId ? "Refresh QB" : "QuickBooks"}
+                                    </Button>
                                     <Button
                                         variant="destructive"
                                         size="sm"

@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Mic, FileText, ArrowRight, Clock, Send, DollarSign, Sparkles } from "lucide-react"
+import { Mic, FileText, ArrowRight, Clock, Send, DollarSign, Sparkles, Languages, Signal, ShieldCheck } from "lucide-react"
 import dynamic from "next/dynamic"
 
 const OnboardingModal = dynamic(() => import("@/components/onboarding-modal").then(mod => mod.OnboardingModal), { ssr: false })
@@ -21,6 +21,7 @@ const FunnelMetricsCard = dynamic(() => import("@/components/funnel-metrics-card
 import { trackReferralEvent } from "@/lib/referrals"
 const UsagePlanCard = dynamic(() => import("@/components/usage-plan-card").then(mod => mod.UsagePlanCard), { ssr: false })
 import { supabase } from "@/lib/supabase"
+import { FREE_PLAN_MARKETING_QUOTE_LIMIT } from "@/lib/free-tier"
 
 const REFERRAL_TOKEN_PATTERN = /^[a-z0-9]{8,32}$/
 const CONNECT_PROMPT_KEY_PREFIX = "snapquote_connect_prompt_seen"
@@ -224,7 +225,10 @@ export default function Home() {
       />
 
       {/* Main Container */}
-      <div className="flex flex-col min-h-screen pb-32 px-4 pt-6 space-y-6">
+      <div className="app-shell flex flex-col min-h-screen pb-32 px-4 pt-6 space-y-6">
+        <div className="ambient-orb left-[-80px] top-10 h-44 w-44 bg-sky-500/20" />
+        <div className="ambient-orb right-[-40px] top-28 h-36 w-36 bg-amber-500/15" />
+        <div className="ambient-orb bottom-28 left-1/2 h-48 w-48 -translate-x-1/2 bg-cyan-400/10" />
 
         {/* If Setup Wizard is active, hide the rest of the dashboard */}
         {showSetupWizard && (
@@ -271,39 +275,68 @@ export default function Home() {
             )}
 
             {/* Hero Section */}
-            <header className="flex flex-col items-center text-center space-y-4 pt-2">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-medium tracking-wide uppercase">
-                <Sparkles className="w-3 h-3" />
-                <span>Field Quote Workflow</span>
+            <header className="premium-panel mesh-border mx-auto flex w-full max-w-sm flex-col items-center overflow-hidden px-5 pb-6 pt-5 text-center">
+              <div className="mb-4 flex w-full items-center justify-between gap-3 text-[10px] uppercase tracking-[0.22em] text-slate-400">
+                <span className="section-eyebrow">
+                  <Sparkles className="w-3 h-3" />
+                  Field Quote Workflow
+                </span>
+                <span className="rounded-full border border-white/10 px-2 py-1">AI Estimator</span>
               </div>
 
-              <h1 className="text-3xl font-bold tracking-tight text-white leading-tight">
-                {heroTitle}
-              </h1>
-              <p className="max-w-sm text-sm text-gray-400 leading-relaxed">
-                {heroSubtitle}
-              </p>
+              <div className="space-y-4">
+                <h1 className="text-balance text-[2rem] font-semibold leading-[1.05] tracking-[-0.04em] text-white sm:text-[2.4rem]">
+                  {heroTitle}
+                </h1>
+                <p className="mx-auto max-w-[30rem] text-sm leading-6 text-slate-300">
+                  {heroSubtitle}
+                </p>
+              </div>
 
-              {/* Premium Voice Demo Card */}
-              <div className="w-full max-w-sm glass-card p-4 text-left relative overflow-hidden group">
-                <div className="absolute top-0 left-0 w-1 h-full bg-blue-500/50" />
-                <div className="flex gap-3">
-                  <div className="p-2 h-fit bg-blue-500/20 rounded-full shrink-0">
-                    <Mic className="w-4 h-4 text-blue-400 animate-pulse" />
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-xs text-blue-300 font-medium uppercase tracking-wider">Listening...</p>
-                    <p className="text-sm text-gray-300 leading-relaxed">
-                      <TypewriterText text="Replace damaged trim, reset fixture, patch access, haul away debris..." />
-                    </p>
-                  </div>
+              <div className="mt-5 grid w-full grid-cols-3 gap-2 text-left">
+                <div className="premium-card px-3 py-3">
+                  <Signal className="mb-2 h-4 w-4 text-sky-300" />
+                  <p className="text-[11px] font-medium text-white">Weak signal</p>
+                  <p className="mt-1 text-[11px] leading-4 text-slate-400">Draft from the truck, basement, or crawlspace.</p>
                 </div>
+                <div className="premium-card px-3 py-3">
+                  <Languages className="mb-2 h-4 w-4 text-cyan-300" />
+                  <p className="text-[11px] font-medium text-white">Clean English</p>
+                  <p className="mt-1 text-[11px] leading-4 text-slate-400">Normalize rough field talk into a customer-ready draft.</p>
+                </div>
+                <div className="premium-card px-3 py-3">
+                  <ShieldCheck className="mb-2 h-4 w-4 text-amber-300" />
+                  <p className="text-[11px] font-medium text-white">Send on site</p>
+                  <p className="mt-1 text-[11px] leading-4 text-slate-400">Review, send, and collect before heading out.</p>
+                </div>
+              </div>
+
+              <div className="premium-card mt-5 w-full overflow-hidden p-4 text-left relative group">
+                <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-sky-300/70 to-transparent" />
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-400/15 text-sky-200">
+                      <Mic className="w-4 h-4 animate-pulse" />
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-200">Live field capture</p>
+                      <p className="text-[11px] text-slate-400">Voice note to polished scope draft</p>
+                    </div>
+                  </div>
+                  <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[10px] font-medium text-emerald-200">
+                    Listening
+                  </span>
+                </div>
+
+                <p className="rounded-2xl border border-white/8 bg-slate-950/60 px-3 py-3 text-sm leading-6 text-slate-200">
+                  <TypewriterText text="Replace damaged trim, reset fixture, patch access, haul away debris..." />
+                </p>
               </div>
             </header>
 
             {isSignedIn ? (
               <Link href="/new-estimate" className="w-full max-w-sm mx-auto block">
-                <Button size="lg" className="w-full h-16 text-lg font-bold rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 shadow-[0_0_30px_-5px_rgba(37,99,235,0.4)] border border-blue-400/20 transition-all hover:scale-[1.02] active:scale-[0.98]">
+                <Button size="lg" className="w-full h-16 rounded-[24px] border border-sky-300/20 bg-gradient-to-r from-sky-500 via-cyan-400 to-amber-400 text-lg font-bold text-slate-950 shadow-[0_18px_50px_-18px_rgba(56,189,248,0.75)] transition-all hover:scale-[1.02] hover:shadow-[0_20px_60px_-18px_rgba(56,189,248,0.95)] active:scale-[0.98]">
                   <Mic className="mr-2 h-6 w-6" />
                   Create Field Quote
                 </Button>
@@ -314,14 +347,14 @@ export default function Home() {
             ) : (
               <div className="w-full max-w-sm mx-auto space-y-3">
                 <Link href="/landing" className="block" data-testid="home-primary-marketing-cta">
-                  <Button size="lg" className="w-full h-16 text-lg font-bold rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 shadow-[0_0_30px_-5px_rgba(37,99,235,0.4)] border border-blue-400/20 transition-all hover:scale-[1.02] active:scale-[0.98]">
+                  <Button size="lg" className="w-full h-16 rounded-[24px] border border-sky-300/20 bg-gradient-to-r from-sky-500 via-cyan-400 to-amber-400 text-lg font-bold text-slate-950 shadow-[0_18px_50px_-18px_rgba(56,189,248,0.75)] transition-all hover:scale-[1.02] hover:shadow-[0_20px_60px_-18px_rgba(56,189,248,0.95)] active:scale-[0.98]">
                     See the Field Workflow
                     <ArrowRight className="ml-2 h-5 w-5" />
                   </Button>
                 </Link>
                 <Link href="/new-estimate" className="block" data-testid="home-try-free-cta">
-                  <Button size="lg" variant="outline" className="w-full h-14 rounded-2xl border-white/15 bg-white/5 hover:bg-white/10">
-                    Try 10 Free Field Quotes
+                  <Button size="lg" variant="outline" className="w-full h-14 rounded-[22px] border-white/15 bg-white/5 text-white hover:bg-white/10">
+                    Try {FREE_PLAN_MARKETING_QUOTE_LIMIT} Free Field Quotes
                   </Button>
                 </Link>
                 <p className="text-center text-xs text-muted-foreground">
@@ -340,42 +373,42 @@ export default function Home() {
 
             {!isSignedIn && (
               <div className="grid gap-3 max-w-sm mx-auto" data-testid="home-signed-out-workflow">
-                <div className="glass-card p-4 flex gap-3 items-start">
-                  <div className="p-2 rounded-full bg-blue-500/15 border border-blue-500/20">
-                    <Mic className="h-4 w-4 text-blue-300" />
+                <div className="premium-card premium-card-hover p-4 flex gap-3 items-start">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-300/20 bg-sky-400/15">
+                    <Mic className="h-4 w-4 text-sky-200" />
                   </div>
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-white">Speak the scope once</p>
-                    <p className="text-xs text-gray-400">Capture rough field notes while the job is still fresh.</p>
+                    <p className="text-xs leading-5 text-slate-400">Capture rough field notes while the job is still fresh and before you lose the job details.</p>
                   </div>
                 </div>
-                <div className="glass-card p-4 flex gap-3 items-start">
-                  <div className="p-2 rounded-full bg-blue-500/15 border border-blue-500/20">
-                    <FileText className="h-4 w-4 text-blue-300" />
+                <div className="premium-card premium-card-hover p-4 flex gap-3 items-start">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/15">
+                    <FileText className="h-4 w-4 text-cyan-200" />
                   </div>
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-white">Review a clean draft</p>
-                    <p className="text-xs text-gray-400">Turn rough or broken English into customer-ready wording.</p>
+                    <p className="text-xs leading-5 text-slate-400">Turn rough or broken English into customer-ready wording with less cleanup after hours.</p>
                   </div>
                 </div>
-                <div className="glass-card p-4 flex gap-3 items-start">
-                  <div className="p-2 rounded-full bg-blue-500/15 border border-blue-500/20">
-                    <DollarSign className="h-4 w-4 text-blue-300" />
+                <div className="premium-card premium-card-hover p-4 flex gap-3 items-start">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-300/20 bg-amber-400/15">
+                    <DollarSign className="h-4 w-4 text-amber-200" />
                   </div>
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-white">Send before you leave</p>
-                    <p className="text-xs text-gray-400">Save, send, and collect payment without doing quote work after dinner.</p>
+                    <p className="text-xs leading-5 text-slate-400">Save, send, and collect payment without doing quote work after dinner.</p>
                   </div>
                 </div>
               </div>
             )}
 
             {!isSignedIn && (
-              <div className="glass-card max-w-sm mx-auto p-4 space-y-3">
+              <div className="premium-card max-w-sm mx-auto p-4 space-y-3">
                 <p className="text-[11px] font-medium uppercase tracking-wider text-blue-300">
                   Best fit
                 </p>
-                <div className="space-y-2 text-sm text-gray-300">
+                <div className="space-y-2 text-sm text-slate-300">
                   <p>Owner-operators quoting from the truck</p>
                   <p>Weak-signal basements, crawlspaces, and remodel jobs</p>
                   <p>Teams that need cleaner customer-facing wording fast</p>

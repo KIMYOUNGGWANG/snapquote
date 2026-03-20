@@ -3,6 +3,7 @@ import { Resend } from "resend"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
+import { resolveEffectivePlanTier } from "@/lib/server/effective-plan"
 
 const PRO_TIERS = new Set(["pro", "team"])
 const RECOVERY_LOOKBACK_MS = 48 * 60 * 60 * 1000
@@ -137,7 +138,7 @@ async function loadPlanTier(
 ): Promise<{ planTier: string; error: string | null }> {
     const { data, error } = await supabase
         .from("profiles")
-        .select("plan_tier")
+        .select("plan_tier, stripe_subscription_status, referral_trial_ends_at, referral_bonus_ends_at")
         .eq("id", userId)
         .maybeSingle()
 
@@ -149,7 +150,7 @@ async function loadPlanTier(
     }
 
     return {
-        planTier: asTrimmedString(data?.plan_tier, 24).toLowerCase() || "free",
+        planTier: resolveEffectivePlanTier(data || {}),
         error: null,
     }
 }

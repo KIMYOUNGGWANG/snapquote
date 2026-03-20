@@ -20,6 +20,7 @@ import {
 } from "@/lib/pricing"
 import { toast } from "@/components/toast"
 import { supabase } from "@/lib/supabase"
+import { FREE_PLAN_MARKETING_QUOTE_LIMIT } from "@/lib/free-tier"
 
 const PLAN_OPTIONS: Array<{
     tier: BillingPaidPlanTier
@@ -37,6 +38,7 @@ const PLAN_OPTIONS: Array<{
                 "Up to 80 field estimates per month",
                 "60 transcription minutes for multilingual on-site scope notes",
                 "60 sent estimate emails per month",
+                "Branded PDF header with your logo and payment link",
                 "Spanish/Korean voice capture plus offline quote drafting",
             ],
         },
@@ -49,6 +51,8 @@ const PLAN_OPTIONS: Array<{
                 "Up to 250 estimates per month",
                 "180 transcription minutes for service-call volume",
                 "200 sent estimate emails per month",
+                "Custom full-page PDF background template",
+                "QuickBooks sync and photo estimate workflow",
                 "Receipt scan, English quote cleanup, and better fit for higher-ticket jobs",
             ],
         },
@@ -60,6 +64,7 @@ const PLAN_OPTIONS: Array<{
             includes: [
                 "Up to 800 estimates per month",
                 "Shared English quote standards across techs",
+                "Shared premium PDF branding workflow",
                 "Automation included",
                 "Built for higher-volume quoting and follow-up",
             ],
@@ -216,51 +221,74 @@ export default function PricingPage() {
     }
 
     return (
-        <div className="space-y-4">
-            <Card className="border-primary/20">
+        <div className="app-shell space-y-4 px-4 pb-32 pt-6">
+            <div className="ambient-orb left-[-80px] top-8 h-40 w-40 bg-sky-500/20" />
+            <div className="ambient-orb right-[-40px] top-24 h-36 w-36 bg-amber-500/15" />
+
+            <Card className="premium-panel mesh-border mx-auto w-full max-w-sm overflow-hidden border-primary/20">
                 <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
+                    <div className="section-eyebrow w-fit">
                         <Sparkles className="h-4 w-4" />
                         Pricing for trade owner-operators
+                    </div>
+                    <CardTitle className="text-[1.85rem] font-semibold leading-[1.05] tracking-[-0.04em] text-white">
+                        Pick the quoting pace your crew can actually keep up with
                     </CardTitle>
+                    <p className="text-sm leading-6 text-slate-300">
+                        SnapQuote is for multilingual field capture, cleaner English estimates, and faster follow-through from the truck.
+                    </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     {loading && (
-                        <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground flex items-center gap-2">
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-muted-foreground flex items-center gap-2">
                             <Loader2 className="h-4 w-4 animate-spin" />
                             Checking live pricing and billing status...
                         </div>
                     )}
 
-                    <div className="rounded-lg border bg-primary/5 p-3 text-sm text-muted-foreground">
+                    <div className="rounded-[24px] border border-sky-300/10 bg-gradient-to-r from-sky-500/12 via-cyan-400/10 to-amber-400/10 p-4 text-sm leading-6 text-slate-300">
                         Pay for turning Spanish or Korean field talk into clean English quotes, not for bloated office software you barely open.
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 gap-3">
                         {PLAN_OPTIONS.map((plan) => (
-                            <Button
+                            <button
                                 key={plan.tier}
                                 type="button"
-                                variant={selectedPlanTier === plan.tier ? "default" : "outline"}
                                 onClick={() => setSelectedPlanTier(plan.tier)}
                                 disabled={checkoutLoading || portalLoading}
-                                className="w-full"
+                                className={`premium-card premium-card-hover w-full p-4 text-left ${selectedPlanTier === plan.tier
+                                    ? "border-sky-300/30 bg-sky-400/10 shadow-[0_20px_60px_-36px_rgba(56,189,248,0.8)]"
+                                    : "border-white/10 bg-white/[0.045]"
+                                    }`}
                             >
-                                {plan.label}
-                            </Button>
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <p className="text-base font-semibold text-white">{plan.label}</p>
+                                        <p className="mt-1 text-sm text-slate-300">{plan.priceLabel}</p>
+                                    </div>
+                                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${selectedPlanTier === plan.tier
+                                        ? "bg-sky-300/15 text-sky-100"
+                                        : "bg-white/8 text-slate-300"
+                                        }`}>
+                                        {plan.tier}
+                                    </span>
+                                </div>
+                                <p className="mt-3 text-xs leading-5 text-slate-400">{plan.bestFor}</p>
+                            </button>
                         ))}
                     </div>
 
-                    <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+                    <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-4 space-y-3">
                         <div className="flex items-center justify-between gap-3">
                             <div>
-                                <p className="text-sm font-medium">Billing cadence</p>
+                                <p className="text-sm font-medium text-white">Billing cadence</p>
                                 <p className="text-xs text-muted-foreground">
                                     Use annual billing when the plan is configured to reduce churn and push self-serve upgrades through Stripe Checkout.
                                 </p>
                             </div>
                             {annualEnabled ? (
-                                <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-700">
+                                <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-200">
                                     Save up to {annualDiscountPct}%
                                 </span>
                             ) : null}
@@ -272,7 +300,7 @@ export default function PricingPage() {
                                 variant={billingInterval === "monthly" ? "default" : "outline"}
                                 onClick={() => setBillingInterval("monthly")}
                                 disabled={checkoutLoading || portalLoading}
-                                className="w-full"
+                                className="w-full rounded-2xl"
                             >
                                 Monthly
                             </Button>
@@ -281,7 +309,7 @@ export default function PricingPage() {
                                 variant={billingInterval === "annual" ? "default" : "outline"}
                                 onClick={() => setBillingInterval("annual")}
                                 disabled={checkoutLoading || portalLoading || !annualEnabled}
-                                className="w-full"
+                                className="w-full rounded-2xl"
                             >
                                 Annual
                             </Button>
@@ -296,15 +324,15 @@ export default function PricingPage() {
                         </p>
                     </div>
 
-                    <div className="space-y-1">
+                    <div className="rounded-[24px] border border-white/10 bg-slate-950/45 p-4 space-y-2">
                         <p className="text-sm text-muted-foreground">Selected plan</p>
-                        <p className="text-2xl font-semibold">
+                        <p className="text-3xl font-semibold tracking-[-0.04em] text-white">
                             {selectedPlan.priceLabel}
                         </p>
                         <p className="text-xs text-muted-foreground">
                             Tier: <span className="font-medium uppercase">{selectedPlan.tier}</span>
                         </p>
-                        <p className="text-sm text-foreground">
+                        <p className="text-sm leading-6 text-slate-200">
                             {selectedPlan.bestFor}
                         </p>
                         <p className="text-xs text-muted-foreground">
@@ -329,7 +357,7 @@ export default function PricingPage() {
                                     </p>
                                 )}
                                 {subscription.cancelAtPeriodEnd && (
-                                    <p className="text-amber-700">
+                                    <p className="text-amber-300">
                                         Cancel at period end is enabled. Use the billing portal to resume or change plans.
                                     </p>
                                 )}
@@ -338,7 +366,7 @@ export default function PricingPage() {
                     </div>
 
                     {usageSnapshot && (
-                        <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+                        <div className="rounded-[24px] border border-white/10 bg-white/[0.045] p-4 space-y-3">
                             <div className="flex items-center justify-between gap-3">
                                 <div>
                                     <p className="text-sm font-medium">Live monthly usage</p>
@@ -366,7 +394,7 @@ export default function PricingPage() {
                                                 <span>{row.label}</span>
                                                 <span>{row.used}/{row.limit}</span>
                                             </div>
-                                            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                                            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
                                                 <div className={`h-full transition-all ${color}`} style={{ width: `${width}%` }} />
                                             </div>
                                         </div>
@@ -376,14 +404,14 @@ export default function PricingPage() {
 
                             {usageSnapshot.planTier === "free" && (
                                 <p className="text-xs text-muted-foreground">
-                                    You have {usageSnapshot.remaining.generate} free quote drafts left this month. This page now surfaces live usage so free-tier changes can be measured before rollout.
+                                    You have {usageSnapshot.remaining.generate} free quote drafts left this month out of {FREE_PLAN_MARKETING_QUOTE_LIMIT}. Live usage here makes the upgrade point explicit before you hit the cap.
                                 </p>
                             )}
                         </div>
                     )}
 
-                    <div className="rounded-lg border bg-muted/30 p-3 text-sm">
-                        <p className="font-medium mb-2">What you get</p>
+                    <div className="rounded-[24px] border border-white/10 bg-white/[0.045] p-4 text-sm">
+                        <p className="mb-2 font-medium text-white">What you get</p>
                         <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
                             {selectedPlan.includes.map((include) => (
                                 <li key={include}>{include}</li>
@@ -391,11 +419,29 @@ export default function PricingPage() {
                         </ul>
                     </div>
 
-                    <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    <div className="rounded-[24px] border border-white/10 bg-white/[0.045] p-4 space-y-3 text-sm">
+                        <p className="font-medium text-white">PDF Branding by Plan</p>
+                        <div className="space-y-2 text-muted-foreground">
+                            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                                <p className="font-medium text-white">Free</p>
+                                <p className="text-xs leading-5">Standard SnapQuote PDF layout and email watermarking.</p>
+                            </div>
+                            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                                <p className="font-medium text-white">Starter</p>
+                                <p className="text-xs leading-5">Unlock logo branding on the PDF header so estimates look like your business, not a generic tool.</p>
+                            </div>
+                            <div className="rounded-2xl border border-sky-300/20 bg-sky-400/10 p-3">
+                                <p className="font-medium text-white">Pro and Team</p>
+                                <p className="text-xs leading-5">Upload a full-page branded estimate background for premium customer-facing PDFs.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="rounded-[24px] border border-white/10 bg-white/[0.035] p-4 text-xs leading-5 text-muted-foreground">
                         Best fit: repair calls, installs, replacements, change orders, and small projects where the job is explained one way on site and sent another way to the customer.
                     </div>
 
-                    <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    <div className="rounded-[24px] border border-white/10 bg-white/[0.035] p-4 text-xs leading-5 text-muted-foreground">
                         SnapQuote is not trying to replace dispatch, CRM, or accounting. It is for owner-operators and small crews who need a faster multilingual field-to-English quote workflow.
                     </div>
 
@@ -403,7 +449,7 @@ export default function PricingPage() {
                         <Button
                             onClick={handleUpgradeClick}
                             disabled={loading || checkoutLoading || isSubscribed || (billingInterval === "annual" && !annualEnabled)}
-                            className="w-full justify-between"
+                            className="h-12 w-full justify-between rounded-[22px] border border-sky-300/20 bg-gradient-to-r from-sky-500 via-cyan-400 to-amber-400 font-semibold text-slate-950 shadow-[0_18px_50px_-18px_rgba(56,189,248,0.75)]"
                         >
                             {loading
                                 ? "Loading live pricing..."
@@ -417,10 +463,10 @@ export default function PricingPage() {
                         <Button
                             asChild
                             variant="outline"
-                            className="w-full"
+                            className="h-12 w-full rounded-[22px] border-white/15 bg-white/5 text-white hover:bg-white/10"
                         >
                             <Link href="/new-estimate">
-                                Try 10 free English quote drafts first
+                                Try {FREE_PLAN_MARKETING_QUOTE_LIMIT} free English quote drafts first
                             </Link>
                         </Button>
                         {isAuthed && (
@@ -428,7 +474,7 @@ export default function PricingPage() {
                                 variant="outline"
                                 onClick={handleManageBillingClick}
                                 disabled={loading || portalLoading || !subscription?.customerId}
-                                className="w-full"
+                                className="h-12 w-full rounded-[22px] border-white/15 bg-white/5 text-white hover:bg-white/10"
                             >
                                 {portalLoading ? "Opening portal..." : "Manage billing in Stripe"}
                             </Button>

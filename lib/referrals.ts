@@ -7,6 +7,58 @@ interface ReferralTokenResponse {
     token: string
 }
 
+export interface ReferralStatusResponse {
+    ok: true
+    token: string
+    shareUrl: string
+    shareMessages: {
+        en: string
+        es: string
+        ko: string
+    }
+    metrics: {
+        visits: number
+        shareClicks: number
+        signupStarts: number
+        successfulClaims: number
+    }
+    rewards: {
+        activeReward:
+            | {
+                  kind: "referred_trial" | "referrer_bonus"
+                  planTier: "pro"
+                  endsAt: string
+              }
+            | null
+        pendingCreditMonths: number
+        totalCreditMonths: number
+    }
+    recentClaims: Array<{
+        claimId: string
+        createdAt: string
+        referrerRewardMode: "pro_trial" | "pending_credit" | "none"
+        referrerRewardEndsAt?: string
+        referredRewardEndsAt?: string
+    }>
+}
+
+export interface ReferralClaimResponse {
+    ok: true
+    claimed: boolean
+    deduped?: boolean
+    reason?: "self_referral" | "already_claimed" | "token_not_found"
+    referrerReward: {
+        mode: "pro_trial" | "pending_credit" | "none"
+        endsAt?: string
+        creditMonths?: number
+    }
+    referredReward: {
+        applied: boolean
+        planTier?: "pro"
+        endsAt?: string
+    }
+}
+
 function normalizeToken(value: unknown): string {
     if (typeof value !== "string") return ""
     return value.trim().toLowerCase()
@@ -79,5 +131,49 @@ export async function trackReferralEvent(input: {
         })
     } catch (error) {
         console.error("Failed to track referral event:", error)
+    }
+}
+
+export async function claimReferralToken(token: string, source = "app_auth"): Promise<ReferralClaimResponse | null> {
+    const normalizedToken = normalizeToken(token)
+    if (!TOKEN_PATTERN.test(normalizedToken)) return null
+
+    try {
+        const headers = await withAuthHeaders({ "content-type": "application/json" })
+        if (!headers.authorization) return null
+
+        const response = await fetch("/api/referrals/claim", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+                token: normalizedToken,
+                source,
+            }),
+        })
+
+        if (!response.ok) return null
+        return (await response.json()) as ReferralClaimResponse
+    } catch (error) {
+        console.error("Failed to claim referral token:", error)
+        return null
+    }
+}
+
+export async function getReferralStatus(): Promise<ReferralStatusResponse | null> {
+    try {
+        const headers = await withAuthHeaders()
+        if (!headers.authorization) return null
+
+        const response = await fetch("/api/referrals/status", {
+            method: "GET",
+            headers,
+            cache: "no-store",
+        })
+
+        if (!response.ok) return null
+        return (await response.json()) as ReferralStatusResponse
+    } catch (error) {
+        console.error("Failed to load referral status:", error)
+        return null
     }
 }

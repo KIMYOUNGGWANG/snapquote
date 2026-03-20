@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import { Loader2, Save, Building2, Upload, X, Plus, Pencil, Trash2, DollarSign, Link2, ExternalLink, RefreshCw } from "lucide-react"
+import { Loader2, Save, Building2, Upload, X, Plus, Pencil, Trash2, DollarSign, Link2, ExternalLink, RefreshCw, Sparkles, Lock, Users } from "lucide-react"
 import Image from "next/image"
 import { getProfile, saveProfile, clearAllEstimates, getStorageStats, type BusinessInfo } from "@/lib/estimates-storage"
 import { getPriceList, savePriceListItem, deletePriceListItem } from "@/lib/db"
@@ -19,6 +20,9 @@ import { saveEstimates } from "@/lib/estimates-storage"
 import { savePriceList } from "@/lib/db"
 import { withAuthHeaders } from "@/lib/auth-headers"
 import { useAuthGuard } from "@/lib/use-auth-guard"
+import { ReferralStatusCard } from "@/components/referral-status-card"
+import { getBillingSubscriptionStatus, type BillingSubscriptionStatusResponse } from "@/lib/pricing"
+import { hasPdfBrandingAccess, hasPdfTemplateAccess } from "@/lib/pdf-branding"
 
 type StripeConnectStatus = {
     connected: boolean
@@ -41,7 +45,9 @@ export default function ProfilePage() {
         license_number: "",
         tax_rate: 13,
         logo_url: "",
-        state_province: "ON"
+        state_province: "ON",
+        payment_link: "",
+        estimate_template_url: "",
     })
     const [uploading, setUploading] = useState(false)
     const [logoPreview, setLogoPreview] = useState<string | null>(null)
@@ -55,6 +61,7 @@ export default function ProfilePage() {
     const [stripeStatusLoading, setStripeStatusLoading] = useState(false)
     const [stripeConnecting, setStripeConnecting] = useState(false)
     const [stripeDashboardLoading, setStripeDashboardLoading] = useState(false)
+    const [subscription, setSubscription] = useState<BillingSubscriptionStatusResponse | null>(null)
 
     const loadStripeConnectStatus = useCallback(async () => {
         setStripeStatusLoading(true)
@@ -103,7 +110,7 @@ export default function ProfilePage() {
             if (session?.user) {
                 const { data: dbProfile, error: dbError } = await supabase
                     .from("profiles")
-                    .select("business_name, phone, email, address, license_number, tax_rate, logo_url, state_province, payment_link")
+                    .select("business_name, phone, email, address, license_number, tax_rate, logo_url, state_province, payment_link, estimate_template_url")
                     .eq("id", session.user.id)
                     .single()
 
@@ -117,7 +124,8 @@ export default function ProfilePage() {
                         tax_rate: dbProfile.tax_rate ?? 13,
                         logo_url: dbProfile.logo_url || "",
                         state_province: dbProfile.state_province || "ON",
-                        payment_link: dbProfile.payment_link || ""
+                        payment_link: dbProfile.payment_link || "",
+                        estimate_template_url: dbProfile.estimate_template_url || "",
                     }
                     setProfile(mappedProfile)
                     if (mappedProfile.logo_url) setLogoPreview(mappedProfile.logo_url)
@@ -136,6 +144,8 @@ export default function ProfilePage() {
             // Load price list
             const prices = await getPriceList()
             setPriceList(prices)
+            const subscriptionResult = await getBillingSubscriptionStatus()
+            setSubscription(subscriptionResult)
             // getStorageStats is now async
             const stats = await getStorageStats()
             setStorageStats(stats)
@@ -262,7 +272,8 @@ export default function ProfilePage() {
                         tax_rate: profile.tax_rate,
                         logo_url: profile.logo_url,
                         state_province: profile.state_province,
-                        payment_link: profile.payment_link
+                        payment_link: profile.payment_link,
+                        estimate_template_url: profile.estimate_template_url,
                     })
 
                 if (dbError) throw dbError
@@ -283,6 +294,11 @@ export default function ProfilePage() {
     }
 
     const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!canUsePdfBranding) {
+            toast("🔒 Upgrade to Starter or above to brand PDFs with your logo.", "info")
+            return
+        }
+
         const file = e.target.files?.[0]
         if (!file) return
 
@@ -330,7 +346,9 @@ export default function ProfilePage() {
                 license_number: "",
                 tax_rate: 13,
                 logo_url: "",
-                state_province: "ON"
+                state_province: "ON",
+                payment_link: "",
+                estimate_template_url: "",
             })
             setLogoPreview(null)
             toast("🗑️ All data cleared.", "success")
@@ -347,6 +365,10 @@ export default function ProfilePage() {
         )
     }
 
+    const currentPlanTier = subscription?.planTier || "free"
+    const canUsePdfBranding = hasPdfBrandingAccess(currentPlanTier)
+    const canUsePdfTemplate = hasPdfTemplateAccess(currentPlanTier)
+
     return (
         <div className="max-w-md mx-auto space-y-6 pb-20">
             <CardHeader className="px-0">
@@ -358,6 +380,65 @@ export default function ProfilePage() {
                     This information will appear on your estimates and PDFs.
                 </CardDescription>
             </CardHeader>
+
+            <Card className="border-primary/20">
+                <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between gap-3">
+                        <div>
+                            <CardTitle className="text-lg flex items-center gap-2">
+                                <Sparkles className="h-5 w-5" />
+                                PDF Branding Kit
+                            </CardTitle>
+                            <CardDescription>
+                                Make estimate PDFs look like your company, not generic software.
+                            </CardDescription>
+                        </div>
+                        <span className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-primary">
+                            {currentPlanTier}
+                        </span>
+                    </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                    <div className={`rounded-lg border p-3 ${canUsePdfBranding ? "border-emerald-300 bg-emerald-50/70" : "border-amber-300 bg-amber-50/70"}`}>
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <p className="text-sm font-semibold text-slate-900">Starter Branding</p>
+                                <p className="text-xs text-slate-700">
+                                    Add your company logo so the PDF header looks like your business.
+                                </p>
+                            </div>
+                            <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-700">
+                                {canUsePdfBranding ? "Unlocked" : "Starter+"}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div className={`rounded-lg border p-3 ${canUsePdfTemplate ? "border-sky-300 bg-sky-50/70" : "border-slate-200 bg-slate-50"}`}>
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <p className="text-sm font-semibold text-slate-900">Pro Template Background</p>
+                                <p className="text-xs text-slate-700">
+                                    Upload a full-page estimate background for a custom branded PDF layout.
+                                </p>
+                            </div>
+                            <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-700">
+                                {canUsePdfTemplate ? "Unlocked" : "Pro+"}
+                            </span>
+                        </div>
+                    </div>
+
+                    {!canUsePdfBranding && (
+                        <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-slate-700">
+                            Upgrade to Starter to unlock logo branding on PDFs, or Pro to unlock a full custom background template.
+                            <div className="mt-3">
+                                <Button asChild size="sm">
+                                    <Link href="/pricing">See PDF branding plans</Link>
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
 
             <Card>
                 <CardContent className="pt-6 space-y-4">
@@ -390,11 +471,13 @@ export default function ProfilePage() {
                                     type="file"
                                     accept="image/*"
                                     onChange={handleLogoUpload}
-                                    disabled={uploading}
+                                    disabled={uploading || !canUsePdfBranding}
                                     className="cursor-pointer"
                                 />
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    Upload your company logo (appears on PDF header)
+                                    {canUsePdfBranding
+                                        ? "Upload your company logo (appears on PDF header)"
+                                        : "Starter or above unlocks logo branding on estimate PDFs."}
                                 </p>
                             </div>
                         </div>
@@ -402,7 +485,7 @@ export default function ProfilePage() {
 
                     {/* Estimate Template Upload */}
                     <div className="space-y-2">
-                        <Label>견적서 양식 (Estimate Template)</Label>
+                        <Label>Estimate Template Background</Label>
                         <div className="flex items-center gap-4">
                             {profile.estimate_template_url ? (
                                 <div className="relative w-24 h-32 border-2 border-primary/50 rounded-lg overflow-hidden bg-muted">
@@ -429,7 +512,9 @@ export default function ProfilePage() {
                                 <Input
                                     type="file"
                                     accept="image/*"
+                                    disabled={!canUsePdfTemplate}
                                     onChange={(e) => {
+                                        if (!canUsePdfTemplate) return
                                         const file = e.target.files?.[0]
                                         if (!file) return
                                         const reader = new FileReader()
@@ -441,11 +526,19 @@ export default function ProfilePage() {
                                     className="cursor-pointer"
                                 />
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    📄 회사 견적서 양식을 업로드하세요 (PDF 배경으로 사용됩니다)
+                                    {canUsePdfTemplate
+                                        ? "Upload a company estimate background image. It will render behind every PDF page."
+                                        : "Upgrade to Pro or Team to upload a full-page branded PDF template."}
                                 </p>
                                 <p className="text-[10px] text-muted-foreground">
-                                    권장: A4 크기 (210×297mm) 이미지. 없으면 기본 양식이 사용됩니다.
+                                    Recommended: A4-sized image. Starter unlocks logo branding. Pro unlocks the full-page background.
                                 </p>
+                                {!canUsePdfTemplate && (
+                                    <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+                                        <Lock className="h-3 w-3" />
+                                        Pro branding kit required
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -669,6 +762,28 @@ export default function ProfilePage() {
                             )}
                         </>
                     )}
+                </CardContent>
+            </Card>
+
+            <ReferralStatusCard />
+
+            <Card className="border-primary/20">
+                <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                        <Users className="h-5 w-5" />
+                        Team Workspace
+                    </CardTitle>
+                    <CardDescription>
+                        Team plan members can invite crew, share synced estimates, and standardize quoting across the workspace.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                        Team workspace access is live. Invite members, manage crew roles, and review synced estimate activity from one shared feed.
+                    </p>
+                    <Button asChild variant="outline" className="w-full">
+                        <Link href="/team">Open Team Workspace</Link>
+                    </Button>
                 </CardContent>
             </Card>
 

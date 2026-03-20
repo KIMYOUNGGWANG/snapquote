@@ -4,6 +4,7 @@ import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { parseFormDataPayload } from "@/lib/server/request-validation"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
+import { resolveEffectivePlanTier } from "@/lib/server/effective-plan"
 import { parseReceiptFormSchema } from "@/lib/validation/api-schemas"
 
 const openai = new OpenAI({
@@ -213,7 +214,7 @@ async function resolvePlanTier(
 ): Promise<{ planTier: string; error: string | null }> {
     const { data, error } = await supabase
         .from("profiles")
-        .select("plan_tier")
+        .select("plan_tier, stripe_subscription_status, referral_trial_ends_at, referral_bonus_ends_at")
         .eq("id", userId)
         .maybeSingle()
 
@@ -225,7 +226,7 @@ async function resolvePlanTier(
     }
 
     return {
-        planTier: toTrimmedString(data?.plan_tier, 24).toLowerCase() || "free",
+        planTier: resolveEffectivePlanTier(data || {}),
         error: null,
     }
 }

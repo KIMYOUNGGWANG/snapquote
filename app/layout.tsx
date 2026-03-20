@@ -9,6 +9,7 @@ import { OfflineBanner } from "@/components/offline-banner";
 import { InstallPrompt } from "@/components/install-prompt";
 import { FeedbackModal } from "@/components/feedback-modal";
 import { ServiceWorkerRegister } from "@/components/service-worker-register";
+import { ReferralAttributionManager } from "@/components/referral-attribution-manager";
 import { Analytics } from "@vercel/analytics/next";
 import { cn } from "@/lib/utils";
 
@@ -76,6 +77,7 @@ export default function RootLayout({
           </main>
           <BottomNav />
           <AuthRedirectManager />
+          <ReferralAttributionManager />
           <SyncManager />
           <FeedbackModal />
           <Toaster />

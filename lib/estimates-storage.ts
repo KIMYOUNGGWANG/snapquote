@@ -1,4 +1,5 @@
-import { saveEstimateToDB, getEstimatesFromDB, initDB } from "./db"
+import { saveEstimateToDB, getEstimatesFromDB, initDB } from "./db.ts"
+import { emitOfflineQueueChanged } from "./offline-events.ts"
 
 // Unit types for professional estimating
 export type EstimateUnit = 'ea' | 'LS' | 'hr' | 'day' | 'SF' | 'LF' | '%' | 'other'
@@ -61,6 +62,11 @@ export interface LocalEstimate {
     paymentLinkType?: 'full' | 'deposit' | 'custom'
     paymentCompletedAt?: string
     lastPaymentSessionId?: string
+    quickbooksInvoiceId?: string
+    quickbooksCustomerId?: string
+    quickbooksDocNumber?: string
+    quickbooksInvoiceStatus?: 'open' | 'paid' | 'unknown'
+    quickbooksSyncedAt?: string
     attachments?: EstimateAttachments  // Original data preservation
     clientSignature?: string; // base64 image (NEW for Phase 6)
     signedAt?: string; // ISO date (NEW for Phase 6)
@@ -96,6 +102,7 @@ export async function saveEstimates(estimates: LocalEstimate[]): Promise<void> {
         })
     }
     await tx.done
+    emitOfflineQueueChanged()
 }
 
 export async function saveEstimate(estimate: LocalEstimate): Promise<void> {
@@ -119,7 +126,9 @@ export async function getEstimates(): Promise<LocalEstimate[]> {
 
 export async function deleteEstimate(id: string) {
     const db = await initDB()
-    return db.delete('estimates', id)
+    const result = await db.delete('estimates', id)
+    emitOfflineQueueChanged()
+    return result
 }
 
 // NEW: Get only draft estimates
@@ -159,6 +168,7 @@ export async function updateEstimateStatus(id: string, status: 'draft' | 'sent' 
         }
 
         await db.put('estimates', next)
+        emitOfflineQueueChanged()
     }
 }
 
@@ -174,6 +184,7 @@ export async function updateEstimate(id: string, updates: Partial<LocalEstimate>
             updatedAt: now,
             synced: updates.synced ?? false // Usually false if we update content
         })
+        emitOfflineQueueChanged()
     }
 }
 
@@ -239,6 +250,7 @@ export function clearAllEstimates() {
     localStorage.removeItem("snapquote_terms_accepted")
     // Also clear IndexedDB
     indexedDB.deleteDatabase('snapquote-db')
+    emitOfflineQueueChanged()
 }
 
 // Onboarding

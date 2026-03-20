@@ -44,8 +44,6 @@ Secondary segment:
 
 ## Current Planning Priorities
 
-1. Validate billing usage visibility and free-tier measurement
-2. Wire annual billing checkout, portal, and subscription status
-3. Verify offline sync and trust-critical runtime behavior
-4. Strengthen paid differentiators such as SMS, recovery, and receipt parsing
-5. Keep the runtime contract and task board aligned before `/develop`
+1. Keep the delivered free-tier, referral, onboarding lifecycle, offline workflow, photo-estimate, QuickBooks handoff, PDF branding packaging, and Team collaboration flows stable while watching conversion impact.
+2. Treat Team collaboration as shared workspace, shared estimate feed, composer handoff, edit-session lease, takeover, and direct shared save today; defer true live multi-user merge editing until it has a separate scoped contract.
+3. Keep delivered runtime work separate from still-open strategy and GTM backlog before `/develop`.

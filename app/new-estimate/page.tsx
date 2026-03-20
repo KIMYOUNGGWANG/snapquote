@@ -16,10 +16,24 @@ import type { BusinessInfo } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
-import type { BillingUsageSnapshot } from "@/lib/billing-usage"
+import {
+    getBillingSubscriptionStatus,
+    getBillingUsageSnapshot,
+    type BillingSubscriptionStatusResponse,
+    type BillingUsageSnapshot,
+} from "@/lib/pricing"
+import { hasPdfBrandingAccess, hasPdfTemplateAccess } from "@/lib/pdf-branding"
 import { copyReferralShareUrl, getReferralShareUrl } from "@/lib/referrals"
 import { createDemoEstimateDraft, DUPLICATE_ESTIMATE_KEY } from "@/lib/demo-estimate"
 import { sendEstimateSms } from "@/lib/send-sms"
+import {
+    getTeamEstimateDetail,
+    getTeamEstimateSession,
+    mutateTeamEstimateSession,
+    updateTeamEstimate,
+    type TeamEstimateDetailResponse,
+    type TeamEstimateSessionResponse,
+} from "@/lib/team"
 const PaymentOptionModal = dynamic(() => import("@/components/payment-option-modal").then(mod => mod.PaymentOptionModal), { ssr: false })
 import { AudioRecorder } from "@/components/audio-recorder"
 const PDFPreviewModal = dynamic(() => import("@/components/pdf-preview-modal").then(mod => mod.PDFPreviewModal), { ssr: false })
@@ -74,6 +88,7 @@ interface Estimate {
     payment_terms?: string
     closing_note?: string
     upsellOptions?: UpsellOption[]
+    photoAnalysis?: PhotoEstimateAnalysis
 }
 
 type ReceiptScanResult = {
@@ -90,6 +105,22 @@ type ReceiptScanResult = {
 
 type Step = "input" | "transcribing" | "verifying" | "generating" | "result"
 type SourceLanguage = "auto" | "en" | "es" | "ko"
+type GenerateWorkflow = "standard" | "photo_estimate"
+type PricingConfidence = "low" | "medium" | "high"
+
+type PhotoEstimateMaterialSuggestion = {
+    label: string
+    quantity: number
+    unit: string
+    reason: string
+}
+
+type PhotoEstimateAnalysis = {
+    observations: string[]
+    suggestedScope: string[]
+    materialSuggestions: PhotoEstimateMaterialSuggestion[]
+    pricingConfidence: PricingConfidence
+}
 
 const ESTIMATE_CATEGORIES: EstimateCategory[] = ["PARTS", "LABOR", "SERVICE", "OTHER"]
 const ESTIMATE_UNITS: EstimateUnit[] = ["ea", "LS", "hr", "day", "SF", "LF", "%", "other"]
@@ -105,6 +136,7 @@ const SOURCE_LANGUAGE_EXAMPLES: Record<SourceLanguage, string> = {
     ko: "\"싱크대 아래 앵글밸브 교체하고 배수 누수 잡고 수압 테스트합니다.\"",
     en: "\"Replace the angle stop under the sink, fix the drain leak, and pressure-test the line.\"",
 }
+const PHOTO_ESTIMATE_PRO_TIERS = new Set(["pro", "team"])
 
 function isRecord(value: unknown): value is Record<string, any> {
     return value !== null && typeof value === "object"
@@ -211,6 +243,63 @@ function normalizeUpsellOptions(input: unknown): UpsellOption[] {
         .filter((option): option is UpsellOption => option !== null)
 }
 
+function normalizePricingConfidence(value: unknown): PricingConfidence {
+    if (typeof value !== "string") return "medium"
+    const normalized = value.trim().toLowerCase()
+    if (normalized === "low" || normalized === "medium" || normalized === "high") {
+        return normalized
+    }
+    return "medium"
+}
+
+function normalizeStringList(input: unknown, maxItems: number, maxLength: number): string[] {
+    if (!Array.isArray(input)) return []
+
+    return input
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim().slice(0, maxLength))
+        .filter(Boolean)
+        .slice(0, maxItems)
+}
+
+function normalizePhotoEstimateAnalysis(input: unknown): PhotoEstimateAnalysis | undefined {
+    const analysis = isRecord(input) ? input : null
+    if (!analysis) return undefined
+
+    const observations = normalizeStringList(analysis.observations, 6, 180)
+    const suggestedScope = normalizeStringList(analysis.suggestedScope, 6, 180)
+    const materialSuggestions = (Array.isArray(analysis.materialSuggestions) ? analysis.materialSuggestions : [])
+        .map((suggestion) => {
+            const suggestionRecord = isRecord(suggestion) ? suggestion : null
+            const label = toSafeString(suggestionRecord?.label).trim()
+            if (!label) return null
+
+            return {
+                label,
+                quantity: Math.max(0, toSafeNumber(suggestionRecord?.quantity, 1)),
+                unit: toSafeString(suggestionRecord?.unit, "ea").trim() || "ea",
+                reason:
+                    toSafeString(
+                        suggestionRecord?.reason,
+                        "Visible condition from the jobsite photo."
+                    ).trim() || "Visible condition from the jobsite photo.",
+            }
+        })
+        .filter((suggestion): suggestion is PhotoEstimateMaterialSuggestion => suggestion !== null)
+        .slice(0, 8)
+
+    if (observations.length === 0 && suggestedScope.length === 0 && materialSuggestions.length === 0) {
+        return undefined
+    }
+
+    return {
+        observations,
+        suggestedScope,
+        materialSuggestions,
+        pricingConfidence: normalizePricingConfidence(analysis.pricingConfidence),
+    }
+}
+
 function normalizeEstimatePayload(input: unknown): Estimate {
     const estimate = isRecord(input) ? input : {}
     const rawItems = Array.isArray(estimate.items) ? estimate.items : []
@@ -231,6 +320,7 @@ function normalizeEstimatePayload(input: unknown): Estimate {
         .map((warning) => warning.trim())
         .filter(Boolean)
     const upsellOptions = normalizeUpsellOptions(rawUpsellOptions)
+    const photoAnalysis = normalizePhotoEstimateAnalysis(estimate.photoAnalysis)
 
     return {
         items,
@@ -240,6 +330,7 @@ function normalizeEstimatePayload(input: unknown): Estimate {
         closing_note: toSafeString(estimate.closing_note),
         warnings,
         ...(upsellOptions.length > 0 ? { upsellOptions } : {}),
+        ...(photoAnalysis ? { photoAnalysis } : {}),
     }
 }
 
@@ -292,6 +383,8 @@ export default function NewEstimatePage() {
     const [pendingAudioId, setPendingAudioId] = useState<string | null>(null)
     const [projectType, setProjectType] = useState<'residential' | 'commercial'>('residential')
     const [sourceLanguage, setSourceLanguage] = useState<SourceLanguage>("auto")
+    const [generateWorkflow, setGenerateWorkflow] = useState<GenerateWorkflow>("standard")
+    const [photoContext, setPhotoContext] = useState("")
     const [paymentLink, setPaymentLink] = useState<string | null>(null)
     const [paymentLinkId, setPaymentLinkId] = useState<string | null>(null)
     const [paymentLinkType, setPaymentLinkType] = useState<'full' | 'deposit' | 'custom' | null>('full')
@@ -303,10 +396,31 @@ export default function NewEstimatePage() {
     const [isReceiptScannerOpen, setIsReceiptScannerOpen] = useState(false)
     const [showDemoTutorial, setShowDemoTutorial] = useState(false)
     const [billingUsageSnapshot, setBillingUsageSnapshot] = useState<BillingUsageSnapshot | null>(null)
+    const [subscription, setSubscription] = useState<BillingSubscriptionStatusResponse | null>(null)
+    const [teamEstimateContext, setTeamEstimateContext] = useState<TeamEstimateDetailResponse["estimate"] | null>(null)
+    const [teamEstimateSession, setTeamEstimateSession] = useState<TeamEstimateSessionResponse["session"] | null>(null)
+    const [teamEstimateLoading, setTeamEstimateLoading] = useState(false)
+    const [teamSessionMutating, setTeamSessionMutating] = useState(false)
 
     const fileInputRef = useRef<HTMLInputElement>(null)
     const draftMetaRef = useRef<{ id: string; estimateNumber: string } | null>(null)
     const handledPaymentIntentRef = useRef(false)
+    const hasPhotoEstimateAccess = subscription ? PHOTO_ESTIMATE_PRO_TIERS.has(subscription.planTier) : false
+    const isTeamEstimateMode = Boolean(teamEstimateContext)
+    const canEditTeamEstimate = !isTeamEstimateMode || Boolean(teamEstimateSession?.canEdit)
+    const activeTeamEditorLabel = teamEstimateSession?.editor?.businessName
+        || teamEstimateSession?.editor?.email
+        || teamEstimateSession?.editor?.userId
+        || "another teammate"
+    const pdfBusinessProfile = useMemo(() => {
+        if (!businessProfile) return undefined
+
+        return {
+            ...businessProfile,
+            logo_url: hasPdfBrandingAccess(subscription?.planTier) ? businessProfile.logo_url : "",
+            estimate_template_url: hasPdfTemplateAccess(subscription?.planTier) ? businessProfile.estimate_template_url : "",
+        }
+    }, [businessProfile, subscription?.planTier])
 
     const getOrCreateDraftMeta = () => {
         if (!draftMetaRef.current) {
@@ -329,6 +443,14 @@ export default function NewEstimatePage() {
         setPaymentLinkType(null)
     }, [])
 
+    const redirectToLoginForTeamEstimate = useCallback((estimateId: string) => {
+        const params = new URLSearchParams({
+            next: `/new-estimate?teamEstimateId=${estimateId}`,
+            intent: "team-edit",
+        })
+        router.push(`/login?${params.toString()}`)
+    }, [router])
+
     const loadDraftIntoComposer = useCallback((draft: Record<string, any>, options?: { tutorial?: boolean; toastMessage?: string }) => {
         resetDraftMeta()
         resetPaymentLinkState()
@@ -340,6 +462,8 @@ export default function NewEstimatePage() {
         setImages([])
         setPreviewUrls([])
         setTranscribedText("")
+        setGenerateWorkflow("standard")
+        setPhotoContext("")
         setStep("result")
         setShowDemoTutorial(Boolean(options?.tutorial))
 
@@ -347,6 +471,79 @@ export default function NewEstimatePage() {
             toast(options.toastMessage, "success")
         }
     }, [resetPaymentLinkState])
+
+    const applyTeamEstimateToComposer = useCallback((detail: TeamEstimateDetailResponse["estimate"]) => {
+        draftMetaRef.current = {
+            id: detail.estimateId,
+            estimateNumber: detail.estimateNumber,
+        }
+        resetPaymentLinkState()
+        setTeamEstimateContext(detail)
+        setEstimate({
+            items: detail.items as EstimateItem[],
+            ...(detail.sections && detail.sections.length > 0 ? { sections: detail.sections as EstimateSection[] } : {}),
+            summary_note: detail.summary_note,
+            status: detail.status,
+        })
+        setClientName(detail.clientName)
+        setClientAddress(detail.clientAddress)
+        setTaxRate(detail.taxRate)
+        setAudioBlob(null)
+        setImages([])
+        setPreviewUrls([])
+        setTranscribedText("")
+        setGenerateWorkflow("standard")
+        setPhotoContext("")
+        setShowDemoTutorial(false)
+        setStep("result")
+    }, [resetPaymentLinkState])
+
+    const refreshTeamEstimateSession = useCallback(async (estimateId: string) => {
+        const session = await getTeamEstimateSession(estimateId)
+        setTeamEstimateSession(session.session)
+        return session.session
+    }, [])
+
+    const loadTeamEstimate = useCallback(async (estimateId: string) => {
+        setTeamEstimateLoading(true)
+        try {
+            const detail = await getTeamEstimateDetail(estimateId)
+            applyTeamEstimateToComposer(detail.estimate)
+            const session = await refreshTeamEstimateSession(estimateId)
+            if (!session.active) {
+                toast("Team estimate loaded. Claim editing when you're ready to make changes.", "info")
+            }
+        } catch (error: any) {
+            if (String(error?.message || "").toLowerCase().includes("log in required")) {
+                redirectToLoginForTeamEstimate(estimateId)
+                return
+            }
+            toast(`❌ ${error.message || "Failed to open Team estimate."}`, "error")
+        } finally {
+            setTeamEstimateLoading(false)
+        }
+    }, [applyTeamEstimateToComposer, redirectToLoginForTeamEstimate, refreshTeamEstimateSession])
+
+    const handleTeamSessionAction = useCallback(async (action: "claim" | "heartbeat" | "release" | "takeover") => {
+        if (!teamEstimateContext) return
+        setTeamSessionMutating(true)
+        try {
+            const result = await mutateTeamEstimateSession(teamEstimateContext.estimateId, action)
+            setTeamEstimateSession(result.session)
+
+            if (action === "claim") {
+                toast("✅ You now hold the Team editing session.", "success")
+            } else if (action === "takeover") {
+                toast("⚠️ Team editing session taken over.", "warning")
+            } else if (action === "release") {
+                toast("ℹ️ Team editing session released.", "info")
+            }
+        } catch (error: any) {
+            toast(`❌ ${error.message || "Failed to update Team editing session."}`, "error")
+        } finally {
+            setTeamSessionMutating(false)
+        }
+    }, [teamEstimateContext])
 
     const redirectToLoginForPaymentLink = useCallback(() => {
         const params = new URLSearchParams({
@@ -396,7 +593,9 @@ export default function NewEstimatePage() {
 
     // Load business profile and check for duplicate data
     useEffect(() => {
-        const tutorialMode = new URLSearchParams(window.location.search).get("tutorial") === "1"
+        const searchParams = new URLSearchParams(window.location.search)
+        const tutorialMode = searchParams.get("tutorial") === "1"
+        const teamEstimateId = searchParams.get("teamEstimateId")?.trim() || ""
         setShowDemoTutorial(tutorialMode)
 
         const profile = getProfile()
@@ -427,8 +626,23 @@ export default function NewEstimatePage() {
                 tutorial: true,
                 toastMessage: "Demo quote loaded. Edit it before sending.",
             })
+            return
         }
-    }, [loadDraftIntoComposer])
+
+        if (teamEstimateId) {
+            void loadTeamEstimate(teamEstimateId)
+        }
+    }, [loadDraftIntoComposer, loadTeamEstimate])
+
+    useEffect(() => {
+        if (!teamEstimateContext || !teamEstimateSession?.ownedByCaller) return
+
+        const intervalId = window.setInterval(() => {
+            void handleTeamSessionAction("heartbeat")
+        }, 25_000)
+
+        return () => window.clearInterval(intervalId)
+    }, [handleTeamSessionAction, teamEstimateContext, teamEstimateSession?.ownedByCaller])
 
     // Offline detection and online recovery for pending audio
     useEffect(() => {
@@ -519,30 +733,28 @@ export default function NewEstimatePage() {
 
         const loadBillingUsageSnapshot = async () => {
             try {
-                const headers = await withAuthHeaders()
-                if (!headers.authorization) {
-                    if (!isCancelled) setBillingUsageSnapshot(null)
+                const [usageResult, subscriptionResult] = await Promise.all([
+                    getBillingUsageSnapshot(),
+                    getBillingSubscriptionStatus(),
+                ])
+
+                if (isCancelled) return
+
+                setSubscription(subscriptionResult)
+
+                if (!usageResult.authorized) {
+                    setBillingUsageSnapshot(null)
                     return
                 }
 
-                const response = await fetch("/api/billing/usage", {
-                    method: "GET",
-                    headers,
-                    cache: "no-store",
-                })
-
-                if (!response.ok) {
-                    if (!isCancelled) setBillingUsageSnapshot(null)
-                    return
-                }
-
-                const snapshot = await response.json() as BillingUsageSnapshot
-                if (!isCancelled) {
-                    setBillingUsageSnapshot(snapshot.planTier === "free" ? snapshot : null)
-                }
+                const snapshot = usageResult.snapshot
+                setBillingUsageSnapshot(snapshot?.planTier === "free" ? snapshot : null)
             } catch (error) {
                 console.error("Failed to load free tier usage banner:", error)
-                if (!isCancelled) setBillingUsageSnapshot(null)
+                if (!isCancelled) {
+                    setBillingUsageSnapshot(null)
+                    setSubscription(null)
+                }
             }
         }
 
@@ -553,6 +765,12 @@ export default function NewEstimatePage() {
         }
     }, [])
 
+    useEffect(() => {
+        if (generateWorkflow === "photo_estimate" && !hasPhotoEstimateAccess) {
+            setGenerateWorkflow("standard")
+        }
+    }, [generateWorkflow, hasPhotoEstimateAccess])
+
     const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || [])
         if (files.length > 0) {
@@ -560,6 +778,16 @@ export default function NewEstimatePage() {
             const newUrls = files.map(file => URL.createObjectURL(file))
             setPreviewUrls(prev => [...prev, ...newUrls])
         }
+    }
+
+    const handleSelectGenerateWorkflow = (nextWorkflow: GenerateWorkflow) => {
+        if (nextWorkflow === "photo_estimate" && !hasPhotoEstimateAccess) {
+            toast("📸 Photo Estimate is available on Pro or Team.", "info")
+            router.push("/pricing")
+            return
+        }
+
+        setGenerateWorkflow(nextWorkflow)
     }
 
     const handleRemoveImage = (index: number) => {
@@ -636,6 +864,11 @@ export default function NewEstimatePage() {
             return
         }
 
+        if (generateWorkflow === "photo_estimate" && images.length === 0) {
+            toast("📸 Add at least one jobsite photo to run Photo Estimate.", "warning")
+            return
+        }
+
         setStep("generating")
         try {
             const base64Images = await Promise.all(images.map(fileToDataUrl))
@@ -652,6 +885,10 @@ export default function NewEstimatePage() {
                     notes: transcribedText,
                     sourceLanguage,
                     projectType,
+                    workflow: generateWorkflow,
+                    ...(generateWorkflow === "photo_estimate" && photoContext.trim()
+                        ? { photoContext: photoContext.trim() }
+                        : {}),
                     userProfile: businessProfile ? {
                         city: businessProfile.address?.split(',')[0] || "Toronto",
                         country: "Canada",
@@ -669,9 +906,17 @@ export default function NewEstimatePage() {
                 if (status === 429) {
                     throw new Error("Too many requests. Please wait a moment and try again.")
                 } else if (status === 402) {
-                    throw new Error("Monthly AI generation quota reached. Upgrade flow will be enabled soon.")
+                    throw new Error(
+                        generateWorkflow === "photo_estimate"
+                            ? "Photo Estimate requires a Pro or Team plan."
+                            : "Monthly AI generation quota reached. Upgrade flow will be enabled soon."
+                    )
                 } else if (status === 401 || status === 403) {
-                    throw new Error("API key issue. Please check your configuration.")
+                    throw new Error(
+                        generateWorkflow === "photo_estimate"
+                            ? "Log in with a Pro or Team account to use Photo Estimate."
+                            : "API key issue. Please check your configuration."
+                    )
                 } else if (status >= 500) {
                     throw new Error("Server error. Please try again in a few moments.")
                 } else {
@@ -936,11 +1181,11 @@ export default function NewEstimatePage() {
                 summary={estimate.summary_note}
                 taxRate={taxRate}
                 client={{ name: clientName, address: clientAddress }}
-                business={businessProfile ?? undefined}
+                business={pdfBusinessProfile}
                 paymentLink={includePaymentLink && paymentLink ? paymentLink : undefined}
                 signature={includeSignature ? estimate.clientSignature : undefined}
                 signedAt={includeSignature ? estimate.signedAt : undefined}
-                templateUrl={businessProfile?.estimate_template_url}
+                templateUrl={pdfBusinessProfile?.estimate_template_url}
                 paymentLabel={paymentLinkType === 'deposit' ? 'PAY DEPOSIT' : (paymentLinkType === 'custom' ? 'PAY AMOUNT' : 'PAY ONLINE')}
                 photos={includePhotos ? previewUrls : undefined}
             />
@@ -952,7 +1197,7 @@ export default function NewEstimatePage() {
         taxRate,
         clientName,
         clientAddress,
-        businessProfile,
+        pdfBusinessProfile,
         includePaymentLink,
         paymentLink,
         paymentLinkType,
@@ -988,9 +1233,9 @@ export default function NewEstimatePage() {
             taxRate,
             taxAmount,
             totalAmount,
-            createdAt: new Date().toISOString(),
+            createdAt: teamEstimateContext?.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            sentAt: status === "sent" ? new Date().toISOString() : undefined,
+            sentAt: status === "sent" ? (teamEstimateContext?.sentAt || new Date().toISOString()) : undefined,
             status,
             paymentLink: includePaymentLink && paymentLink ? paymentLink : undefined,
             paymentLinkId: includePaymentLink && paymentLinkId ? paymentLinkId : undefined,
@@ -1009,47 +1254,112 @@ export default function NewEstimatePage() {
         paymentLink,
         paymentLinkId,
         paymentLinkType,
+        teamEstimateContext?.createdAt,
+        teamEstimateContext?.sentAt,
     ])
 
+    const persistTeamEstimateToCloud = useCallback(async (localEstimate: Awaited<ReturnType<typeof buildLocalEstimatePayload>>) => {
+        if (!teamEstimateContext) {
+            return localEstimate
+        }
+
+        const result = await updateTeamEstimate(teamEstimateContext.estimateId, {
+            clientName: localEstimate.clientName,
+            clientAddress: localEstimate.clientAddress,
+            summary_note: localEstimate.summary_note,
+            status: localEstimate.status,
+            taxRate: localEstimate.taxRate,
+            taxAmount: localEstimate.taxAmount,
+            totalAmount: localEstimate.totalAmount,
+            sentAt: localEstimate.sentAt,
+            items: localEstimate.items.map((item) => ({
+                id: item.id,
+                itemNumber: item.itemNumber,
+                category: item.category,
+                description: item.description,
+                quantity: item.quantity,
+                unit: item.unit,
+                unit_price: item.unit_price,
+                total: item.total,
+            })),
+            sections: localEstimate.sections?.map((section) => ({
+                id: section.id,
+                name: section.name,
+                divisionCode: section.divisionCode,
+                items: section.items.map((item) => ({
+                    id: item.id,
+                    itemNumber: item.itemNumber,
+                    category: item.category,
+                    description: item.description,
+                    quantity: item.quantity,
+                    unit: item.unit,
+                    unit_price: item.unit_price,
+                    total: item.total,
+                })),
+            })),
+        })
+
+        setTeamEstimateContext(result.estimate)
+        return {
+            ...localEstimate,
+            estimateNumber: result.estimate.estimateNumber,
+            createdAt: result.estimate.createdAt,
+            updatedAt: result.estimate.updatedAt,
+            sentAt: result.estimate.sentAt,
+            synced: true,
+        }
+    }, [teamEstimateContext])
+
     const persistCurrentEstimateAsSent = useCallback(async () => {
+        if (isTeamEstimateMode && !canEditTeamEstimate) {
+            throw new Error("Claim the Team editing session before sending.")
+        }
+
         const nextEstimate = await buildLocalEstimatePayload("sent")
+        const persistedEstimate = await persistTeamEstimateToCloud(nextEstimate)
         const existing = (await getEstimates()).find((entry) => entry.id === nextEstimate.id)
 
         if (!existing) {
-            await saveEstimate(nextEstimate)
-            return nextEstimate
+            await saveEstimate(persistedEstimate)
+            return persistedEstimate
         }
 
-        const sentAt = existing.sentAt || nextEstimate.sentAt || new Date().toISOString()
+        const sentAt = existing.sentAt || persistedEstimate.sentAt || new Date().toISOString()
         await updateEstimate(existing.id, {
-            ...nextEstimate,
+            ...persistedEstimate,
             createdAt: existing.createdAt,
             sentAt,
             status: "sent",
-            synced: false,
+            synced: isTeamEstimateMode ? true : false,
         })
 
-        return { ...existing, ...nextEstimate, createdAt: existing.createdAt, sentAt, status: "sent" as const }
-    }, [buildLocalEstimatePayload])
+        return { ...existing, ...persistedEstimate, createdAt: existing.createdAt, sentAt, status: "sent" as const }
+    }, [buildLocalEstimatePayload, canEditTeamEstimate, isTeamEstimateMode, persistTeamEstimateToCloud])
 
     const handleSave = async () => {
         if (!estimate) return
+        if (isTeamEstimateMode && !canEditTeamEstimate) {
+            toast("Claim the Team editing session before saving shared changes.", "warning")
+            return
+        }
         setIsSaving(true)
         try {
             const localEstimate = await buildLocalEstimatePayload("draft")
+            const persistedEstimate = await persistTeamEstimateToCloud(localEstimate)
             const allItems = localEstimate.items || []
-            await saveEstimate(localEstimate)
+            await saveEstimate(persistedEstimate)
             void trackAnalyticsEvent({
                 event: "draft_saved",
-                estimateId: localEstimate.id,
-                estimateNumber: localEstimate.estimateNumber,
+                estimateId: persistedEstimate.id,
+                estimateNumber: persistedEstimate.estimateNumber,
                 metadata: {
-                    totalAmount: localEstimate.totalAmount,
+                    totalAmount: persistedEstimate.totalAmount,
                     itemCount: allItems.length,
-                    hasAttachments: Boolean(localEstimate.attachments),
+                    hasAttachments: Boolean(persistedEstimate.attachments),
+                    teamEstimate: isTeamEstimateMode,
                 },
             })
-            toast("✅ Estimate saved successfully!", "success")
+            toast(isTeamEstimateMode ? "✅ Team estimate saved to shared workspace." : "✅ Estimate saved successfully!", "success")
             setTimeout(() => router.push("/history"), 500)
         } catch (error) {
             console.error(error)
@@ -1183,6 +1493,68 @@ export default function NewEstimatePage() {
                     limit={billingUsageSnapshot.limits.generate}
                     periodStart={billingUsageSnapshot.periodStart}
                 />
+            ) : null}
+
+            {teamEstimateLoading ? (
+                <Card className="border-sky-300/30 bg-sky-50/70">
+                    <CardContent className="flex items-center gap-3 py-4 text-sm text-sky-900">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading shared Team estimate...
+                    </CardContent>
+                </Card>
+            ) : null}
+
+            {teamEstimateContext ? (
+                <Card className="border-primary/20">
+                    <CardContent className="space-y-3 py-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <p className="text-sm font-semibold">Shared Team estimate</p>
+                                <p className="text-xs text-muted-foreground">
+                                    {teamEstimateContext.ownerBusinessName || teamEstimateContext.ownerUserId} · {teamEstimateContext.estimateNumber}
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {teamEstimateSession?.active ? (
+                                    <span className={`rounded-full px-2 py-1 text-xs font-medium ${teamEstimateSession.ownedByCaller ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                                        {teamEstimateSession.ownedByCaller ? "You hold edit session" : "Locked by teammate"}
+                                    </span>
+                                ) : (
+                                    <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-medium text-sky-800">
+                                        No active editor
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                            {teamEstimateSession?.active
+                                ? teamEstimateSession.ownedByCaller
+                                    ? "Shared saves go straight to the Team workspace while your edit session stays active."
+                                    : `${activeTeamEditorLabel} is editing this estimate right now. Claim or take over the session before saving.`
+                                : "Claim the edit session before saving shared changes to this Team estimate."}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                            {!teamEstimateSession?.active ? (
+                                <Button size="sm" onClick={() => void handleTeamSessionAction("claim")} disabled={teamSessionMutating}>
+                                    {teamSessionMutating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                    Claim editing
+                                </Button>
+                            ) : null}
+                            {teamEstimateSession?.active && !teamEstimateSession.ownedByCaller ? (
+                                <Button size="sm" variant="outline" onClick={() => void handleTeamSessionAction("takeover")} disabled={teamSessionMutating}>
+                                    {teamSessionMutating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                    Take over
+                                </Button>
+                            ) : null}
+                            {teamEstimateSession?.ownedByCaller ? (
+                                <Button size="sm" variant="outline" onClick={() => void handleTeamSessionAction("release")} disabled={teamSessionMutating}>
+                                    {teamSessionMutating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                    Release session
+                                </Button>
+                            ) : null}
+                        </div>
+                    </CardContent>
+                </Card>
             ) : null}
 
             {/* STEP 1: INPUT */}
@@ -1324,6 +1696,78 @@ export default function NewEstimatePage() {
                                 ))}
                             </div>
                         )}
+
+                        <div className="grid gap-3 md:grid-cols-2">
+                            <button
+                                type="button"
+                                onClick={() => handleSelectGenerateWorkflow("standard")}
+                                className={`rounded-2xl border p-4 text-left transition-colors ${
+                                    generateWorkflow === "standard"
+                                        ? "border-primary bg-primary/5"
+                                        : "border-border/70 bg-background hover:bg-muted/40"
+                                }`}
+                            >
+                                <p className="text-sm font-semibold">Standard AI Draft</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    Mix notes, photos, and voice to get a clean estimate draft fast.
+                                </p>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleSelectGenerateWorkflow("photo_estimate")}
+                                className={`rounded-2xl border p-4 text-left transition-colors ${
+                                    generateWorkflow === "photo_estimate"
+                                        ? "border-primary bg-primary/10"
+                                        : "border-border/70 bg-background hover:bg-muted/40"
+                                }`}
+                            >
+                                <div className="flex items-center justify-between gap-2">
+                                    <p className="text-sm font-semibold">Pro Photo Estimate</p>
+                                    <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">
+                                        Pro
+                                    </span>
+                                </div>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    Turn jobsite photos into scope suggestions, material takeoff hints, and pricing confidence.
+                                </p>
+                            </button>
+                        </div>
+
+                        {generateWorkflow === "photo_estimate" ? (
+                            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 space-y-3">
+                                <div className="space-y-1">
+                                    <p className="text-sm font-semibold">Photo Estimate mode</p>
+                                    <p className="text-xs text-muted-foreground">
+                                        The AI will prioritize visible site conditions, suggest likely materials, and flag assumptions you still need to verify on site.
+                                    </p>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-xs font-medium text-muted-foreground">Jobsite context (optional)</label>
+                                    <Textarea
+                                        value={photoContext}
+                                        onChange={(e) => setPhotoContext(e.target.value)}
+                                        className="min-h-[92px]"
+                                        placeholder="Example: water damage around upstairs bath vanity, customer wants finish-grade repair and repaint"
+                                    />
+                                </div>
+                            </div>
+                        ) : null}
+
+                        {!hasPhotoEstimateAccess ? (
+                            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                                <p className="text-sm font-semibold text-amber-900">Photo Estimate is a Pro feature</p>
+                                <p className="mt-1 text-xs text-amber-800">
+                                    Unlock jobsite photo analysis, material suggestions, and pricing confidence on Pro or Team.
+                                </p>
+                                <Button
+                                    variant="outline"
+                                    className="mt-3 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+                                    onClick={() => router.push("/pricing")}
+                                >
+                                    View Pro plans
+                                </Button>
+                            </div>
+                        ) : null}
                     </div>
 
                     {/* Manual Entry Button */}
@@ -1377,6 +1821,26 @@ export default function NewEstimatePage() {
                             </div>
                         </div>
                     )}
+
+                    {generateWorkflow === "photo_estimate" ? (
+                        <div className="space-y-3 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                            <div className="space-y-1">
+                                <p className="text-sm font-semibold">Photo Estimate review</p>
+                                <p className="text-xs text-muted-foreground">
+                                    AI will return visible observations, suggested scope bullets, and likely materials. Hidden conditions should still be verified before sending.
+                                </p>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-xs font-medium text-muted-foreground">Extra context for the photos</label>
+                                <Textarea
+                                    value={photoContext}
+                                    onChange={(e) => setPhotoContext(e.target.value)}
+                                    className="min-h-[88px]"
+                                    placeholder="Add room, finish level, trade, or customer expectations before generating"
+                                />
+                            </div>
+                        </div>
+                    ) : null}
 
                     <Button
                         size="lg"
@@ -1448,6 +1912,61 @@ export default function NewEstimatePage() {
                             </div>
                         </CardHeader>
                         <CardContent className="space-y-4">
+                            {estimate.photoAnalysis ? (
+                                <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 space-y-4">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                            <p className="text-sm font-semibold text-sky-900">Photo Estimate Analysis</p>
+                                            <p className="mt-1 text-xs text-sky-800">
+                                                Pricing confidence: <span className="font-semibold uppercase">{estimate.photoAnalysis.pricingConfidence}</span>
+                                            </p>
+                                        </div>
+                                        <Camera className="mt-0.5 h-4 w-4 shrink-0 text-sky-700" />
+                                    </div>
+                                    {estimate.photoAnalysis.observations.length > 0 ? (
+                                        <div className="space-y-2">
+                                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-900">Observed</p>
+                                            <ul className="space-y-1 text-sm text-sky-950">
+                                                {estimate.photoAnalysis.observations.map((observation, index) => (
+                                                    <li key={`observation-${index}`}>• {observation}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    ) : null}
+                                    {estimate.photoAnalysis.suggestedScope.length > 0 ? (
+                                        <div className="space-y-2">
+                                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-900">Suggested scope</p>
+                                            <ul className="space-y-1 text-sm text-sky-950">
+                                                {estimate.photoAnalysis.suggestedScope.map((scopeItem, index) => (
+                                                    <li key={`scope-${index}`}>• {scopeItem}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    ) : null}
+                                    {estimate.photoAnalysis.materialSuggestions.length > 0 ? (
+                                        <div className="space-y-2">
+                                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-900">Material suggestions</p>
+                                            <div className="space-y-2">
+                                                {estimate.photoAnalysis.materialSuggestions.map((suggestion, index) => (
+                                                    <div key={`material-${index}`} className="rounded-xl border border-sky-200 bg-white/80 p-3">
+                                                        <div className="flex items-start justify-between gap-3">
+                                                            <div>
+                                                                <p className="text-sm font-medium text-slate-950">
+                                                                    {suggestion.label}
+                                                                </p>
+                                                                <p className="mt-1 text-xs text-slate-600">{suggestion.reason}</p>
+                                                            </div>
+                                                            <span className="text-xs font-semibold text-sky-900">
+                                                                {suggestion.quantity} {suggestion.unit}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ) : null}
                             {/* Warnings */}
                             {estimate.warnings && estimate.warnings.length > 0 && (
                                 <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
@@ -1831,7 +2350,7 @@ export default function NewEstimatePage() {
                                     size="lg"
                                     className="h-12 font-semibold"
                                     onClick={handleSave}
-                                    disabled={isSaving}
+                                    disabled={isSaving || teamEstimateLoading || teamSessionMutating || !canEditTeamEstimate}
                                 >
                                     {isSaving ? (
                                         <>
@@ -2045,6 +2564,7 @@ export default function NewEstimatePage() {
                                 variant="outline"
                                 className="w-full mt-2"
                                 onClick={() => setIsEmailModalOpen(true)}
+                                disabled={isTeamEstimateMode && !canEditTeamEstimate}
                             >
                                 <Mail className="h-4 w-4 mr-2" />
                                 📧 Send to Customer
@@ -2055,6 +2575,7 @@ export default function NewEstimatePage() {
                                 variant="outline"
                                 className="w-full mt-2"
                                 onClick={() => setIsSmsModalOpen(true)}
+                                disabled={isTeamEstimateMode && !canEditTeamEstimate}
                             >
                                 <MessageSquare className="h-4 w-4 mr-2" />
                                 💬 Send via SMS

@@ -15,11 +15,28 @@ const RELEVANT_ENV_KEYS = [
   'GEMINI_API_KEY',
   'GEMINI_GENERATE_MODEL',
   'GENERATE_AI_PROVIDER',
+  'NEXT_PUBLIC_SUPABASE_URL',
+  'SUPABASE_SERVICE_ROLE_KEY',
 ]
 
 function clearRelevantEnv() {
   for (const key of RELEVANT_ENV_KEYS) {
     delete process.env[key]
+  }
+}
+
+function setServiceEnv() {
+  process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+}
+
+function mockPlanTier(state, planTier) {
+  state.supabase.queryResolver = async (query) => {
+    if (query.table === 'profiles' && query.action === 'select') {
+      return { data: { plan_tier: planTier }, error: null }
+    }
+
+    return { data: null, error: null }
   }
 }
 
@@ -63,6 +80,7 @@ describe('POST /api/generate', () => {
     assert.equal(res.status, 402)
     assert.equal(data.code, 'FREE_PLAN_LIMIT_REACHED')
     assert.equal(data.metric, 'generate')
+    assert.equal(data.limit, 3)
     assert.match(data.error, /sign in to continue/i)
     assert.equal(state.usageQuota.recordCalls.length, 0)
     assert.equal(
@@ -151,6 +169,109 @@ describe('POST /api/generate', () => {
     assert.equal(res.status, 400)
     assert.equal(data.error, 'Invalid source language')
     assert.equal(state.openai.chatCalls.length, 0)
+  })
+
+  test('requires authentication for photo estimate workflow', async () => {
+    const state = getTestState()
+    state.routeAuth.result = {
+      ok: false,
+      response: new Response(
+        JSON.stringify({ error: { message: 'Unauthorized', code: 401 } }),
+        { status: 401, headers: { 'content-type': 'application/json' } }
+      ),
+    }
+
+    const req = jsonRequest('http://localhost/api/generate', {
+      images: ['data:image/png;base64,AAAA'],
+      workflow: 'photo_estimate',
+    })
+
+    const res = await generateEstimate(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 401)
+    assert.match(data.error, /log in required/i)
+    assert.equal(state.openai.chatCalls.length, 0)
+  })
+
+  test('requires Pro or Team for photo estimate workflow', async () => {
+    setServiceEnv()
+    const state = getTestState()
+    state.routeAuth.result = { ok: true, userId: 'user-free' }
+    mockPlanTier(state, 'starter')
+
+    const req = jsonRequest('http://localhost/api/generate', {
+      images: ['data:image/png;base64,AAAA'],
+      workflow: 'photo_estimate',
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await generateEstimate(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 402)
+    assert.match(data.error, /pro|team/i)
+    assert.equal(state.openai.chatCalls.length, 0)
+  })
+
+  test('returns normalized photo analysis for Pro photo estimate workflow', async () => {
+    setServiceEnv()
+    const state = getTestState()
+    state.routeAuth.result = { ok: true, userId: 'user-pro' }
+    mockPlanTier(state, 'pro')
+    state.openai.chatCompletionsCreate = async () => ({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              items: [
+                { description: 'Drywall replacement area', quantity: 24, unit: 'SF', unit_price: 4.25 },
+              ],
+              summary_note: 'Replace the damaged drywall section and repaint the repair area.',
+              warnings: ['Wall cavity moisture still needs confirmation.'],
+              photoAnalysis: {
+                observations: ['Visible drywall staining below the window trim'],
+                suggestedScope: ['Open the affected wall section and check insulation for moisture'],
+                materialSuggestions: [
+                  {
+                    label: 'Mold-resistant drywall',
+                    quantity: 24,
+                    unit: 'SF',
+                    reason: 'Repair area appears to be a small cut-and-patch section.',
+                  },
+                ],
+                pricingConfidence: 'high',
+              },
+            }),
+          },
+        },
+      ],
+      usage: {
+        prompt_tokens: 111,
+        completion_tokens: 37,
+      },
+    })
+
+    const req = jsonRequest('http://localhost/api/generate', {
+      images: ['data:image/png;base64,AAAA'],
+      notes: 'bathroom wall under window',
+      workflow: 'photo_estimate',
+      photoContext: 'Customer wants finish-ready repair.',
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await generateEstimate(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.items.length, 1)
+    assert.equal(data.photoAnalysis.pricingConfidence, 'high')
+    assert.equal(data.photoAnalysis.observations.length, 1)
+    assert.equal(data.photoAnalysis.materialSuggestions[0].label, 'Mold-resistant drywall')
+    assert.match(state.openai.chatCalls[0].messages[0].content, /PHOTO ESTIMATE MODE/)
+    assert.match(state.openai.chatCalls[0].messages[0].content, /Customer wants finish-ready repair/)
   })
 
   test('uses Gemini provider when GEMINI_API_KEY is configured', async () => {

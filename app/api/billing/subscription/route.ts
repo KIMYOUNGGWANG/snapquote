@@ -3,21 +3,9 @@ import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 import {
-    isPaidSubscriptionStatus,
     normalizeBillingPlanTier,
-    normalizeSubscriptionStatus,
 } from "@/lib/server/stripe-billing"
-
-function toPlanTier(value: unknown): "free" | "starter" | "pro" | "team" {
-    return normalizeBillingPlanTier(value)
-}
-
-function toOptionalIsoString(value: unknown): string | null {
-    if (typeof value !== "string") return null
-    const trimmed = value.trim()
-    if (!trimmed) return null
-    return trimmed
-}
+import { resolveEffectiveSubscriptionView } from "@/lib/server/effective-plan"
 
 export async function GET(req: Request) {
     const auth = await requireAuthenticatedUser(req)
@@ -50,7 +38,7 @@ export async function GET(req: Request) {
     const { data: profile, error } = await supabase
         .from("profiles")
         .select(
-            "plan_tier, stripe_customer_id, stripe_subscription_id, stripe_subscription_status, stripe_subscription_price_id, stripe_subscription_current_period_end, stripe_cancel_at_period_end"
+            "plan_tier, stripe_customer_id, stripe_subscription_id, stripe_subscription_status, stripe_subscription_price_id, stripe_subscription_current_period_end, stripe_cancel_at_period_end, referral_trial_ends_at, referral_bonus_ends_at, referral_credit_balance_months"
         )
         .eq("id", auth.userId)
         .maybeSingle()
@@ -62,9 +50,11 @@ export async function GET(req: Request) {
         )
     }
 
-    const planTier = toPlanTier(profile?.plan_tier)
-    const status = normalizeSubscriptionStatus(profile?.stripe_subscription_status)
-    const subscribed = isPaidSubscriptionStatus(status)
+    const normalizedPlanTier = normalizeBillingPlanTier(profile?.plan_tier)
+    const view = resolveEffectiveSubscriptionView({
+        ...profile,
+        plan_tier: normalizedPlanTier,
+    })
     const customerId =
         typeof profile?.stripe_customer_id === "string" ? profile.stripe_customer_id.trim() : ""
     const subscriptionId =
@@ -73,18 +63,17 @@ export async function GET(req: Request) {
         typeof profile?.stripe_subscription_price_id === "string"
             ? profile.stripe_subscription_price_id.trim()
             : ""
-    const currentPeriodEnd = toOptionalIsoString(profile?.stripe_subscription_current_period_end)
     const cancelAtPeriodEnd = Boolean(profile?.stripe_cancel_at_period_end)
 
     return NextResponse.json({
         ok: true,
-        planTier,
-        subscribed,
-        status,
+        planTier: view.planTier,
+        subscribed: view.subscribed,
+        status: view.status,
         ...(customerId ? { customerId } : {}),
         ...(subscriptionId ? { subscriptionId } : {}),
         ...(priceId ? { priceId } : {}),
-        ...(currentPeriodEnd ? { currentPeriodEnd } : {}),
+        ...(view.currentPeriodEnd ? { currentPeriodEnd: view.currentPeriodEnd } : {}),
         cancelAtPeriodEnd,
     })
 }

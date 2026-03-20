@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { FreeEstimatorWidget } from "@/components/free-estimator-widget"
+import { FREE_PLAN_MARKETING_QUOTE_LIMIT } from "@/lib/free-tier"
 
 // Animated counter component
 function AnimatedCounter({ target, suffix = "", prefix = "" }: { target: number, suffix?: string, prefix?: string }) {
@@ -185,7 +186,7 @@ export default function LandingPage() {
                             </div>
 
                             <p className="text-xs text-gray-500 mt-4">
-                                ✓ 10 free quotes/month &nbsp;·&nbsp; ✓ Speak naturally on site &nbsp;·&nbsp; ✓ Review the English draft before you send
+                                ✓ {FREE_PLAN_MARKETING_QUOTE_LIMIT} free quotes/month &nbsp;·&nbsp; ✓ Speak naturally on site &nbsp;·&nbsp; ✓ Review the English draft before you send
                             </p>
                         </div>
 
@@ -477,7 +478,7 @@ export default function LandingPage() {
                             <h2 className="text-3xl md:text-4xl font-bold mb-4">
                             Priced for multilingual field quoting, not seat bloat.
                         </h2>
-                        <p className="text-gray-400">Start with 10 free quotes per month, then move up based on how often you need to turn Spanish or Korean field talk into clean English estimates from the truck.</p>
+                        <p className="text-gray-400">Start with {FREE_PLAN_MARKETING_QUOTE_LIMIT} free quotes per month, then move up based on how often you need to turn Spanish or Korean field talk into clean English estimates from the truck.</p>
                     </div>
 
                     <div className="grid md:grid-cols-3 gap-6">
@@ -643,7 +644,7 @@ export default function LandingPage() {
                         <span className="bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">even if the job was explained in Spanish or Korean.</span>
                     </h2>
                     <p className="text-lg text-gray-400 mb-10 max-w-2xl mx-auto">
-                        Start with 10 free field quotes. If SnapQuote becomes part of your service-call routine, move up to the plan that matches your truck, quote volume, and crew.
+                        Start with {FREE_PLAN_MARKETING_QUOTE_LIMIT} free field quotes. If SnapQuote becomes part of your service-call routine, move up to the plan that matches your truck, quote volume, and crew.
                     </p>
                     <Link href="/new-estimate" className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-10 py-5 rounded-2xl text-lg font-semibold transition-all hover:shadow-2xl hover:shadow-blue-500/30 hover:-translate-y-1">
                         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">

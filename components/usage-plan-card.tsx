@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, Gauge, Sparkles } from "lucide-react"
 import { getBillingUsageSnapshot, type BillingUsageSnapshot } from "@/lib/billing-usage"
+import { FREE_PLAN_MARKETING_QUOTE_LIMIT } from "@/lib/free-tier"
 
 function ProgressBar({ value }: { value: number }) {
     const clamped = Math.min(100, Math.max(0, value))
@@ -124,7 +125,7 @@ export function UsagePlanCard() {
                                 <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 flex items-start gap-2">
                                     <Sparkles className="h-3.5 w-3.5 mt-0.5" />
                                     <div className="flex-1">
-                                        <p>Free quota is almost used. Upgrade flow will be connected next.</p>
+                                        <p>Free quota is almost used. Upgrade before you hit the {FREE_PLAN_MARKETING_QUOTE_LIMIT}-quote monthly cap.</p>
                                         <Button
                                             type="button"
                                             size="sm"

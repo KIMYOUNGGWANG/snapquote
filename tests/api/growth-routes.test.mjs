@@ -8,6 +8,8 @@ import { GET as pricingOffer } from '../../app/api/pricing/offer/route.ts'
 import { GET as pricingReport } from '../../app/api/pricing/report/route.ts'
 import { POST as referralToken } from '../../app/api/referrals/token/route.ts'
 import { POST as referralTrack } from '../../app/api/referrals/track/route.ts'
+import { POST as referralClaim } from '../../app/api/referrals/claim/route.ts'
+import { GET as referralStatus } from '../../app/api/referrals/status/route.ts'
 import { POST as analyticsEvents } from '../../app/api/analytics/events/route.ts'
 import { GET as analyticsFunnel } from '../../app/api/analytics/funnel/route.ts'
 
@@ -331,6 +333,210 @@ describe('POST /api/referrals/track', () => {
 
     assert.equal(res.status, 200)
     assert.equal(data.ok, true)
+  })
+})
+
+describe('POST /api/referrals/claim', () => {
+  test('prevents self-referrals from granting rewards', async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role_key'
+
+    const state = getTestState()
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'referral_claims' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return { data: null, error: null }
+      }
+
+      if (query.table === 'referral_tokens' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return {
+          data: { token: 'selftoken1234', user_id: 'user-1' },
+          error: null,
+        }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = jsonRequest('http://localhost/api/referrals/claim', {
+      token: 'selftoken1234',
+      source: 'test',
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await referralClaim(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.claimed, false)
+    assert.equal(data.reason, 'self_referral')
+  })
+
+  test('grants a referred Pro trial and referrer pending credit for paid referrers', async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role_key'
+
+    const state = getTestState()
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'referral_claims' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return { data: null, error: null }
+      }
+
+      if (query.table === 'referral_tokens' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return {
+          data: { token: 'friendtoken12', user_id: 'user-referrer' },
+          error: null,
+        }
+      }
+
+      if (query.table === 'referral_claims' && query.action === 'insert' && query.mode === 'single') {
+        return {
+          data: { id: 'claim_1' },
+          error: null,
+        }
+      }
+
+      if (query.table === 'profiles' && query.action === 'select' && query.mode === 'maybeSingle') {
+        const idFilter = query.filters.find((filter) => filter.column === 'id')
+        if (idFilter?.value === 'user-1') {
+          return {
+            data: {
+              plan_tier: 'free',
+              stripe_subscription_status: null,
+              stripe_subscription_current_period_end: null,
+              stripe_subscription_id: null,
+              referral_trial_ends_at: null,
+            },
+            error: null,
+          }
+        }
+
+        if (idFilter?.value === 'user-referrer') {
+          return {
+            data: {
+              plan_tier: 'pro',
+              stripe_subscription_status: 'active',
+              stripe_subscription_current_period_end: '2026-04-30T00:00:00.000Z',
+              stripe_subscription_id: 'sub_live_1',
+              referral_bonus_ends_at: null,
+              referral_credit_balance_months: 0,
+            },
+            error: null,
+          }
+        }
+      }
+
+      if (query.table === 'profiles' && query.action === 'upsert') {
+        return { data: null, error: null }
+      }
+
+      if (query.table === 'referral_claims' && query.action === 'update') {
+        return { data: { id: 'claim_1' }, error: null }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = jsonRequest('http://localhost/api/referrals/claim', {
+      token: 'friendtoken12',
+      source: 'test',
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await referralClaim(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.claimed, true)
+    assert.equal(data.referredReward.applied, true)
+    assert.equal(data.referredReward.planTier, 'pro')
+    assert.equal(data.referrerReward.mode, 'pending_credit')
+    assert.equal(data.referrerReward.creditMonths, 1)
+  })
+})
+
+describe('GET /api/referrals/status', () => {
+  test('returns referral metrics, share copy, and reward state', async () => {
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role_key'
+    process.env.NEXT_PUBLIC_APP_URL = 'https://snapquote.test'
+
+    const state = getTestState()
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'referral_tokens' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return {
+          data: { token: 'statusref1234' },
+          error: null,
+        }
+      }
+
+      if (query.table === 'profiles' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return {
+          data: {
+            plan_tier: 'pro',
+            stripe_subscription_status: null,
+            stripe_subscription_current_period_end: null,
+            stripe_subscription_id: null,
+            stripe_customer_id: null,
+            referral_trial_ends_at: null,
+            referral_bonus_ends_at: '2099-01-31T00:00:00.000Z',
+            referral_credit_balance_months: 2,
+          },
+          error: null,
+        }
+      }
+
+      if (query.table === 'referral_events' && query.action === 'select' && query.mode === 'execute') {
+        return {
+          data: [
+            { event_name: 'landing_visit' },
+            { event_name: 'landing_visit' },
+            { event_name: 'quote_share_click' },
+            { event_name: 'signup_start' },
+          ],
+          error: null,
+        }
+      }
+
+      if (query.table === 'referral_claims' && query.action === 'select' && query.mode === 'execute') {
+        return {
+          data: [
+            {
+              id: 'claim_1',
+              created_at: '2026-03-20T10:00:00.000Z',
+              referrer_reward_mode: 'pending_credit',
+              referrer_reward_ends_at: null,
+              referred_reward_ends_at: '2026-04-03T00:00:00.000Z',
+            },
+          ],
+          error: null,
+        }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = new Request('http://localhost/api/referrals/status', {
+      method: 'GET',
+      headers: bearerHeader(),
+    })
+
+    const res = await referralStatus(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.token, 'statusref1234')
+    assert.equal(data.metrics.visits, 2)
+    assert.equal(data.metrics.shareClicks, 1)
+    assert.equal(data.metrics.signupStarts, 1)
+    assert.equal(data.metrics.successfulClaims, 1)
+    assert.equal(data.rewards.pendingCreditMonths, 2)
+    assert.equal(data.rewards.activeReward.kind, 'referrer_bonus')
+    assert.match(data.shareMessages.es, /cotizaciones/i)
   })
 })
 
