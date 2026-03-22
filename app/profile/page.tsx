@@ -10,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Label } from "@/components/ui/label"
 import { Loader2, Save, Building2, Upload, X, Plus, Pencil, Trash2, DollarSign, Link2, ExternalLink, RefreshCw, Sparkles, Lock, Users, CreditCard, Database, ShieldCheck } from "lucide-react"
 import Image from "next/image"
-import { getProfile, saveProfile, clearAllEstimates, getStorageStats, type BusinessInfo } from "@/lib/estimates-storage"
+import { getEstimates, getProfile, saveProfile, clearAllEstimates, getStorageStats, type BusinessInfo } from "@/lib/estimates-storage"
 import { getPriceList, savePriceListItem, deletePriceListItem } from "@/lib/db"
 import { toast } from "@/components/toast"
 import { PriceListModal } from "@/components/price-list-modal"
