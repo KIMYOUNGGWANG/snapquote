@@ -360,7 +360,7 @@ export async function POST(req: Request) {
             .update({
                 status: "sent",
                 sent_at: new Date().toISOString(),
-                provider_message_id: sendResponse.data?.id || sendResponse.id || null,
+                provider_message_id: sendResponse.data?.id ?? null,
             })
             .eq("id", claimRow.id)
 
