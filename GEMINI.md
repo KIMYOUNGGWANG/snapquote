@@ -1,4 +1,4 @@
-# 🏭 Orchestrator 5.2 — Antigravity Mission Control (GEMINI.md)
+# 🏭 Orchestrator 5.3 — Antigravity Mission Control (GEMINI.md)
 
 > **"로컬 환경(Antigravity IDE) 전용 멀티 에이전트 오케스트레이션 엔진."**
 > 
@@ -16,7 +16,7 @@
 
 ---
 
-## 🏗️ 2. Architecture & Pipeline (v5.2)
+## 🏗️ 2. Architecture & Pipeline (v5.3)
 
 ### Phase Pipeline
 | Phase | Name | Workflow | Action / Output |
@@ -24,12 +24,23 @@
 | P1 | Strategic Planning | `/plan` | 전략 기획 및 태스크 보드 생성 |
 | P2 | Architecture Design | `/plan`, `/ddd` | 도메인 및 파일 설계 (`task_board.md`) |
 | P3 | Database Schema | `/plan`, `/mvp` | 스키마 셋업 (Supabase/Neon) |
-| **P3.5** | **API Spec Gen** | **`/plan`** | **표준 명세화 (`docs/api-spec.md`)** ⚡ |
-| **P4** | **Implementation** | **`/develop`** | **직접 코드 작성 및 수정 (Step 1, 2)** ⚡ |
+| **P3.5** | **API Spec Gen** | **`/plan`** | **표준 명세화 (`docs/api-spec.md`)** |
+| **P4** | **Implementation** | **`/develop`** | **직접 코드 작성 및 수정 (Step 1, 2)** |
 | P5 | Integration | `/develop` | 백엔드 + 프론트엔드 연동 (Step 3) |
 | P6 | Testing | `/qa`, `/test`, `/ship` | 단위/E2E 테스트 실행 |
-| **P7** | **Fix & Debug** | **`/fix`** | **에러 로그 분석 및 자동 치유** ⚡ |
-| P8 | Deployment | `/ship` | Vercel 배포 및 Kaizen 학습 |
+| **P6.5** | **Cross-Model Review** | **`/review`** | **다중 모델 교차 검증** ⚡ |
+| **P7** | **Fix & Debug** | **`/fix`** | **Investigation Lock, 스코프 잠금, 자동 치유** ⚡ |
+| P8 | Deployment | `/ship` | Guard Mode, Document Auto-Sync, Bisectable Commits |
+| **P9** | **Retrospective** | **`/retro`** | **Git 분석 기반 자동 엔지니어링 회고** |
+
+### Model-Tier Routing ⚡ (v5.3)
+
+워크플로우별 최적 모델 등급을 프론트매터로 지정:
+
+| Tier | 워크플로우 | 근거 |
+|:-----|:-----------|:-----|
+| `strong` | `/plan`, `/review`, `/fix`, `/ship`, `/retro`, `/uiux`, `/ddd`, `/mvp`, `/cycle`, `/agent-builder`, `/pm`, `/mobile-plan` | 복잡한 추론, 아키텍처 판단 필요 |
+| `fast` | `/develop`, `/micro`, `/qa`, `/test`, `/status`, `/content`, `/stitch`, `/mobile-dev` | 패턴화된 작업, 코딩 속도 우선 |
 
 ---
 
@@ -40,18 +51,24 @@
 - `/plan`   : 신규 프로젝트 기획 구체화 및 API 규격(`api-spec.md`) 정의.
 - `/mvp`    : 최소 기능 제품(MVP) 신속 개발 및 빌드.
 - `/develop`: 기획이 끝난 기능의 실무 코드 구현 (Backend -> Frontend -> Integration).
-- `/fix`    : 에러 발생 시 원인 분석 및 `task_board` 우회 수정 후 재실행.
-- `/ship`   : 최종 품질 검수, 사이드 이펙트 체크 및 배포.
+- `/fix`    : Investigation Lock + 스코프 잠금 + 근본 원인 분석 + 자동 수정.
+- `/ship`   : Guard Mode, 스코프 드리프트 감지, Document Auto-Sync, Bisectable Commits, 배포.
+- `/retro`  : Git 히스토리 기반 자동 엔지니어링 회고 + 트렌드 분석.
 *   **Specialist commands**:
     - `/mobile-plan`: 모바일 앱 기획 및 전략 수립.
     - `/mobile-dev`: 모바일 앱 고속 구현 및 검증.
     - `/qa` : 브라우저 자동화 및 E2E 테스트 수행.
     - `/test` : TDD 사이클 기반 단위 테스트 작성 및 통과.
-    - `/uiux` : 디자인 DNA 스킬을 적용한 UI 폴리싱.
+    - `/uiux` : DESIGN.md 거버넌스 + 디자인 DNA로 UI 폴리싱.
     - `/stitch` : 디자인 에셋을 바탕으로 한 퍼블리싱 자동화.
     - `/ddd` : 도메인 주도 설계 아키텍처 수립.
     - `/micro` : 매우 단순한 원샷(One-shot) 코드 수정.
     - `/status` : 프로젝트 건강 상태 및 태스크 진행률 보고.
+*   **Safety commands** ⚡ (v5.3):
+    - `/careful` : 파괴적 명령어 사전 경고 활성화.
+    - `/freeze`  : 특정 디렉토리 외 수정 차단.
+    - `/guard`   : careful + freeze + 추가 제한 (배포 시 자동).
+    - `/investigate` : 원인 파악 전 코드 수정 금지 (`/fix` 자동 활성).
 
 ---
 
@@ -76,12 +93,13 @@
 ```
 project-root/
 ├── .agent/            ← 에이전트 시스템 코어
-│   ├── workflows/     ← 워크플로우 명세 (v5.2)
+│   ├── workflows/     ← 워크플로우 명세 (v5.3, model-tier 포함)
 │   ├── skills/        ← 도메인별 AI 스킬 (engineering, design, qa 등)
-│   ├── memory/        ← 현재 상태 기억 (task_board, learnings 등)
+│   ├── memory/        ← 현재 상태 기억 (task_board, learnings, freeze-scope 등)
 │   └── scripts/       ← 자동화 스크립트 (skill-loader, audit 등)
 ├── docs/
 │   └── api-spec.md    ← 모든 개발의 단일 진실 공급원 (Contract)
+├── DESIGN.md          ← 디자인 시스템 문서 (/uiux 자동 생성)
 └── GEMINI.md          ← 바로 이 파일 (나의 헌법)
 ```
 
@@ -93,10 +111,15 @@ project-root/
 2. **Contract-Driven**: `docs/api-spec.md`에 정의되지 않은 API나 데이터 타입은 함부로 날조(Hallucination)하지 않는다.
 3. **Checklist Follower**: 관련된 `.agent/skills/` 파일 내 규칙(예: `clean-code.md`)을 무조건 준수한다.
 4. **Speak Native**: 요약 보고나 사용자 질문 및 답변은 모두 "Korean(한국어)"으로 친절하게 답변한다.
+5. **Self-Regulation (v5.2)**: `critic-gate.md`의 WTF-likelihood 점수를 추적한다. Score ≥ 6이면 즉시 중단하고 사용자에게 보고한다.
+6. **Verification First (v5.2)**: 검증 없는 완료 선언은 금지. 코드 변경 후에는 반드시 테스트를 재실행한다. "자신감은 증거가 아니다."
+7. **Fix-First (v5.2)**: 리뷰에서 발견된 기계적 문제는 즉시 수정한다. 읽기만 하는 리뷰는 시간 낭비.
+8. **Safety First (v5.3)**: `safety-guardrails.md`의 규칙을 준수한다. 파괴적 명령어 실행 전 경고, 디버깅 시 스코프 잠금, 배포 시 Guard Mode.
+9. **Cross-Verify (v5.3)**: 보안/아키텍처 변경 시 교차 모델 검증을 수행한다. 같은 모델의 편향을 제거한다.
 
 ---
 
-## 🛠️ 7. Embedded Engineering Standards (v5.2)
+## 🛠️ 7. Embedded Engineering Standards (v5.3)
 
 ### [ ] 1. Architecture & Clean Code (`clean-code.md`)
 - [ ] **Descriptive Naming**: 축약어 금지 (`req`, `res` 대신 `request`, `response`).
@@ -117,12 +140,14 @@ project-root/
 ## 🎨 8. Design DNA (Premium Aesthetics)
 
 Apply these rules to every UI component to avoid "Generic AI" looks.
+> 상세 가이드: `.agents/skills/design/design-dna.md` 참조.
 
 - [ ] **No Default Colors**: HSL 기반의 세련된 팔레트(Slate, Indigo 등)를 사용한다.
 - [ ] **Glassmorphism**: `backdrop-blur-md`와 반투명 배경을 활용한다.
 - [ ] **Soft Shadows**: 다층 레이어 그림자를 사용하여 입체감을 부여한다.
 - [ ] **Motion**: 모든 버튼에 `transition-all`과 호버 액션을 적용한다.
 - [ ] **8px Grid**: 모든 간격은 4의 배수(Tailwind 단위)를 엄격히 준수한다.
+- [ ] **DESIGN.md (v5.3)**: `/uiux` 실행 시 프로젝트별 `DESIGN.md` 자동 생성 및 강제 참조.
 
 ---
 
@@ -140,3 +165,4 @@ Apply these rules to every UI component to avoid "Generic AI" looks.
 - If a tool or command fails, do NOT enter an infinite retry loop.
 - Analyze the error, adjust the approach, and retry exactly **once**.
 - If it fails again, immediately halt and use `notify_user` with `BlockedOnUser: true` to seek human guidance.
+

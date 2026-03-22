@@ -1,17 +1,16 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import { BottomNav } from "@/components/bottom-nav";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/toast";
 import { SyncManager } from "@/components/sync-manager";
 import { AuthRedirectManager } from "@/components/auth-redirect-manager";
 import { OfflineBanner } from "@/components/offline-banner";
 import { InstallPrompt } from "@/components/install-prompt";
-import { FeedbackModal } from "@/components/feedback-modal";
 import { ServiceWorkerRegister } from "@/components/service-worker-register";
 import { ReferralAttributionManager } from "@/components/referral-attribution-manager";
 import { Analytics } from "@vercel/analytics/next";
 import { cn } from "@/lib/utils";
+import { AppShellWrapper } from "@/components/app-shell-wrapper";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://snapquote.ai"; // Fallback to production URL
 
@@ -62,7 +61,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={cn("min-h-screen bg-background antialiased pb-24 selection:bg-primary/20 selection:text-primary")}>
+      <body className={cn("min-h-screen bg-[#050505] sm:bg-[#0a0a0a] antialiased selection:bg-primary/20 selection:text-primary")}>
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"
@@ -72,15 +71,13 @@ export default function RootLayout({
           <ServiceWorkerRegister />
           <InstallPrompt />
           <OfflineBanner />
-          <main className="w-full min-h-screen relative">
-            {children}
-          </main>
-          <BottomNav />
           <AuthRedirectManager />
           <ReferralAttributionManager />
           <SyncManager />
-          <FeedbackModal />
           <Toaster />
+          <AppShellWrapper>
+            {children}
+          </AppShellWrapper>
           <Analytics />
         </ThemeProvider>
       </body>

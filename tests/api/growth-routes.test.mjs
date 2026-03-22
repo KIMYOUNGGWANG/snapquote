@@ -107,6 +107,62 @@ describe('POST /api/pricing/events', () => {
     assert.equal(data.eventId, 'conv_123')
     assert.equal(state.supabase.rpcCalls.length, 1)
   })
+
+  test('accepts RPC payloads that use out_ column names', async () => {
+    const state = getTestState()
+
+    state.supabase.rpcResolver = async () => ({
+      data: [{ out_experiment_id: 'exp_out', out_variant: 'variant_out' }],
+      error: null,
+    })
+
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'pricing_conversions' && query.action === 'insert' && query.mode === 'single') {
+        return { data: { id: 'conv_out' }, error: null }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = jsonRequest('http://localhost/api/pricing/events', {
+      event: 'upgrade_clicked',
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await pricingEvents(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.eventId, 'conv_out')
+  })
+
+  test('skips tracking when pricing experiment schema is unavailable', async () => {
+    const state = getTestState()
+
+    state.supabase.rpcResolver = async () => ({
+      data: null,
+      error: {
+        code: 'PGRST204',
+        message: "Could not find the function public.get_or_create_pricing_assignment(experiment_name) in the schema cache",
+      },
+    })
+
+    const req = jsonRequest('http://localhost/api/pricing/events', {
+      event: 'pricing_viewed',
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await pricingEvents(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.skipped, true)
+    assert.equal(data.reason, 'pricing_schema_unavailable')
+  })
 })
 
 describe('GET /api/pricing/offer', () => {
@@ -115,6 +171,30 @@ describe('GET /api/pricing/offer', () => {
     state.supabase.rpcResolver = async () => ({
       data: [],
       error: null,
+    })
+
+    const req = new Request('http://localhost/api/pricing/offer', {
+      method: 'GET',
+      headers: bearerHeader(),
+    })
+
+    const res = await pricingOffer(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.experiment, null)
+    assert.equal(data.variant, null)
+  })
+
+  test('returns null offer when pricing schema is unavailable', async () => {
+    const state = getTestState()
+    state.supabase.rpcResolver = async () => ({
+      data: null,
+      error: {
+        code: 'PGRST204',
+        message: "Could not find the function public.get_or_create_pricing_assignment(experiment_name) in the schema cache",
+      },
     })
 
     const req = new Request('http://localhost/api/pricing/offer', {
@@ -172,6 +252,47 @@ describe('GET /api/pricing/offer', () => {
     assert.equal(data.experiment.id, 'exp_42')
     assert.equal(data.variant.name, 'pro_19')
     assert.equal(data.variant.priceMonthly, 19)
+  })
+
+  test('accepts RPC payloads that use out_ column names', async () => {
+    const state = getTestState()
+    state.supabase.rpcResolver = async () => ({
+      data: [{ out_experiment_id: 'exp_out_42', out_variant: 'pro_29' }],
+      error: null,
+    })
+
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'pricing_experiments' && query.mode === 'maybeSingle') {
+        return {
+          data: {
+            id: 'exp_out_42',
+            name: 'pricing_v1',
+            config: {
+              currency: 'USD',
+              variants: [
+                { name: 'pro_29', priceMonthly: 29, ctaLabel: 'Go Pro' },
+              ],
+            },
+          },
+          error: null,
+        }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = new Request('http://localhost/api/pricing/offer', {
+      method: 'GET',
+      headers: bearerHeader(),
+    })
+
+    const res = await pricingOffer(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.experiment.id, 'exp_out_42')
+    assert.equal(data.variant.name, 'pro_29')
   })
 })
 

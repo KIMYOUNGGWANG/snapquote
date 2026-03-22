@@ -172,6 +172,36 @@ describe("POST /api/billing/stripe/checkout", () => {
     assert.equal(res.status, 409)
     assert.equal(state.stripe.checkoutSessionsCreateCalls.length, 0)
   })
+
+  test("returns actionable error when billing schema columns are missing", async () => {
+    setBillingEnv()
+    const state = getTestState()
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === "profiles" && query.action === "select" && query.mode === "maybeSingle") {
+        return {
+          data: null,
+          error: {
+            code: "PGRST204",
+            message: "Could not find the 'stripe_customer_id' column of 'profiles' in the schema cache",
+          },
+        }
+      }
+      return { data: null, error: null }
+    }
+
+    const req = jsonRequest(
+      "http://localhost/api/billing/stripe/checkout",
+      { planTier: "pro" },
+      { headers: bearerHeader() }
+    )
+
+    const res = await billingCheckoutPost(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 503)
+    assert.match(data.error.message, /schema is out of date/i)
+    assert.equal(state.stripe.checkoutSessionsCreateCalls.length, 0)
+  })
 })
 
 describe("POST /api/billing/stripe/portal", () => {
@@ -257,6 +287,37 @@ describe("GET /api/billing/subscription", () => {
     assert.equal(data.subscribed, true)
     assert.equal(data.status, "active")
     assert.equal(data.customerId, "cus_sub_1")
+  })
+
+  test("returns free-plan fallback when billing schema columns are missing", async () => {
+    setBillingEnv()
+    const state = getTestState()
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === "profiles" && query.action === "select" && query.mode === "maybeSingle") {
+        return {
+          data: null,
+          error: {
+            code: "PGRST204",
+            message: "Could not find the 'stripe_customer_id' column of 'profiles' in the schema cache",
+          },
+        }
+      }
+      return { data: null, error: null }
+    }
+
+    const req = new Request("http://localhost/api/billing/subscription", {
+      method: "GET",
+      headers: bearerHeader(),
+    })
+    const res = await billingSubscriptionGet(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.planTier, "free")
+    assert.equal(data.subscribed, false)
+    assert.equal(data.status, null)
+    assert.equal(data.cancelAtPeriodEnd, false)
   })
 })
 

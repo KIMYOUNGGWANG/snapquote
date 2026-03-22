@@ -7,6 +7,35 @@ import {
 } from "@/lib/server/stripe-billing"
 import { resolveEffectiveSubscriptionView } from "@/lib/server/effective-plan"
 
+function isSchemaMismatchError(error: unknown, relatedTerms: string[] = []): boolean {
+    if (!error || typeof error !== "object") return false
+    const record = error as Record<string, unknown>
+    const code = typeof record.code === "string" ? record.code : ""
+    const rawMessage = [
+        typeof record.message === "string" ? record.message : "",
+        typeof record.details === "string" ? record.details : "",
+        typeof record.hint === "string" ? record.hint : "",
+    ]
+        .join(" ")
+        .toLowerCase()
+
+    if (code === "PGRST204" || code === "42703" || code === "42P01") {
+        return true
+    }
+
+    return relatedTerms.some((term) => rawMessage.includes(term.toLowerCase()))
+}
+
+function billingSubscriptionFallbackResponse() {
+    return NextResponse.json({
+        ok: true,
+        planTier: "free",
+        subscribed: false,
+        status: null,
+        cancelAtPeriodEnd: false,
+    })
+}
+
 export async function GET(req: Request) {
     const auth = await requireAuthenticatedUser(req)
     if (!auth.ok) {
@@ -44,6 +73,22 @@ export async function GET(req: Request) {
         .maybeSingle()
 
     if (error) {
+        if (isSchemaMismatchError(error, [
+            "profiles",
+            "stripe_customer_id",
+            "stripe_subscription_id",
+            "stripe_subscription_status",
+            "stripe_subscription_price_id",
+            "stripe_subscription_current_period_end",
+            "stripe_cancel_at_period_end",
+            "referral_trial_ends_at",
+            "referral_bonus_ends_at",
+            "referral_credit_balance_months",
+        ])) {
+            console.warn("billing/subscription: billing schema missing, returning free-plan fallback.")
+            return billingSubscriptionFallbackResponse()
+        }
+
         return NextResponse.json(
             { error: { message: "Failed to load subscription status", code: 500 } },
             { status: 500 }

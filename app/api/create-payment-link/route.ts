@@ -14,6 +14,7 @@ const UUID_PATTERN =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const MAX_IDEMPOTENCY_KEY_LENGTH = 255
+const STRIPE_PAYMENT_LINK_CURRENCY = "usd"
 
 function normalizeIdempotencyKey(value: string | null): string | null {
     if (!value) return null
@@ -225,7 +226,7 @@ export async function POST(req: Request) {
                 line_items: [
                     {
                         price_data: {
-                            currency: "cad",
+                            currency: STRIPE_PAYMENT_LINK_CURRENCY,
                             product_data: {
                                 name: safeEstimateNumber
                                     ? `Estimate Payment - ${safeEstimateNumber}`

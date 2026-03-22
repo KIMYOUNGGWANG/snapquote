@@ -71,15 +71,17 @@ export function FeedbackModal() {
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-                <Button
-                    className="fixed bottom-20 right-4 z-50 rounded-full shadow-lg"
-                    size="icon"
-                >
-                    <MessageSquarePlus className="h-6 w-6" />
-                    <span className="sr-only">Feedback</span>
-                </Button>
-            </DialogTrigger>
+            <div className="fixed bottom-24 left-0 right-0 z-[90] pointer-events-none flex justify-end px-4 max-w-md mx-auto">
+                <DialogTrigger asChild>
+                    <Button
+                        className="rounded-full shadow-lg pointer-events-auto"
+                        size="icon"
+                    >
+                        <MessageSquarePlus className="h-6 w-6" />
+                        <span className="sr-only">Feedback</span>
+                    </Button>
+                </DialogTrigger>
+            </div>
             <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
                     <DialogTitle>Send Feedback</DialogTitle>

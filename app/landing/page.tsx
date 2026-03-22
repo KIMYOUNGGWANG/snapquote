@@ -5,6 +5,7 @@ import Link from "next/link"
 import Image from "next/image"
 import { FreeEstimatorWidget } from "@/components/free-estimator-widget"
 import { FREE_PLAN_MARKETING_QUOTE_LIMIT } from "@/lib/free-tier"
+import { MARKETING_PLAN_OPTIONS } from "@/lib/marketing-plans"
 
 // Animated counter component
 function AnimatedCounter({ target, suffix = "", prefix = "" }: { target: number, suffix?: string, prefix?: string }) {
@@ -90,6 +91,30 @@ export default function LandingPage() {
         "욕실 타일 50 sqft, new vanity install, haul away debris, 하루 인건비",
         "Cambiar dos luces, add dimmer, test circuit, cleanup included",
         "천장 누수 보수, drywall patch, texture blend, paint touch-up"
+    ]
+
+    const appPreviewCards = [
+        {
+            title: "Owner Dashboard",
+            description: "See active quotes, sent jobs, and what still needs a follow-up.",
+            accentClassName: "border-amber-400/20 bg-gradient-to-b from-amber-500/10 to-transparent",
+            badge: "Today",
+            lines: ["4 drafts ready", "2 sent today", "1 follow-up due"],
+        },
+        {
+            title: "On-Site Quote Builder",
+            description: "Capture the scope, clean it up, and send before you leave the house.",
+            accentClassName: "border-sky-400/20 bg-gradient-to-b from-sky-500/10 to-transparent",
+            badge: "Estimate Draft",
+            lines: ["Scope", "Materials", "Labor", "Tax + Total"],
+        },
+        {
+            title: "Follow-Up + Payment",
+            description: "Keep the quote moving until it becomes an approved job.",
+            accentClassName: "border-emerald-400/20 bg-gradient-to-b from-emerald-500/10 to-transparent",
+            badge: "Automation",
+            lines: ["Sent 48h ago", "Reminder queued", "Deposit link ready"],
+        },
     ]
 
     return (
@@ -420,27 +445,27 @@ export default function LandingPage() {
                     </div>
 
                     <div className="grid md:grid-cols-3 gap-8">
-                        <div className="text-center">
-                            <div className="bg-white/5 border border-white/10 rounded-3xl p-3 mb-4 hover:border-blue-500/30 transition-colors shadow-2xl shadow-blue-900/10">
-                                <Image src="/app-screenshot-home.png" alt="SnapQuote Home" width={400} height={800} className="rounded-2xl w-full h-auto" />
+                        {appPreviewCards.map((card) => (
+                            <div key={card.title} className="text-center">
+                                <div className={`bg-white/5 border border-white/10 rounded-3xl p-5 mb-4 transition-colors shadow-2xl ${card.accentClassName}`}>
+                                    <div className="rounded-[1.5rem] border border-white/10 bg-[#11141b] p-4 text-left min-h-[17rem]">
+                                        <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                                            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">SnapQuote</div>
+                                            <div className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-gray-300">{card.badge}</div>
+                                        </div>
+                                        <div className="space-y-3 pt-4">
+                                            {card.lines.map((line) => (
+                                                <div key={line} className="rounded-2xl border border-white/5 bg-white/[0.03] px-3 py-3 text-sm text-gray-200">
+                                                    {line}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                                <h3 className="font-semibold text-lg">{card.title}</h3>
+                                <p className="text-sm text-gray-400">{card.description}</p>
                             </div>
-                            <h3 className="font-semibold text-lg">Owner Dashboard</h3>
-                            <p className="text-sm text-gray-400">See active quotes, sent jobs, and what still needs a follow-up.</p>
-                        </div>
-                        <div className="text-center">
-                            <div className="bg-white/5 border border-white/10 rounded-3xl p-3 mb-4 hover:border-purple-500/30 transition-colors shadow-2xl shadow-purple-900/10">
-                                <Image src="/app-screenshot-estimate.png" alt="SnapQuote Estimate" width={400} height={800} className="rounded-2xl w-full h-auto" />
-                            </div>
-                            <h3 className="font-semibold text-lg">On-Site Quote Builder</h3>
-                            <p className="text-sm text-gray-400">Capture the scope, clean it up, and send before you leave the house.</p>
-                        </div>
-                        <div className="text-center">
-                            <div className="bg-white/5 border border-white/10 rounded-3xl p-3 mb-4 hover:border-green-500/30 transition-colors shadow-2xl shadow-green-900/10">
-                                <Image src="/app-screenshot-automation.png" alt="SnapQuote Automation" width={400} height={800} className="rounded-2xl w-full h-auto" />
-                            </div>
-                            <h3 className="font-semibold text-lg">Follow-Up + Payment</h3>
-                            <p className="text-sm text-gray-400">Keep the quote moving until it becomes an approved job.</p>
-                        </div>
+                        ))}
                     </div>
                 </div>
             </section>
@@ -482,99 +507,46 @@ export default function LandingPage() {
                     </div>
 
                     <div className="grid md:grid-cols-3 gap-6">
-                        {/* Starter */}
-                        <div className="bg-white/5 border border-white/10 rounded-2xl p-8">
-                            <h3 className="text-lg font-bold mb-1">Starter</h3>
-                            <p className="text-sm text-gray-400 mb-6">For solo contractors sending clean English quotes from multilingual field notes</p>
-                            <div className="text-4xl font-bold mb-1">CAD $29</div>
-                            <p className="text-sm text-gray-400 mb-6">per month</p>
-                            <ul className="space-y-3 text-sm text-gray-300">
-                                <li className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    80 estimates per month
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    60 transcription minutes
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    60 emails per month
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    Spanish/Korean voice capture plus offline mode
-                                </li>
-                            </ul>
-                            <Link href="/new-estimate" className="block mt-8 border border-white/10 hover:border-white/20 text-center py-3 rounded-xl text-sm font-medium transition-colors">
-                                Start With Starter
-                            </Link>
-                        </div>
+                        {MARKETING_PLAN_OPTIONS.map((plan) => {
+                            const isTeam = plan.tier === "team"
 
-                        {/* Pro */}
-                        <div className="bg-white/5 border border-white/10 rounded-2xl p-8">
-                            <h3 className="text-lg font-bold mb-1">Pro</h3>
-                            <p className="text-sm text-gray-400 mb-6">For owner-operators who want English-ready quotes, faster approvals, and deposits</p>
-                            <div className="text-4xl font-bold mb-1">CAD $59</div>
-                            <p className="text-sm text-gray-400 mb-6">per month</p>
-                            <ul className="space-y-3 text-sm text-gray-300">
-                                <li className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    250 estimates per month
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    180 transcription minutes
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    200 emails per month
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    Receipt scan, English quote cleanup, and payment-ready quotes
-                                </li>
-                            </ul>
-                            <Link href="/new-estimate" className="block mt-8 border border-white/10 hover:border-white/20 text-center py-3 rounded-xl text-sm font-medium transition-colors">
-                                Try Pro Workflow
-                            </Link>
-                        </div>
-
-                        {/* Team */}
-                        <div className="relative bg-gradient-to-br from-blue-600/10 to-purple-600/10 border-2 border-blue-500/30 rounded-2xl p-8">
-                            <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-bold px-4 py-1 rounded-full">
-                                MOST POPULAR
-                            </div>
-                            <h3 className="text-lg font-bold mb-1">Team</h3>
-                            <p className="text-sm text-gray-400 mb-6">For 2-10 tech crews standardizing English quote output across multilingual teams</p>
-                            <div className="text-4xl font-bold mb-1">CAD $129</div>
-                            <p className="text-sm text-gray-400 mb-6">per month</p>
-                            <ul className="space-y-3 text-sm text-gray-300">
-                                <li className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-blue-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    800 estimates per month
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-blue-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    Shared English quote standards across techs
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-blue-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    Automation included
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-blue-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    Higher-volume quoting for multiple techs
-                                </li>
-                                <li className="flex items-center gap-2">
-                                    <svg className="w-4 h-4 text-blue-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                    Priority support
-                                </li>
-                            </ul>
-                            <Link href="/new-estimate" className="block mt-8 bg-blue-600 hover:bg-blue-500 text-center py-3 rounded-xl text-sm font-semibold transition-all hover:shadow-lg hover:shadow-blue-500/25">
-                                Explore Team →
-                            </Link>
-                        </div>
+                            return (
+                                <div
+                                    key={plan.tier}
+                                    className={isTeam
+                                        ? "relative bg-gradient-to-br from-blue-600/10 to-purple-600/10 border-2 border-blue-500/30 rounded-2xl p-8"
+                                        : "bg-white/5 border border-white/10 rounded-2xl p-8"}
+                                >
+                                    {isTeam && (
+                                        <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-bold px-4 py-1 rounded-full">
+                                            MOST POPULAR
+                                        </div>
+                                    )}
+                                    <h3 className="text-lg font-bold mb-1">{plan.label}</h3>
+                                    <p className="text-sm text-gray-400 mb-6">{plan.bestFor}</p>
+                                    <div className="text-4xl font-bold mb-1">{plan.monthlyPrice}</div>
+                                    <p className="text-sm text-gray-400 mb-6">{plan.billingLabel}</p>
+                                    <ul className="space-y-3 text-sm text-gray-300">
+                                        {plan.includes.map((item) => (
+                                            <li key={item} className="flex items-center gap-2">
+                                                <svg className={`w-4 h-4 shrink-0 ${isTeam ? "text-blue-400" : "text-green-400"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                </svg>
+                                                {item}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    <Link
+                                        href={`/pricing?plan=${plan.tier}`}
+                                        className={isTeam
+                                            ? "block mt-8 bg-blue-600 hover:bg-blue-500 text-center py-3 rounded-xl text-sm font-semibold transition-all hover:shadow-lg hover:shadow-blue-500/25"
+                                            : "block mt-8 border border-white/10 hover:border-white/20 text-center py-3 rounded-xl text-sm font-medium transition-colors"}
+                                    >
+                                        {plan.pricingCtaLabel}
+                                    </Link>
+                                </div>
+                            )
+                        })}
                     </div>
                 </div>
             </section>

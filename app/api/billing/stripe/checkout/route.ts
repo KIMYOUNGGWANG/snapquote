@@ -20,6 +20,37 @@ interface BillingProfileRow {
     stripe_subscription_status: string | null
 }
 
+function isSchemaMismatchError(error: unknown, relatedTerms: string[] = []): boolean {
+    if (!error || typeof error !== "object") return false
+    const record = error as Record<string, unknown>
+    const code = typeof record.code === "string" ? record.code : ""
+    const rawMessage = [
+        typeof record.message === "string" ? record.message : "",
+        typeof record.details === "string" ? record.details : "",
+        typeof record.hint === "string" ? record.hint : "",
+    ]
+        .join(" ")
+        .toLowerCase()
+
+    if (code === "PGRST204" || code === "42703" || code === "42P01") {
+        return true
+    }
+
+    return relatedTerms.some((term) => rawMessage.includes(term.toLowerCase()))
+}
+
+function billingSchemaErrorResponse() {
+    return NextResponse.json(
+        {
+            error: {
+                message: "Billing database schema is out of date. Apply the Stripe billing Supabase migrations and try again.",
+                code: 503,
+            },
+        },
+        { status: 503 }
+    )
+}
+
 function toSafeString(value: unknown, maxLength: number): string {
     if (typeof value !== "string") return ""
     return value.trim().slice(0, maxLength)
@@ -129,6 +160,16 @@ export async function POST(req: Request) {
             .maybeSingle()
 
         if (profileError) {
+            if (isSchemaMismatchError(profileError, [
+                "stripe_customer_id",
+                "stripe_subscription_id",
+                "stripe_subscription_status",
+                "profiles",
+            ])) {
+                console.error("Billing checkout blocked by missing billing schema:", profileError)
+                return billingSchemaErrorResponse()
+            }
+
             return NextResponse.json(
                 { error: { message: "Failed to load billing profile", code: 500 } },
                 { status: 500 }
@@ -161,7 +202,7 @@ export async function POST(req: Request) {
             customerId = customer.id
         }
 
-        await supabase
+        const { error: upsertError } = await supabase
             .from("profiles")
             .upsert(
                 {
@@ -171,6 +212,22 @@ export async function POST(req: Request) {
                 },
                 { onConflict: "id" }
             )
+
+        if (upsertError) {
+            if (isSchemaMismatchError(upsertError, [
+                "stripe_customer_id",
+                "stripe_subscription_updated_at",
+                "profiles",
+            ])) {
+                console.error("Billing checkout blocked by missing billing schema during profile upsert:", upsertError)
+                return billingSchemaErrorResponse()
+            }
+
+            return NextResponse.json(
+                { error: { message: "Failed to update billing profile", code: 500 } },
+                { status: 500 }
+            )
+        }
 
         const checkoutSession = await stripe.checkout.sessions.create({
             mode: "subscription",
@@ -207,6 +264,14 @@ export async function POST(req: Request) {
         })
     } catch (error: any) {
         console.error("Stripe Billing checkout error:", error)
+
+        if (isSchemaMismatchError(error, [
+            "stripe_customer_id",
+            "stripe_subscription_status",
+            "profiles",
+        ])) {
+            return billingSchemaErrorResponse()
+        }
 
         const stripeType = typeof error?.type === "string" ? error.type : ""
         const status = stripeType === "StripeAuthenticationError" ? 401 : 500

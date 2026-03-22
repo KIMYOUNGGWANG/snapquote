@@ -964,6 +964,7 @@ describe('POST /api/create-payment-link', () => {
     assert.equal(capturedPayload.metadata.userId, 'user-1')
     assert.equal(capturedPayload.metadata.estimateId, '11111111-1111-4111-8111-111111111111')
     assert.equal(capturedPayload.metadata.estimateNumber, 'EST-249')
+    assert.equal(capturedPayload.line_items[0].price_data.currency, 'usd')
   })
 
   test('uses deterministic idempotency key by default', async () => {
