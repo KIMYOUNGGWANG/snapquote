@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { createAuthedSupabaseClient, parseBearerToken } from "@/lib/server/supabase-auth"
+import { createServiceSupabaseClient, ensureProfileExists } from "@/lib/server/stripe-connect"
 import { getBillingPlanPriceConfig, type PaidBillingPlanTier } from "@/lib/server/stripe-billing"
 
 const DEFAULT_EXPERIMENT_NAME = "pricing_v1"
@@ -10,6 +11,32 @@ type PricingVariantConfig = {
     priceMonthly?: number
     ctaLabel?: string
     [key: string]: unknown
+}
+
+type PricingAssignmentRow = {
+    experiment_id?: string | null
+    variant?: string | null
+    out_experiment_id?: string | null
+    out_variant?: string | null
+}
+
+function isSchemaMismatchError(error: unknown, relatedTerms: string[] = []): boolean {
+    if (!error || typeof error !== "object") return false
+    const record = error as Record<string, unknown>
+    const code = typeof record.code === "string" ? record.code : ""
+    const rawMessage = [
+        typeof record.message === "string" ? record.message : "",
+        typeof record.details === "string" ? record.details : "",
+        typeof record.hint === "string" ? record.hint : "",
+    ]
+        .join(" ")
+        .toLowerCase()
+
+    if (code === "PGRST204" || code === "42703" || code === "42P01" || code === "42883") {
+        return true
+    }
+
+    return relatedTerms.some((term) => rawMessage.includes(term.toLowerCase()))
 }
 
 function resolveBillingOptions() {
@@ -64,6 +91,35 @@ function resolveVariantConfig(config: Record<string, unknown>, variantName: stri
     return { name: variantName }
 }
 
+function pricingOfferUnavailableResponse() {
+    return NextResponse.json({
+        ok: true,
+        experiment: null,
+        variant: null,
+        billing: resolveBillingOptions(),
+    })
+}
+
+function normalizeAssignmentRow(value: unknown): { experimentId: string; variant: string } | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null
+    const record = value as PricingAssignmentRow
+    const experimentId =
+        typeof record.experiment_id === "string"
+            ? record.experiment_id.trim()
+            : typeof record.out_experiment_id === "string"
+              ? record.out_experiment_id.trim()
+              : ""
+    const variant =
+        typeof record.variant === "string"
+            ? record.variant.trim()
+            : typeof record.out_variant === "string"
+              ? record.out_variant.trim()
+              : ""
+
+    if (!experimentId || !variant) return null
+    return { experimentId, variant }
+}
+
 export async function GET(req: Request) {
     const token = parseBearerToken(req)
     if (!token) {
@@ -107,6 +163,11 @@ export async function GET(req: Request) {
         )
     }
 
+    const serviceSupabase = createServiceSupabaseClient()
+    if (serviceSupabase) {
+        await ensureProfileExists(serviceSupabase, user.id)
+    }
+
     const experimentName = normalizeExperimentName(new URL(req.url).searchParams.get("experiment"))
 
     const { data: assignmentRows, error: assignmentError } = await supabase.rpc(
@@ -115,6 +176,14 @@ export async function GET(req: Request) {
     )
 
     if (assignmentError) {
+        if (isSchemaMismatchError(assignmentError, [
+            "get_or_create_pricing_assignment",
+            "pricing_experiments",
+        ])) {
+            console.warn("pricing/offer: pricing schema missing, returning null offer.")
+            return pricingOfferUnavailableResponse()
+        }
+
         console.error("Failed to resolve pricing assignment:", assignmentError)
         return NextResponse.json(
             { error: { message: "Failed to resolve pricing offer", code: 500 } },
@@ -122,23 +191,23 @@ export async function GET(req: Request) {
         )
     }
 
-    const assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : null
-    if (!assignment?.experiment_id || !assignment?.variant) {
-        return NextResponse.json({
-            ok: true,
-            experiment: null,
-            variant: null,
-            billing: resolveBillingOptions(),
-        })
+    const assignment = normalizeAssignmentRow(Array.isArray(assignmentRows) ? assignmentRows[0] : null)
+    if (!assignment) {
+        return pricingOfferUnavailableResponse()
     }
 
     const { data: experiment, error: experimentError } = await supabase
         .from("pricing_experiments")
         .select("id, name, config")
-        .eq("id", assignment.experiment_id)
+        .eq("id", assignment.experimentId)
         .maybeSingle()
 
     if (experimentError || !experiment) {
+        if (isSchemaMismatchError(experimentError, ["pricing_experiments"])) {
+            console.warn("pricing/offer: pricing experiment table missing, returning null offer.")
+            return pricingOfferUnavailableResponse()
+        }
+
         console.error("Failed to load pricing experiment:", experimentError)
         return NextResponse.json(
             { error: { message: "Failed to load pricing offer", code: 500 } },

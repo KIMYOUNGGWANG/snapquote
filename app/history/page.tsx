@@ -1,9 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle, MessageSquare, RefreshCw, Link2 } from "lucide-react"
+import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle, MessageSquare, RefreshCw, Link2, Clock3, CloudUpload, CircleDollarSign, Send } from "lucide-react"
 import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
 import { getEstimates, deleteEstimate, getProfile, updateEstimateStatus, updateEstimate, type LocalEstimate, type EstimateItem, type BusinessInfo } from "@/lib/estimates-storage"
@@ -27,6 +27,7 @@ import {
     type QuickBooksStatusResponse,
 } from "@/lib/quickbooks"
 import { hasPdfBrandingAccess, hasPdfTemplateAccess } from "@/lib/pdf-branding"
+import { cn } from "@/lib/utils"
 
 type TabType = 'drafts' | 'sent' | 'paid'
 
@@ -35,6 +36,22 @@ type StripePaymentStatusResponse = {
     paid: boolean
     checkoutSessionId?: string
     paidAt?: string
+}
+
+function formatAmount(amount: number): string {
+    return `$${amount.toFixed(2)}`
+}
+
+function getEstimateStatusTone(status: LocalEstimate["status"]) {
+    if (status === "paid") {
+        return "bg-emerald-100 text-emerald-800"
+    }
+
+    if (status === "sent") {
+        return "bg-sky-100 text-sky-800"
+    }
+
+    return "bg-amber-100 text-amber-800"
 }
 
 export default function HistoryPage() {
@@ -175,22 +192,54 @@ export default function HistoryPage() {
         }
     }, [authResolved, isAuthenticated, syncSentEstimatePaymentStatuses])
 
-    // Filter estimates based on active tab
-    const filteredEstimates = estimates.filter(e => {
-        if (activeTab === 'drafts') {
-            return e.status === 'draft' || !e.status  // Include legacy estimates
-        }
-        if (activeTab === 'sent') {
-            return e.status === 'sent'
-        }
-        return e.status === 'paid'
-    })
+    const filteredEstimates = useMemo(() => {
+        return estimates.filter((estimate) => {
+            if (activeTab === "drafts") {
+                return estimate.status === "draft" || !estimate.status
+            }
 
-    // Count for badges
-    const draftsCount = estimates.filter(e => e.status === 'draft' || !e.status).length
-    const sentCount = estimates.filter(e => e.status === 'sent').length
-    const paidCount = estimates.filter(e => e.status === 'paid').length
+            if (activeTab === "sent") {
+                return estimate.status === "sent"
+            }
+
+            return estimate.status === "paid"
+        })
+    }, [activeTab, estimates])
+
+    const historyMetrics = useMemo(() => {
+        const drafts = estimates.filter((estimate) => estimate.status === "draft" || !estimate.status)
+        const sent = estimates.filter((estimate) => estimate.status === "sent")
+        const paid = estimates.filter((estimate) => estimate.status === "paid")
+
+        const draftValue = drafts.reduce((sum, estimate) => sum + estimate.totalAmount, 0)
+        const sentValue = sent.reduce((sum, estimate) => sum + estimate.totalAmount, 0)
+        const paidValue = paid.reduce((sum, estimate) => sum + estimate.totalAmount, 0)
+        const latestUpdatedAt = estimates[0]?.updatedAt || estimates[0]?.createdAt || null
+
+        return {
+            draftsCount: drafts.length,
+            sentCount: sent.length,
+            paidCount: paid.length,
+            draftValue,
+            sentValue,
+            paidValue,
+            latestUpdatedAt,
+        }
+    }, [estimates])
+
+    const draftsCount = historyMetrics.draftsCount
+    const sentCount = historyMetrics.sentCount
+    const paidCount = historyMetrics.paidCount
     const pendingSyncSummary = summarizePendingSync(estimates, 0)
+    const activeTabLabel = activeTab === "drafts" ? "Draft queue" : activeTab === "sent" ? "Awaiting payment" : "Collected"
+    const latestActivityLabel = historyMetrics.latestUpdatedAt
+        ? new Date(historyMetrics.latestUpdatedAt).toLocaleString()
+        : "No estimate activity yet"
+    const quickBooksSummaryLabel = quickBooksStatus?.syncStats.latestSyncedAt
+        ? `Last synced ${new Date(quickBooksStatus.syncStats.latestSyncedAt).toLocaleString()}`
+        : quickBooksStatus?.connected
+            ? "Connected, but no invoices synced yet"
+            : "No QuickBooks connection yet"
 
     // Count items with price TBD
     const getPriceTBDCount = (estimate: LocalEstimate): number => {
@@ -440,187 +489,316 @@ export default function HistoryPage() {
     }
 
     return (
-        <div className="space-y-4 pb-20 max-w-2xl mx-auto px-4">
-            <div className="flex justify-between items-center">
-                <h1 className="text-2xl font-bold">Estimates</h1>
-                <Button variant="outline" size="sm" onClick={handleExportCSV} title="Export for QuickBooks">
-                    📊 Export CSV
-                </Button>
-            </div>
-
-            {pendingSyncSummary.unsyncedEstimateCount > 0 && (
-                <Card className="border-amber-300 bg-amber-50/70">
-                    <CardContent className="flex items-center justify-between gap-3 py-4">
-                        <div>
-                            <p className="text-sm font-semibold text-amber-900">Local changes waiting to sync</p>
-                            <p className="text-sm text-amber-800">
-                                {formatPendingSyncSummary(pendingSyncSummary)}
-                            </p>
+        <div className="mx-auto max-w-5xl space-y-6 px-4 pb-20 pt-6">
+            <Card className="overflow-hidden border-primary/[0.15] bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
+                <CardContent className="space-y-6 p-6">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="space-y-3">
+                            <Badge className="w-fit bg-white/10 text-white hover:bg-white/10">
+                                <FileText className="mr-1 h-3.5 w-3.5" />
+                                Estimate History
+                            </Badge>
+                            <div className="space-y-2">
+                                <h1 className="text-3xl font-semibold tracking-[-0.04em]">Quotes, payments, and follow-up state</h1>
+                                <p className="max-w-2xl text-sm leading-6 text-slate-300">
+                                    Review every local and synced estimate, track what still needs payment, and push finalized work into QuickBooks without losing offline context.
+                                </p>
+                            </div>
                         </div>
-                        <Badge variant="outline" className="border-amber-300 bg-white text-amber-900">
-                            {pendingSyncSummary.unsyncedEstimateCount} queued
-                        </Badge>
-                    </CardContent>
-                </Card>
-            )}
-
-            <Card className="border-primary/20">
-                <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between gap-3">
-                        <div>
-                            <CardTitle className="text-lg flex items-center gap-2">
-                                <Link2 className="h-5 w-5" />
-                                QuickBooks Sync
-                            </CardTitle>
-                            <p className="text-sm text-muted-foreground">
-                                Push won estimates into QuickBooks Online. CSV export stays available as a fallback.
-                            </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-white/[0.15] bg-white/5 text-white hover:bg-white/10 hover:text-white"
+                                onClick={() => router.push("/new-estimate")}
+                            >
+                                <FileText className="mr-2 h-4 w-4" />
+                                New Estimate
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-white/[0.15] bg-white/5 text-white hover:bg-white/10 hover:text-white"
+                                onClick={handleExportCSV}
+                                title="Export for QuickBooks"
+                            >
+                                <Download className="mr-2 h-4 w-4" />
+                                Export CSV
+                            </Button>
                         </div>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => void loadQuickBooks()}
-                            disabled={quickBooksLoading}
-                        >
-                            {quickBooksLoading ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                                <RefreshCw className="h-4 w-4" />
-                            )}
-                        </Button>
                     </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    {quickBooksLoading ? (
-                        <div className="rounded-lg border p-4 text-sm text-muted-foreground flex items-center gap-2">
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Loading QuickBooks status...
-                        </div>
-                    ) : !quickBooksStatus ? (
-                        <div className="rounded-lg border p-4 text-sm text-muted-foreground">
-                            QuickBooks status is unavailable right now.
-                        </div>
-                    ) : (
-                        <>
-                            <div className="grid grid-cols-2 gap-3">
-                                <div className="rounded-lg border p-3">
-                                    <p className="text-xs text-muted-foreground">Plan access</p>
-                                    <p className="text-2xl font-semibold capitalize">
-                                        {quickBooksStatus.eligible ? quickBooksStatus.planTier : "Upgrade"}
-                                    </p>
-                                </div>
-                                <div className="rounded-lg border p-3">
-                                    <p className="text-xs text-muted-foreground">Synced invoices</p>
-                                    <p className="text-2xl font-semibold">{quickBooksStatus.syncStats.syncedInvoices}</p>
-                                </div>
-                            </div>
 
-                            <div className="rounded-lg border p-3 space-y-2">
-                                <p className="text-sm font-medium">
-                                    {quickBooksStatus.connected ? "Connected to QuickBooks Online" : "Not connected"}
-                                </p>
-                                <p className="text-sm text-muted-foreground">
-                                    {quickBooksStatus.connected
-                                        ? `Company ID ${quickBooksStatus.realmId || "linked"}.`
-                                        : quickBooksStatus.eligible
-                                            ? "Connect your QuickBooks company to create invoices directly from SnapQuote."
-                                            : "Upgrade to Pro or Team to unlock direct QuickBooks invoice sync."}
-                                </p>
-                                {quickBooksStatus.syncStats.latestSyncedAt && (
-                                    <p className="text-xs text-muted-foreground">
-                                        Last synced {new Date(quickBooksStatus.syncStats.latestSyncedAt).toLocaleString()}
-                                    </p>
-                                )}
-                                {quickBooksStatus.reconnectRequired && (
-                                    <p className="text-xs text-amber-700">
-                                        Your QuickBooks token needs a fresh reconnect.
-                                    </p>
-                                )}
-                                <div className="flex flex-wrap gap-2">
-                                    <Button
-                                        type="button"
-                                        onClick={() => void handleConnectQuickBooks()}
-                                        disabled={quickBooksConnecting || !quickBooksStatus.eligible}
-                                    >
-                                        {quickBooksConnecting ? (
-                                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        ) : (
-                                            <Link2 className="h-4 w-4 mr-2" />
-                                        )}
-                                        {quickBooksStatus.connected ? "Reconnect QuickBooks" : "Connect QuickBooks"}
-                                    </Button>
-                                    <Button variant="outline" type="button" onClick={handleExportCSV}>
-                                        📊 Export CSV
-                                    </Button>
-                                </div>
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="flex items-center justify-between">
+                                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Draft pipeline</p>
+                                <FileText className="h-4 w-4 text-slate-400" />
                             </div>
-                        </>
-                    )}
+                            <p className="mt-3 text-3xl font-semibold">{draftsCount}</p>
+                            <p className="mt-1 text-xs text-slate-400">{formatAmount(historyMetrics.draftValue)} in open draft value</p>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="flex items-center justify-between">
+                                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Awaiting payment</p>
+                                <Send className="h-4 w-4 text-slate-400" />
+                            </div>
+                            <p className="mt-3 text-3xl font-semibold">{sentCount}</p>
+                            <p className="mt-1 text-xs text-slate-400">{formatAmount(historyMetrics.sentValue)} currently out with customers</p>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="flex items-center justify-between">
+                                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Collected</p>
+                                <CircleDollarSign className="h-4 w-4 text-slate-400" />
+                            </div>
+                            <p className="mt-3 text-3xl font-semibold">{paidCount}</p>
+                            <p className="mt-1 text-xs text-slate-400">{formatAmount(historyMetrics.paidValue)} marked paid</p>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="flex items-center justify-between">
+                                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Latest activity</p>
+                                <Clock3 className="h-4 w-4 text-slate-400" />
+                            </div>
+                            <p className="mt-3 text-sm font-semibold leading-6">{latestActivityLabel}</p>
+                            <p className="mt-1 text-xs text-slate-400">{estimates.length} total estimate records on device</p>
+                        </div>
+                    </div>
                 </CardContent>
             </Card>
 
-            {/* Tab Navigation */}
-            <div className="flex p-1 bg-muted rounded-lg">
-                <Button
-                    variant={activeTab === 'drafts' ? 'default' : 'ghost'}
-                    className="flex-1 rounded-md h-10"
-                    onClick={() => setActiveTab('drafts')}
-                >
-                    📝 Drafts
-                    {draftsCount > 0 && (
-                        <Badge variant="secondary" className="ml-2">
-                            {draftsCount}
-                        </Badge>
-                    )}
-                </Button>
-                <Button
-                    variant={activeTab === 'sent' ? 'default' : 'ghost'}
-                    className="flex-1 rounded-md h-10"
-                    onClick={() => setActiveTab('sent')}
-                >
-                    ✅ Sent
-                    {sentCount > 0 && (
-                        <Badge variant="secondary" className="ml-2">
-                            {sentCount}
-                        </Badge>
-                    )}
-                </Button>
-                <Button
-                    variant={activeTab === 'paid' ? 'default' : 'ghost'}
-                    className="flex-1 rounded-md h-10"
-                    onClick={() => setActiveTab('paid')}
-                >
-                    💰 Paid
-                    {paidCount > 0 && (
-                        <Badge variant="secondary" className="ml-2">
-                            {paidCount}
-                        </Badge>
-                    )}
-                </Button>
+            <div className="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
+                <Card className={cn("border-border/70", pendingSyncSummary.unsyncedEstimateCount > 0 && "border-amber-300 bg-amber-50/50")}>
+                    <CardHeader className="pb-3">
+                        <CardTitle className="flex items-center gap-2 text-lg">
+                            <CloudUpload className="h-5 w-5" />
+                            Offline Queue
+                        </CardTitle>
+                        <CardDescription>
+                            Device-local edits stay safe here until cloud sync catches up.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="rounded-2xl border border-border/70 bg-background/80 p-4">
+                                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Queued changes</p>
+                                <p className="mt-2 text-3xl font-semibold">{pendingSyncSummary.unsyncedEstimateCount}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    {pendingSyncSummary.unsyncedEstimateCount > 0 ? formatPendingSyncSummary(pendingSyncSummary) : "All local estimate changes are synced."}
+                                </p>
+                            </div>
+                            <div className="rounded-2xl border border-border/70 bg-background/80 p-4">
+                                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Current focus</p>
+                                <p className="mt-2 text-lg font-semibold">{activeTabLabel}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    {filteredEstimates.length} estimate{filteredEstimates.length === 1 ? "" : "s"} visible in this lane
+                                </p>
+                            </div>
+                        </div>
+
+                        {pendingSyncSummary.unsyncedEstimateCount > 0 ? (
+                            <div className="rounded-2xl border border-amber-300 bg-white/80 p-4 text-sm text-amber-900">
+                                <p className="font-semibold">Local changes waiting to sync</p>
+                                <p className="mt-1 text-amber-800">{formatPendingSyncSummary(pendingSyncSummary)}</p>
+                            </div>
+                        ) : (
+                            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 text-sm text-emerald-900">
+                                All draft, sent, and paid updates in local storage are currently synced.
+                            </div>
+                        )}
+
+                        <div className="flex flex-wrap gap-2">
+                            <Badge variant="outline" className="bg-background">
+                                Plan {subscription?.planTier || "free"}
+                            </Badge>
+                            <Badge variant="outline" className="bg-background">
+                                {pendingSyncSummary.draftCount} draft updates
+                            </Badge>
+                            <Badge variant="outline" className="bg-background">
+                                {pendingSyncSummary.sentCount} sent updates
+                            </Badge>
+                            <Badge variant="outline" className="bg-background">
+                                {pendingSyncSummary.paidCount} paid updates
+                            </Badge>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card className="border-primary/20">
+                    <CardHeader className="pb-3">
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <CardTitle className="flex items-center gap-2 text-lg">
+                                    <Link2 className="h-5 w-5" />
+                                    QuickBooks Sync
+                                </CardTitle>
+                                <CardDescription>
+                                    Push won estimates into QuickBooks Online. CSV export stays available as a fallback.
+                                </CardDescription>
+                            </div>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => void loadQuickBooks()}
+                                disabled={quickBooksLoading}
+                            >
+                                {quickBooksLoading ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <RefreshCw className="h-4 w-4" />
+                                )}
+                            </Button>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        {quickBooksLoading ? (
+                            <div className="flex items-center gap-2 rounded-2xl border p-4 text-sm text-muted-foreground">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Loading QuickBooks status...
+                            </div>
+                        ) : !quickBooksStatus ? (
+                            <div className="rounded-2xl border p-4 text-sm text-muted-foreground">
+                                QuickBooks status is unavailable right now.
+                            </div>
+                        ) : (
+                            <>
+                                <div className="grid gap-3 sm:grid-cols-3">
+                                    <div className="rounded-2xl border p-4">
+                                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Plan access</p>
+                                        <p className="mt-2 text-2xl font-semibold capitalize">
+                                            {quickBooksStatus.eligible ? quickBooksStatus.planTier : "Upgrade"}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-2xl border p-4">
+                                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Synced invoices</p>
+                                        <p className="mt-2 text-2xl font-semibold">{quickBooksStatus.syncStats.syncedInvoices}</p>
+                                    </div>
+                                    <div className="rounded-2xl border p-4">
+                                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Connection</p>
+                                        <p className="mt-2 text-2xl font-semibold">{quickBooksStatus.connected ? "Live" : "Offline"}</p>
+                                    </div>
+                                </div>
+
+                                <div className="rounded-2xl border p-4">
+                                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                        <div>
+                                            <p className="text-sm font-medium">
+                                                {quickBooksStatus.connected ? "Connected to QuickBooks Online" : "Not connected"}
+                                            </p>
+                                            <p className="mt-1 text-sm text-muted-foreground">
+                                                {quickBooksStatus.connected
+                                                    ? `Company ID ${quickBooksStatus.realmId || "linked"}.`
+                                                    : quickBooksStatus.eligible
+                                                        ? "Connect your QuickBooks company to create invoices directly from SnapQuote."
+                                                        : "Upgrade to Pro or Team to unlock direct QuickBooks invoice sync."}
+                                            </p>
+                                        </div>
+                                        <Badge variant="outline" className="w-fit">
+                                            {quickBooksSummaryLabel}
+                                        </Badge>
+                                    </div>
+                                    {quickBooksStatus.reconnectRequired && (
+                                        <p className="mt-3 text-xs text-amber-700">
+                                            Your QuickBooks token needs a fresh reconnect.
+                                        </p>
+                                    )}
+                                    <div className="mt-4 flex flex-wrap gap-2">
+                                        <Button
+                                            type="button"
+                                            onClick={() => void handleConnectQuickBooks()}
+                                            disabled={quickBooksConnecting || !quickBooksStatus.eligible}
+                                        >
+                                            {quickBooksConnecting ? (
+                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            ) : (
+                                                <Link2 className="mr-2 h-4 w-4" />
+                                            )}
+                                            {quickBooksStatus.connected ? "Reconnect QuickBooks" : "Connect QuickBooks"}
+                                        </Button>
+                                        <Button variant="outline" type="button" onClick={handleExportCSV}>
+                                            <Download className="mr-2 h-4 w-4" />
+                                            Export CSV
+                                        </Button>
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </CardContent>
+                </Card>
             </div>
+
+            <Card className="border-border/70">
+                <CardContent className="space-y-4 p-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                        <div>
+                            <p className="text-sm font-semibold">Estimate lanes</p>
+                            <p className="text-sm text-muted-foreground">
+                                Move from draft to sent to paid while keeping PDF, SMS, and QuickBooks actions close to the record.
+                            </p>
+                        </div>
+                        <Badge variant="outline">{filteredEstimates.length} visible</Badge>
+                    </div>
+
+                    <div className="grid gap-2 sm:grid-cols-3">
+                        <Button
+                            variant={activeTab === "drafts" ? "default" : "ghost"}
+                            className="h-auto justify-between rounded-xl px-4 py-3"
+                            onClick={() => setActiveTab("drafts")}
+                        >
+                            <span className="flex items-center gap-2">
+                                <FileText className="h-4 w-4" />
+                                Drafts
+                            </span>
+                            <Badge variant="secondary">{draftsCount}</Badge>
+                        </Button>
+                        <Button
+                            variant={activeTab === "sent" ? "default" : "ghost"}
+                            className="h-auto justify-between rounded-xl px-4 py-3"
+                            onClick={() => setActiveTab("sent")}
+                        >
+                            <span className="flex items-center gap-2">
+                                <Send className="h-4 w-4" />
+                                Sent
+                            </span>
+                            <Badge variant="secondary">{sentCount}</Badge>
+                        </Button>
+                        <Button
+                            variant={activeTab === "paid" ? "default" : "ghost"}
+                            className="h-auto justify-between rounded-xl px-4 py-3"
+                            onClick={() => setActiveTab("paid")}
+                        >
+                            <span className="flex items-center gap-2">
+                                <CircleDollarSign className="h-4 w-4" />
+                                Paid
+                            </span>
+                            <Badge variant="secondary">{paidCount}</Badge>
+                        </Button>
+                    </div>
+                </CardContent>
+            </Card>
 
             {filteredEstimates.length === 0 ? (
                 <Card className="border-dashed">
                     <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                        <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-                        <h3 className="font-medium text-lg mb-2">
-                            {activeTab === 'drafts'
-                                ? 'No drafts yet'
-                                : (activeTab === 'sent' ? 'No sent estimates' : 'No paid estimates')}
+                        <FileText className="mb-4 h-12 w-12 text-muted-foreground" />
+                        <h3 className="mb-2 text-lg font-medium">
+                            {activeTab === "drafts"
+                                ? "No drafts yet"
+                                : activeTab === "sent"
+                                    ? "No sent estimates"
+                                    : "No paid estimates"}
                         </h3>
-                        <p className="text-muted-foreground text-sm mb-4">
-                            {activeTab === 'drafts'
-                                ? 'Create a new estimate to get started'
-                                : (activeTab === 'sent'
-                                    ? 'Drafts will appear here after you send them'
-                                    : 'Paid estimates will appear here after successful payment')}
+                        <p className="mb-4 text-sm text-muted-foreground">
+                            {activeTab === "drafts"
+                                ? "Create a new estimate to get started."
+                                : activeTab === "sent"
+                                    ? "Drafts will appear here after you send them."
+                                    : "Paid estimates will appear here after successful payment."}
                         </p>
-                        {activeTab === 'drafts' && (
+                        {activeTab === "drafts" ? (
                             <Button onClick={() => router.push("/new-estimate")}>
                                 Create New Estimate
                             </Button>
-                        )}
+                        ) : null}
                     </CardContent>
                 </Card>
             ) : (
@@ -630,60 +808,94 @@ export default function HistoryPage() {
                     const priceTBDCount = getPriceTBDCount(estimate)
 
                     return (
-                        <Card key={estimate.id}>
-                            <CardHeader className="pb-3">
-                                <div className="flex justify-between items-start">
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <CardTitle className="text-lg">{estimate.clientName || "Client"}</CardTitle>
-                                            {estimate.estimateNumber && (
-                                                <span className="text-xs font-mono bg-muted px-2 py-0.5 rounded">
+                        <Card key={estimate.id} className="border-border/70">
+                            <CardHeader className="pb-4">
+                                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                    <div className="space-y-3">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <CardTitle className="text-xl">{estimate.clientName || "Client"}</CardTitle>
+                                            {estimate.estimateNumber ? (
+                                                <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-mono">
                                                     {estimate.estimateNumber}
                                                 </span>
-                                            )}
+                                            ) : null}
+                                            <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium uppercase", getEstimateStatusTone(estimate.status))}>
+                                                {estimate.type === "invoice"
+                                                    ? "Invoice"
+                                                    : estimate.status === "paid"
+                                                        ? "Paid"
+                                                        : estimate.status === "sent"
+                                                            ? "Sent"
+                                                            : "Draft"}
+                                            </span>
                                         </div>
-                                        <p className="text-sm text-muted-foreground">
-                                            {new Date(estimate.createdAt).toLocaleDateString()}
+                                        <div className="flex flex-wrap gap-2">
+                                            {priceTBDCount > 0 && activeTab === "drafts" ? (
+                                                <Badge variant="outline" className="border-yellow-300 bg-yellow-50 text-yellow-700">
+                                                    <AlertCircle className="mr-1 h-3 w-3" />
+                                                    {priceTBDCount} TBD
+                                                </Badge>
+                                            ) : null}
+                                            {estimate.synced === false ? (
+                                                <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
+                                                    Pending sync
+                                                </Badge>
+                                            ) : null}
+                                            {estimate.quickbooksInvoiceId ? (
+                                                <Badge variant="outline" className="border-sky-300 bg-sky-50 text-sky-800">
+                                                    QB {estimate.quickbooksInvoiceStatus || "linked"}
+                                                </Badge>
+                                            ) : null}
+                                        </div>
+                                        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+                                            {estimate.summary_note}
                                         </p>
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                        {priceTBDCount > 0 && activeTab === 'drafts' && (
-                                            <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-300">
-                                                <AlertCircle className="h-3 w-3 mr-1" />
-                                                {priceTBDCount} TBD
-                                            </Badge>
-                                        )}
-                                        {estimate.synced === false && (
-                                            <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300">
-                                                Pending sync
-                                            </Badge>
-                                        )}
-                                        {estimate.quickbooksInvoiceId && (
-                                            <Badge variant="outline" className="bg-sky-50 text-sky-800 border-sky-300">
-                                                QB {estimate.quickbooksInvoiceStatus || "linked"}
-                                            </Badge>
-                                        )}
-                                        <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${estimate.status === 'paid'
-                                            ? 'bg-emerald-100 text-emerald-800'
-                                            : (estimate.status === 'sent'
-                                                ? 'bg-green-100 text-green-800'
-                                                : 'bg-yellow-100 text-yellow-800')
-                                            }`}>
-                                            {estimate.type === 'invoice'
-                                                ? 'INVOICE'
-                                                : (estimate.status === 'paid'
-                                                    ? 'PAID'
-                                                    : (estimate.status === 'sent' ? 'SENT' : 'DRAFT'))}
-                                        </span>
+
+                                    <div className="w-full max-w-sm rounded-2xl border border-border/70 bg-muted/20 p-4 lg:w-auto">
+                                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Estimate total</p>
+                                        <p className="mt-2 text-3xl font-semibold">{formatAmount(estimate.totalAmount)}</p>
+                                        <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                                            <p>Created {new Date(estimate.createdAt).toLocaleDateString()}</p>
+                                            <p>Updated {new Date(estimate.updatedAt || estimate.createdAt).toLocaleString()}</p>
+                                            {estimate.sentAt ? <p>Sent {new Date(estimate.sentAt).toLocaleDateString()}</p> : null}
+                                            {estimate.paymentCompletedAt ? <p>Paid {new Date(estimate.paymentCompletedAt).toLocaleString()}</p> : null}
+                                        </div>
                                     </div>
                                 </div>
                             </CardHeader>
-                            <CardContent className="space-y-3">
-                                <div>
-                                    <p className="font-bold text-lg">${estimate.totalAmount.toFixed(2)}</p>
-                                    <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
-                                        {estimate.summary_note}
-                                    </p>
+                            <CardContent className="space-y-4">
+                                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                    <div className="rounded-2xl border border-border/70 bg-background/80 p-4">
+                                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Client</p>
+                                        <p className="mt-2 text-sm font-semibold">{estimate.clientName || "Missing client name"}</p>
+                                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{estimate.clientAddress || "No client address saved"}</p>
+                                    </div>
+                                    <div className="rounded-2xl border border-border/70 bg-background/80 p-4">
+                                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Line items</p>
+                                        <p className="mt-2 text-sm font-semibold">{items.length} item{items.length === 1 ? "" : "s"}</p>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            {priceTBDCount > 0 ? `${priceTBDCount} still missing pricing` : "Pricing is fully assigned"}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-2xl border border-border/70 bg-background/80 p-4">
+                                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Payment state</p>
+                                        <p className="mt-2 text-sm font-semibold">
+                                            {estimate.paymentLinkId ? "Payment link attached" : "No payment link"}
+                                        </p>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            {estimate.paymentCompletedAt ? `Completed ${new Date(estimate.paymentCompletedAt).toLocaleDateString()}` : "Status polling keeps sent quotes current."}
+                                        </p>
+                                    </div>
+                                    <div className="rounded-2xl border border-border/70 bg-background/80 p-4">
+                                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">QuickBooks</p>
+                                        <p className="mt-2 text-sm font-semibold">
+                                            {estimate.quickbooksInvoiceId ? (estimate.quickbooksDocNumber || estimate.quickbooksInvoiceStatus || "Linked") : "Not synced"}
+                                        </p>
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            {estimate.quickbooksSyncedAt ? `Synced ${new Date(estimate.quickbooksSyncedAt).toLocaleString()}` : "Sync this estimate when the record is ready."}
+                                        </p>
+                                    </div>
                                 </div>
 
                                 {/* Expanded Items */}
@@ -698,18 +910,18 @@ export default function HistoryPage() {
                                                         {item.unit_price === 0 && <span className="ml-2 text-yellow-600">⚠️ Price TBD</span>}
                                                     </p>
                                                 </div>
-                                                <p className="font-semibold">${item.total.toFixed(2)}</p>
+                                                <p className="font-semibold">{formatAmount(item.total)}</p>
                                             </div>
                                         ))}
                                         {estimate.taxAmount > 0 && (
                                             <div className="pt-2 border-t">
                                                 <div className="flex justify-between text-sm">
                                                     <span className="text-muted-foreground">Subtotal</span>
-                                                    <span>${(estimate.totalAmount - estimate.taxAmount).toFixed(2)}</span>
+                                                    <span>{formatAmount(estimate.totalAmount - estimate.taxAmount)}</span>
                                                 </div>
                                                 <div className="flex justify-between text-sm">
                                                     <span className="text-muted-foreground">Tax ({estimate.taxRate}%)</span>
-                                                    <span>${estimate.taxAmount.toFixed(2)}</span>
+                                                    <span>{formatAmount(estimate.taxAmount)}</span>
                                                 </div>
                                             </div>
                                         )}
@@ -751,7 +963,7 @@ export default function HistoryPage() {
                                     </div>
                                 )}
 
-                                <div className="flex flex-wrap gap-2">
+                                <div className="flex flex-wrap gap-2 border-t border-border/60 pt-4">
                                     <Button
                                         variant="outline"
                                         size="sm"
@@ -762,7 +974,7 @@ export default function HistoryPage() {
                                     </Button>
 
                                     {/* Mark as Sent button - only for drafts */}
-                                    {activeTab === 'drafts' && (
+                                    {activeTab === "drafts" && (
                                         <Button
                                             variant="default"
                                             size="sm"
@@ -772,7 +984,7 @@ export default function HistoryPage() {
                                         </Button>
                                     )}
 
-                                    {activeTab === 'sent' && estimate.status === 'sent' && (
+                                    {activeTab === "sent" && estimate.status === "sent" && (
                                         <Button
                                             variant="default"
                                             size="sm"
@@ -783,7 +995,7 @@ export default function HistoryPage() {
                                     )}
 
                                     {/* Convert to Invoice - only for sent estimates that aren't already invoices */}
-                                    {estimate.status === 'sent' && estimate.type !== 'invoice' && (
+                                    {estimate.status === "sent" && estimate.type !== "invoice" && (
                                         <Button
                                             variant="secondary"
                                             size="sm"
@@ -801,7 +1013,7 @@ export default function HistoryPage() {
                                         <Copy className="h-3 w-3 mr-1" />
                                         Duplicate
                                     </Button>
-                                    {estimate.status !== 'paid' && (
+                                    {estimate.status !== "paid" && (
                                         <Button
                                             variant="outline"
                                             size="sm"
@@ -811,7 +1023,7 @@ export default function HistoryPage() {
                                             Follow-up
                                         </Button>
                                     )}
-                                    {estimate.status !== 'paid' && (
+                                    {estimate.status !== "paid" && (
                                         <Button
                                             variant="secondary"
                                             size="sm"
@@ -849,7 +1061,8 @@ export default function HistoryPage() {
                                                 size="sm"
                                                 onClick={() => setPreviewEstimate(estimate)}
                                             >
-                                                👁️
+                                                <FileText className="h-3 w-3 mr-1" />
+                                                Preview
                                             </Button>
                                             <Button
                                                 variant="secondary"

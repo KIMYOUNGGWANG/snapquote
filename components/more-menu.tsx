@@ -76,7 +76,7 @@ export function MoreMenu({ children }: MoreMenuProps) {
             <DialogTrigger asChild>
                 {children}
             </DialogTrigger>
-            <DialogContent className="fixed bottom-4 left-4 right-4 z-50 w-auto rounded-2xl border bg-background p-0 shadow-2xl translate-x-0 translate-y-0 data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottomtop-auto top-auto md:max-w-sm md:mx-auto">
+            <DialogContent className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[150] w-[calc(100%-2rem)] max-w-sm rounded-2xl border bg-background p-0 shadow-2xl data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom top-auto">
                 <div className="p-4 pb-0">
                     <DialogHeader className="flex flex-row items-center justify-between mb-4">
                         <DialogTitle className="text-lg font-semibold">Menu</DialogTitle>

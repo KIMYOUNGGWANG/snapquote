@@ -226,9 +226,8 @@ export async function getAllPendingAudio(): Promise<PendingAudio[]> {
 }
 
 export async function getUnprocessedAudio(): Promise<PendingAudio[]> {
-    const db = await initDB();
-    const all = await db.getAllFromIndex('pendingAudio', 'by-processed', IDBKeyRange.only(false));
-    return all;
+    const all = await getAllPendingAudio();
+    return all.filter((audio) => audio.processed !== true);
 }
 
 export async function markAudioProcessed(id: string, transcription: string): Promise<void> {
@@ -248,7 +247,7 @@ export async function deletePendingAudio(id: string): Promise<void> {
 
 export async function clearProcessedAudio(): Promise<void> {
     const db = await initDB();
-    const processed = await db.getAllFromIndex('pendingAudio', 'by-processed', IDBKeyRange.only(true));
+    const processed = (await getAllPendingAudio()).filter((audio) => audio.processed === true);
     for (const audio of processed) {
         await db.delete('pendingAudio', audio.id);
     }

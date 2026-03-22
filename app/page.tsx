@@ -276,12 +276,14 @@ export default function Home() {
 
             {/* Hero Section */}
             <header className="premium-panel mesh-border mx-auto flex w-full max-w-sm flex-col items-center overflow-hidden px-5 pb-6 pt-5 text-center">
-              <div className="mb-4 flex w-full items-center justify-between gap-3 text-[10px] uppercase tracking-[0.22em] text-slate-400">
-                <span className="section-eyebrow">
-                  <Sparkles className="w-3 h-3" />
+              <div className="mb-6 flex items-center justify-center p-1 rounded-full border border-white/10 bg-black/40 backdrop-blur-md shadow-inner text-[10px] font-semibold uppercase tracking-[0.15em] w-fit mx-auto cursor-default transition-all hover:bg-black/50">
+                <span className="flex items-center gap-2 rounded-full bg-slate-800/80 px-4 py-1.5 text-slate-100 shadow-sm border border-white/5 pointer-events-none">
+                  <Sparkles className="w-3 h-3 text-blue-400" />
                   Field Quote Workflow
                 </span>
-                <span className="rounded-full border border-white/10 px-2 py-1">AI Estimator</span>
+                <span className="px-5 py-1.5 text-slate-500 hover:text-slate-300 transition-colors pointer-events-auto">
+                  AI Estimator
+                </span>
               </div>
 
               <div className="space-y-4">
@@ -315,7 +317,7 @@ export default function Home() {
                 <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-sky-300/70 to-transparent" />
                 <div className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-400/15 text-sky-200">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-400/[0.15] text-sky-200">
                       <Mic className="w-4 h-4 animate-pulse" />
                     </div>
                     <div>
@@ -336,7 +338,7 @@ export default function Home() {
 
             {isSignedIn ? (
               <Link href="/new-estimate" className="w-full max-w-sm mx-auto block">
-                <Button size="lg" className="w-full h-16 rounded-[24px] border border-sky-300/20 bg-gradient-to-r from-sky-500 via-cyan-400 to-amber-400 text-lg font-bold text-slate-950 shadow-[0_18px_50px_-18px_rgba(56,189,248,0.75)] transition-all hover:scale-[1.02] hover:shadow-[0_20px_60px_-18px_rgba(56,189,248,0.95)] active:scale-[0.98]">
+                <Button size="lg" className="w-full h-16 rounded-[24px] bg-blue-600/90 text-lg font-medium text-white shadow-[0_0_30px_rgba(59,130,246,0.3)] transition-all hover:bg-blue-500 hover:scale-[1.02] hover:shadow-[0_0_40px_rgba(59,130,246,0.5)] active:scale-[0.98] backdrop-blur-md border border-blue-500/30">
                   <Mic className="mr-2 h-6 w-6" />
                   Create Field Quote
                 </Button>
@@ -347,7 +349,7 @@ export default function Home() {
             ) : (
               <div className="w-full max-w-sm mx-auto space-y-3">
                 <Link href="/landing" className="block" data-testid="home-primary-marketing-cta">
-                  <Button size="lg" className="w-full h-16 rounded-[24px] border border-sky-300/20 bg-gradient-to-r from-sky-500 via-cyan-400 to-amber-400 text-lg font-bold text-slate-950 shadow-[0_18px_50px_-18px_rgba(56,189,248,0.75)] transition-all hover:scale-[1.02] hover:shadow-[0_20px_60px_-18px_rgba(56,189,248,0.95)] active:scale-[0.98]">
+                  <Button size="lg" className="w-full h-16 rounded-[24px] bg-blue-600/90 text-lg font-medium text-white shadow-[0_0_30px_rgba(59,130,246,0.3)] transition-all hover:bg-blue-500 hover:scale-[1.02] hover:shadow-[0_0_40px_rgba(59,130,246,0.5)] active:scale-[0.98] backdrop-blur-md border border-blue-500/30">
                     See the Field Workflow
                     <ArrowRight className="ml-2 h-5 w-5" />
                   </Button>
@@ -374,7 +376,7 @@ export default function Home() {
             {!isSignedIn && (
               <div className="grid gap-3 max-w-sm mx-auto" data-testid="home-signed-out-workflow">
                 <div className="premium-card premium-card-hover p-4 flex gap-3 items-start">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-300/20 bg-sky-400/15">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-300/20 bg-sky-400/[0.15]">
                     <Mic className="h-4 w-4 text-sky-200" />
                   </div>
                   <div className="space-y-1">
@@ -383,7 +385,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="premium-card premium-card-hover p-4 flex gap-3 items-start">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/15">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/[0.15]">
                     <FileText className="h-4 w-4 text-cyan-200" />
                   </div>
                   <div className="space-y-1">
@@ -392,7 +394,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="premium-card premium-card-hover p-4 flex gap-3 items-start">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-300/20 bg-amber-400/15">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-300/20 bg-amber-400/[0.15]">
                     <DollarSign className="h-4 w-4 text-amber-200" />
                   </div>
                   <div className="space-y-1">
@@ -460,11 +462,11 @@ export default function Home() {
                   <RevenueChart />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="glass-card p-1 overflow-hidden">
+                <div className="flex flex-col gap-4">
+                  <div className="glass-card p-1">
                     <FunnelMetricsCard />
                   </div>
-                  <div className="glass-card p-1 overflow-hidden">
+                  <div className="glass-card p-1">
                     <UsagePlanCard />
                   </div>
                 </div>

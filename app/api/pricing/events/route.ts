@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { createAuthedSupabaseClient, parseBearerToken } from "@/lib/server/supabase-auth"
+import { createServiceSupabaseClient, ensureProfileExists } from "@/lib/server/stripe-connect"
 
 type PricingEventName = "pricing_viewed" | "upgrade_clicked" | "waitlist_joined"
 
@@ -9,6 +10,32 @@ const ALLOWED_EVENTS: Set<PricingEventName> = new Set([
     "upgrade_clicked",
     "waitlist_joined",
 ])
+
+type PricingAssignmentRow = {
+    experiment_id?: string | null
+    variant?: string | null
+    out_experiment_id?: string | null
+    out_variant?: string | null
+}
+
+function isSchemaMismatchError(error: unknown, relatedTerms: string[] = []): boolean {
+    if (!error || typeof error !== "object") return false
+    const record = error as Record<string, unknown>
+    const code = typeof record.code === "string" ? record.code : ""
+    const rawMessage = [
+        typeof record.message === "string" ? record.message : "",
+        typeof record.details === "string" ? record.details : "",
+        typeof record.hint === "string" ? record.hint : "",
+    ]
+        .join(" ")
+        .toLowerCase()
+
+    if (code === "PGRST204" || code === "42703" || code === "42P01" || code === "42883") {
+        return true
+    }
+
+    return relatedTerms.some((term) => rawMessage.includes(term.toLowerCase()))
+}
 
 function normalizeOptionalString(value: unknown, maxLength: number): string | null {
     if (typeof value !== "string") return null
@@ -28,6 +55,26 @@ function normalizeMetadata(value: unknown): Record<string, unknown> {
         throw new Error("Metadata payload too large")
     }
     return metadata
+}
+
+function normalizeAssignmentRow(value: unknown): { experimentId: string; variant: string } | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null
+    const record = value as PricingAssignmentRow
+    const experimentId =
+        typeof record.experiment_id === "string"
+            ? record.experiment_id.trim()
+            : typeof record.out_experiment_id === "string"
+              ? record.out_experiment_id.trim()
+              : ""
+    const variant =
+        typeof record.variant === "string"
+            ? record.variant.trim()
+            : typeof record.out_variant === "string"
+              ? record.out_variant.trim()
+              : ""
+
+    if (!experimentId || !variant) return null
+    return { experimentId, variant }
 }
 
 export async function POST(req: Request) {
@@ -73,6 +120,11 @@ export async function POST(req: Request) {
         )
     }
 
+    const serviceSupabase = createServiceSupabaseClient()
+    if (serviceSupabase) {
+        await ensureProfileExists(serviceSupabase, user.id)
+    }
+
     try {
         const body = await req.json()
         const eventNameRaw = normalizeOptionalString(body?.event, 64)
@@ -93,6 +145,15 @@ export async function POST(req: Request) {
         )
 
         if (assignmentError) {
+            if (isSchemaMismatchError(assignmentError, [
+                "get_or_create_pricing_assignment",
+                "pricing_experiments",
+                "pricing_conversions",
+            ])) {
+                console.warn("pricing/events: pricing experiment schema missing, skipping event tracking.")
+                return NextResponse.json({ ok: true, skipped: true, reason: "pricing_schema_unavailable" })
+            }
+
             console.error("Failed to resolve pricing assignment:", assignmentError)
             return NextResponse.json(
                 { error: { message: "Failed to resolve pricing assignment", code: 500 } },
@@ -100,8 +161,8 @@ export async function POST(req: Request) {
             )
         }
 
-        const assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : null
-        if (!assignment?.experiment_id || !assignment?.variant) {
+        const assignment = normalizeAssignmentRow(Array.isArray(assignmentRows) ? assignmentRows[0] : null)
+        if (!assignment) {
             return NextResponse.json(
                 { error: { message: "No active pricing experiment", code: 404 } },
                 { status: 404 }
@@ -111,12 +172,12 @@ export async function POST(req: Request) {
         const dateKey = new Date().toISOString().slice(0, 10)
         const externalId =
             normalizeOptionalString(body?.externalId, 140) ||
-            `pricing:${user.id}:${assignment.experiment_id}:${assignment.variant}:${eventNameRaw}:${dateKey}`
+            `pricing:${user.id}:${assignment.experimentId}:${assignment.variant}:${eventNameRaw}:${dateKey}`
 
         const { data: inserted, error: insertError } = await supabase
             .from("pricing_conversions")
             .insert({
-                experiment_id: assignment.experiment_id,
+                experiment_id: assignment.experimentId,
                 user_id: user.id,
                 variant: assignment.variant,
                 event_name: eventNameRaw,
@@ -131,6 +192,15 @@ export async function POST(req: Request) {
             // Duplicate external_id should be treated as ok.
             if (insertError?.code === "23505") {
                 return NextResponse.json({ ok: true, deduped: true })
+            }
+
+            if (isSchemaMismatchError(insertError, [
+                "pricing_conversions",
+                "external_id",
+                "experiment_id",
+            ])) {
+                console.warn("pricing/events: pricing conversion schema missing, skipping event tracking.")
+                return NextResponse.json({ ok: true, skipped: true, reason: "pricing_schema_unavailable" })
             }
 
             console.error("Failed to insert pricing event:", insertError)
@@ -153,4 +223,3 @@ export async function POST(req: Request) {
         )
     }
 }
-

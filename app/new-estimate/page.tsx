@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react"
-import { Camera, Upload, X, Loader2, Save, Share2, Download, Plus, Trash2, ArrowRight, Edit2, CheckCircle2, CreditCard } from "lucide-react"
+import { Camera, Upload, X, Loader2, Save, Share2, Download, Plus, Trash2, ArrowRight, Edit2, CheckCircle2, CreditCard, Mic, SlidersHorizontal, ChevronDown, ChevronUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
@@ -384,6 +384,7 @@ export default function NewEstimatePage() {
     const [projectType, setProjectType] = useState<'residential' | 'commercial'>('residential')
     const [sourceLanguage, setSourceLanguage] = useState<SourceLanguage>("auto")
     const [generateWorkflow, setGenerateWorkflow] = useState<GenerateWorkflow>("standard")
+    const [showInputOptions, setShowInputOptions] = useState(false)
     const [photoContext, setPhotoContext] = useState("")
     const [paymentLink, setPaymentLink] = useState<string | null>(null)
     const [paymentLinkId, setPaymentLinkId] = useState<string | null>(null)
@@ -408,6 +409,8 @@ export default function NewEstimatePage() {
     const hasPhotoEstimateAccess = subscription ? PHOTO_ESTIMATE_PRO_TIERS.has(subscription.planTier) : false
     const isTeamEstimateMode = Boolean(teamEstimateContext)
     const canEditTeamEstimate = !isTeamEstimateMode || Boolean(teamEstimateSession?.canEdit)
+    const shouldShowInputOptions =
+        showInputOptions || previewUrls.length > 0 || generateWorkflow === "photo_estimate" || photoContext.trim().length > 0
     const activeTeamEditorLabel = teamEstimateSession?.editor?.businessName
         || teamEstimateSession?.editor?.email
         || teamEstimateSession?.editor?.userId
@@ -1476,7 +1479,7 @@ export default function NewEstimatePage() {
     }, [estimate, setEstimate, setStep])
 
     return (
-        <div className="max-w-md mx-auto space-y-6 pb-20">
+        <div className="max-w-2xl mx-auto space-y-6 px-4 pb-20">
             <CardHeader className="px-0 pb-2">
                 <CardTitle className="text-2xl font-bold">
                     {step === "input" && "New Estimate"}
@@ -1560,225 +1563,267 @@ export default function NewEstimatePage() {
             {/* STEP 1: INPUT */}
             {step === "input" && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-
-                    {/* Project Type Selector */}
-                    <div className="flex p-1 bg-muted rounded-lg -mb-2">
-                        <Button
-                            variant={projectType === 'residential' ? 'default' : 'ghost'}
-                            className="flex-1 rounded-md h-8 text-xs font-medium"
-                            onClick={() => setProjectType('residential')}
-                        >
-                            🏠 Residential
-                        </Button>
-                        <Button
-                            variant={projectType === 'commercial' ? 'default' : 'ghost'}
-                            className="flex-1 rounded-md h-8 text-xs font-medium"
-                            onClick={() => setProjectType('commercial')}
-                        >
-                            🏢 Commercial
-                        </Button>
-                    </div>
-
-                    <div className="space-y-3 rounded-2xl border border-border/60 bg-muted/30 p-4">
-                        <div className="space-y-1">
-                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Voice language</p>
-                            <p className="text-sm text-muted-foreground">
-                                Pick the language you speak on site. Spanish beta pushes harder on trade-term cleanup before the English quote is generated.
-                            </p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                            {SOURCE_LANGUAGE_OPTIONS.map((option) => (
-                                <Button
-                                    key={option.value}
-                                    type="button"
-                                    variant={sourceLanguage === option.value ? "default" : "outline"}
-                                    className="h-auto min-h-14 flex-col items-start gap-1 px-3 py-3 text-left"
-                                    onClick={() => setSourceLanguage(option.value)}
-                                >
-                                    <span className="text-sm font-semibold">{option.label}</span>
-                                    <span className="text-[11px] leading-4 text-current/80">{option.hint}</span>
-                                </Button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* CHEAT SHEET (Practice Mode) */}
-                    {/* Only show if no logic (simplified for now: always show or manage via state if needed) */}
-                    <div className="glass-card p-4 relative overflow-hidden group border-blue-500/30 shadow-[0_0_20px_-10px_rgba(59,130,246,0.5)]">
-                        <div className="absolute top-0 left-0 w-1 h-full bg-blue-500 animate-pulse" />
-                        <div className="flex items-start gap-3">
-                            <div className="p-2 bg-blue-500/20 rounded-full shrink-0 mt-1">
-                                <Sparkles className="w-4 h-4 text-blue-400" />
+                    <Card className="border-primary/[0.15] bg-gradient-to-b from-primary/10 via-background to-background shadow-lg">
+                        <CardHeader className="space-y-3">
+                            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-primary">
+                                <Mic className="h-3.5 w-3.5" />
+                                Record Scope
                             </div>
-                            <div className="space-y-1">
-                                <p className="text-xs font-bold text-blue-300 uppercase tracking-wider">
-                                    Try saying this:
-                                </p>
-                                <p className="text-sm font-medium text-white italic leading-relaxed">
-                                    {SOURCE_LANGUAGE_EXAMPLES[sourceLanguage]}
-                                </p>
-                                <p className="text-xs text-blue-100/70">
-                                    Output stays in professional English even if you record in Spanish or Korean.
+                            <div className="space-y-2">
+                                <CardTitle className="text-2xl leading-tight">Capture the job now. Refine the quote after.</CardTitle>
+                                <p className="text-sm leading-6 text-muted-foreground">
+                                    Speak naturally on site and let SnapQuote turn rough field language into a clean English draft before you leave the driveway.
                                 </p>
                             </div>
-                        </div>
-                        <Button
-                            variant="outline"
-                            className="mt-4 w-full border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20"
-                            onClick={handleLoadDemoQuote}
-                            data-testid="load-demo-quote-button"
-                        >
-                            <Sparkles className="mr-2 h-4 w-4" />
-                            Load Demo Quote
-                        </Button>
-                    </div>
-
-                    {/* Voice Input (Primary) */}
-                    <div className="flex flex-col items-center justify-center space-y-4 py-2">
-                        <AudioRecorder
-                            onAudioCaptured={handleAudioCaptured}
-                            onAudioRemoved={() => setAudioBlob(null)}
-                        />
-                        <p className="text-sm text-muted-foreground text-center">
-                            Tap to record in Spanish, Korean, English, or mixed site language.
-                        </p>
-                    </div>
-
-                    <div className="relative">
-                        <div className="absolute inset-0 flex items-center">
-                            <span className="w-full border-t" />
-                        </div>
-                        <div className="relative flex justify-center text-xs uppercase">
-                            <span className="bg-background px-2 text-muted-foreground">Or add photos</span>
-                        </div>
-                    </div>
-
-                    {/* Photo Input (Secondary) */}
-                    <div className="space-y-4">
-                        <div
-                            className="border-2 border-dashed border-muted-foreground/25 rounded-xl p-4 flex flex-col items-center justify-center bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors"
-                            onClick={() => fileInputRef.current?.click()}
-                        >
-                            <Camera className="h-6 w-6 text-muted-foreground mb-2" />
-                            <p className="text-sm text-muted-foreground font-medium">Add Photos</p>
-                            <input
-                                type="file"
-                                accept="image/*"
-                                multiple
-                                className="hidden"
-                                ref={fileInputRef}
-                                onChange={handleImageSelect}
-                            />
-                        </div>
-
-                        {previewUrls.length > 0 && (
-                            <div className="grid grid-cols-3 gap-2">
-                                {previewUrls.map((url, index) => (
-                                    <div key={index} className="relative aspect-square">
-                                        <Image
-                                            src={url}
-                                            alt={`Site photo ${index + 1}`}
-                                            fill
-                                            className="object-cover rounded-lg"
-                                        />
-                                        <Button
-                                            variant="destructive"
-                                            size="icon"
-                                            className="absolute top-1 right-1 h-5 w-5 rounded-full"
-                                            onClick={(e) => {
-                                                e.stopPropagation()
-                                                handleRemoveImage(index)
-                                            }}
-                                        >
-                                            <X className="h-3 w-3" />
-                                        </Button>
-                                    </div>
-                                ))}
+                        </CardHeader>
+                        <CardContent className="space-y-5">
+                            <div className="rounded-2xl border border-border/60 bg-background/80 p-4">
+                                <AudioRecorder
+                                    onAudioCaptured={handleAudioCaptured}
+                                    onAudioRemoved={() => setAudioBlob(null)}
+                                />
+                                <p className="mt-4 text-sm text-center text-muted-foreground">
+                                    Tap to record in Spanish, Korean, English, or mixed site language.
+                                </p>
                             </div>
-                        )}
 
-                        <div className="grid gap-3 md:grid-cols-2">
-                            <button
-                                type="button"
-                                onClick={() => handleSelectGenerateWorkflow("standard")}
-                                className={`rounded-2xl border p-4 text-left transition-colors ${
-                                    generateWorkflow === "standard"
-                                        ? "border-primary bg-primary/5"
-                                        : "border-border/70 bg-background hover:bg-muted/40"
-                                }`}
-                            >
-                                <p className="text-sm font-semibold">Standard AI Draft</p>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                    Mix notes, photos, and voice to get a clean estimate draft fast.
-                                </p>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => handleSelectGenerateWorkflow("photo_estimate")}
-                                className={`rounded-2xl border p-4 text-left transition-colors ${
-                                    generateWorkflow === "photo_estimate"
-                                        ? "border-primary bg-primary/10"
-                                        : "border-border/70 bg-background hover:bg-muted/40"
-                                }`}
-                            >
-                                <div className="flex items-center justify-between gap-2">
-                                    <p className="text-sm font-semibold">Pro Photo Estimate</p>
-                                    <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">
-                                        Pro
-                                    </span>
-                                </div>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                    Turn jobsite photos into scope suggestions, material takeoff hints, and pricing confidence.
-                                </p>
-                            </button>
-                        </div>
-
-                        {generateWorkflow === "photo_estimate" ? (
-                            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 space-y-3">
-                                <div className="space-y-1">
-                                    <p className="text-sm font-semibold">Photo Estimate mode</p>
-                                    <p className="text-xs text-muted-foreground">
-                                        The AI will prioritize visible site conditions, suggest likely materials, and flag assumptions you still need to verify on site.
-                                    </p>
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-xs font-medium text-muted-foreground">Jobsite context (optional)</label>
-                                    <Textarea
-                                        value={photoContext}
-                                        onChange={(e) => setPhotoContext(e.target.value)}
-                                        className="min-h-[92px]"
-                                        placeholder="Example: water damage around upstairs bath vanity, customer wants finish-grade repair and repaint"
-                                    />
-                                </div>
-                            </div>
-                        ) : null}
-
-                        {!hasPhotoEstimateAccess ? (
-                            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                                <p className="text-sm font-semibold text-amber-900">Photo Estimate is a Pro feature</p>
-                                <p className="mt-1 text-xs text-amber-800">
-                                    Unlock jobsite photo analysis, material suggestions, and pricing confidence on Pro or Team.
-                                </p>
+                            <div className="grid gap-3 sm:grid-cols-2">
                                 <Button
                                     variant="outline"
-                                    className="mt-3 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
-                                    onClick={() => router.push("/pricing")}
+                                    className="h-11 justify-center"
+                                    data-testid="skip-to-manual-entry"
+                                    onClick={() => setStep("verifying")}
                                 >
-                                    View Pro plans
+                                    Skip to manual entry
                                 </Button>
+                                <Button
+                                    variant="outline"
+                                    className="h-11 justify-center border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/[0.15]"
+                                    onClick={handleLoadDemoQuote}
+                                    data-testid="load-demo-quote-button"
+                                >
+                                    <Sparkles className="mr-2 h-4 w-4" />
+                                    Load Demo Quote
+                                </Button>
+                            </div>
+
+                            <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4">
+                                <div className="flex items-start gap-3">
+                                    <div className="rounded-full bg-blue-500/[0.15] p-2 text-blue-500">
+                                        <Sparkles className="h-4 w-4" />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-500">Try saying this</p>
+                                        <p className="text-sm font-medium leading-relaxed text-foreground italic">
+                                            {SOURCE_LANGUAGE_EXAMPLES[sourceLanguage]}
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">
+                                            Output stays in professional English even if you record in Spanish or Korean.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <div className="rounded-2xl border border-border/60 bg-muted/20">
+                        <button
+                            type="button"
+                            onClick={() => setShowInputOptions((current) => !current)}
+                            className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left"
+                            aria-expanded={shouldShowInputOptions}
+                        >
+                            <div className="space-y-1">
+                                <div className="flex items-center gap-2 text-sm font-semibold">
+                                    <SlidersHorizontal className="h-4 w-4 text-primary" />
+                                    Refine input options
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                    Set project type, voice language, add jobsite photos, or switch to Photo Estimate mode.
+                                </p>
+                            </div>
+                            {shouldShowInputOptions ? (
+                                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            )}
+                        </button>
+
+                        {shouldShowInputOptions ? (
+                            <div className="space-y-5 border-t border-border/60 px-4 py-4">
+                                <div className="space-y-3">
+                                    <div className="space-y-1">
+                                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Project type</p>
+                                        <p className="text-sm text-muted-foreground">Choose the quoting context before the draft is generated.</p>
+                                    </div>
+                                    <div className="flex p-1 bg-muted rounded-lg">
+                                        <Button
+                                            variant={projectType === 'residential' ? 'default' : 'ghost'}
+                                            className="flex-1 rounded-md h-9 text-xs font-medium"
+                                            onClick={() => setProjectType('residential')}
+                                        >
+                                            Residential
+                                        </Button>
+                                        <Button
+                                            variant={projectType === 'commercial' ? 'default' : 'ghost'}
+                                            className="flex-1 rounded-md h-9 text-xs font-medium"
+                                            onClick={() => setProjectType('commercial')}
+                                        >
+                                            Commercial
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3 rounded-2xl border border-border/60 bg-background/70 p-4">
+                                    <div className="space-y-1">
+                                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Voice language</p>
+                                        <p className="text-sm text-muted-foreground">
+                                            Pick the language you speak on site. Spanish beta pushes harder on trade-term cleanup before the English quote is generated.
+                                        </p>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {SOURCE_LANGUAGE_OPTIONS.map((option) => (
+                                            <Button
+                                                key={option.value}
+                                                type="button"
+                                                variant={sourceLanguage === option.value ? "default" : "outline"}
+                                                className="h-auto min-h-14 flex-col items-start gap-1 px-3 py-3 text-left"
+                                                onClick={() => setSourceLanguage(option.value)}
+                                            >
+                                                <span className="text-sm font-semibold">{option.label}</span>
+                                                <span className="text-[11px] leading-4 text-current/80">{option.hint}</span>
+                                            </Button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <div className="relative">
+                                        <div className="absolute inset-0 flex items-center">
+                                            <span className="w-full border-t" />
+                                        </div>
+                                        <div className="relative flex justify-center text-xs uppercase">
+                                            <span className="bg-background px-2 text-muted-foreground">Add photos</span>
+                                        </div>
+                                    </div>
+
+                                    <div
+                                        className="border-2 border-dashed border-muted-foreground/25 rounded-xl p-4 flex flex-col items-center justify-center bg-muted/30 cursor-pointer hover:bg-muted/50 transition-colors"
+                                        onClick={() => fileInputRef.current?.click()}
+                                    >
+                                        <Camera className="h-6 w-6 text-muted-foreground mb-2" />
+                                        <p className="text-sm text-muted-foreground font-medium">Add Photos</p>
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            multiple
+                                            className="hidden"
+                                            ref={fileInputRef}
+                                            onChange={handleImageSelect}
+                                        />
+                                    </div>
+
+                                    {previewUrls.length > 0 && (
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {previewUrls.map((url, index) => (
+                                                <div key={index} className="relative aspect-square">
+                                                    <Image
+                                                        src={url}
+                                                        alt={`Site photo ${index + 1}`}
+                                                        fill
+                                                        className="object-cover rounded-lg"
+                                                    />
+                                                    <Button
+                                                        variant="destructive"
+                                                        size="icon"
+                                                        className="absolute top-1 right-1 h-5 w-5 rounded-full"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            handleRemoveImage(index)
+                                                        }}
+                                                    >
+                                                        <X className="h-3 w-3" />
+                                                    </Button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <div className="grid gap-3 md:grid-cols-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleSelectGenerateWorkflow("standard")}
+                                            className={`rounded-2xl border p-4 text-left transition-colors ${
+                                                generateWorkflow === "standard"
+                                                    ? "border-primary bg-primary/5"
+                                                    : "border-border/70 bg-background hover:bg-muted/40"
+                                            }`}
+                                        >
+                                            <p className="text-sm font-semibold">Standard AI Draft</p>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                Mix notes, photos, and voice to get a clean estimate draft fast.
+                                            </p>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleSelectGenerateWorkflow("photo_estimate")}
+                                            className={`rounded-2xl border p-4 text-left transition-colors ${
+                                                generateWorkflow === "photo_estimate"
+                                                    ? "border-primary bg-primary/10"
+                                                    : "border-border/70 bg-background hover:bg-muted/40"
+                                            }`}
+                                        >
+                                            <div className="flex items-center justify-between gap-2">
+                                                <p className="text-sm font-semibold">Pro Photo Estimate</p>
+                                                <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">
+                                                    Pro
+                                                </span>
+                                            </div>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                Turn jobsite photos into scope suggestions, material takeoff hints, and pricing confidence.
+                                            </p>
+                                        </button>
+                                    </div>
+
+                                    {generateWorkflow === "photo_estimate" ? (
+                                        <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 space-y-3">
+                                            <div className="space-y-1">
+                                                <p className="text-sm font-semibold">Photo Estimate mode</p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    The AI will prioritize visible site conditions, suggest likely materials, and flag assumptions you still need to verify on site.
+                                                </p>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <label className="text-xs font-medium text-muted-foreground">Jobsite context (optional)</label>
+                                                <Textarea
+                                                    value={photoContext}
+                                                    onChange={(e) => setPhotoContext(e.target.value)}
+                                                    className="min-h-[92px]"
+                                                    placeholder="Example: water damage around upstairs bath vanity, customer wants finish-grade repair and repaint"
+                                                />
+                                            </div>
+                                        </div>
+                                    ) : null}
+
+                                    {!hasPhotoEstimateAccess ? (
+                                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                                            <p className="text-sm font-semibold text-amber-900">Photo Estimate is a Pro feature</p>
+                                            <p className="mt-1 text-xs text-amber-800">
+                                                Unlock jobsite photo analysis, material suggestions, and pricing confidence on Pro or Team.
+                                            </p>
+                                            <Button
+                                                variant="outline"
+                                                className="mt-3 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+                                                onClick={() => router.push("/pricing?plan=pro")}
+                                            >
+                                                View Pro plans
+                                            </Button>
+                                        </div>
+                                    ) : null}
+                                </div>
                             </div>
                         ) : null}
                     </div>
-
-                    {/* Manual Entry Button */}
-                    <Button
-                        variant="ghost"
-                        className="w-full text-muted-foreground"
-                        data-testid="skip-to-manual-entry"
-                        onClick={() => setStep("verifying")}
-                    >
-                        Skip to manual entry
-                    </Button>
                 </div>
             )}
 

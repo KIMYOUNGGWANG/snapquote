@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { supabase } from "@/lib/supabase"
@@ -8,16 +8,14 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import { Loader2, Save, Building2, Upload, X, Plus, Pencil, Trash2, DollarSign, Link2, ExternalLink, RefreshCw, Sparkles, Lock, Users } from "lucide-react"
+import { Loader2, Save, Building2, Upload, X, Plus, Pencil, Trash2, DollarSign, Link2, ExternalLink, RefreshCw, Sparkles, Lock, Users, CreditCard, Database, ShieldCheck } from "lucide-react"
 import Image from "next/image"
 import { getProfile, saveProfile, clearAllEstimates, getStorageStats, type BusinessInfo } from "@/lib/estimates-storage"
 import { getPriceList, savePriceListItem, deletePriceListItem } from "@/lib/db"
 import { toast } from "@/components/toast"
 import { PriceListModal } from "@/components/price-list-modal"
 import type { PriceListItem, CreatePriceListItem } from "@/types"
-import { generateFullBackupJSON, type SnapQuoteBackup } from "@/lib/export-service"
-import { saveEstimates } from "@/lib/estimates-storage"
-import { savePriceList } from "@/lib/db"
+import { generateFullBackupJSON } from "@/lib/export-service"
 import { withAuthHeaders } from "@/lib/auth-headers"
 import { useAuthGuard } from "@/lib/use-auth-guard"
 import { ReferralStatusCard } from "@/components/referral-status-card"
@@ -30,6 +28,12 @@ type StripeConnectStatus = {
     detailsSubmitted?: boolean
     chargesEnabled?: boolean
     payoutsEnabled?: boolean
+}
+
+function getStripeStatusLabel(status: StripeConnectStatus | null): string {
+    if (!status?.connected) return "Not connected"
+    if (status.detailsSubmitted && status.chargesEnabled) return "Ready to take payments"
+    return "Onboarding incomplete"
 }
 
 export default function ProfilePage() {
@@ -357,6 +361,8 @@ export default function ProfilePage() {
         }
     }
 
+    const priceListCategoryCount = useMemo(() => new Set(priceList.map((item) => item.category)).size, [priceList])
+
     if (!authResolved || !isAuthenticated || loading) {
         return (
             <div className="flex items-center justify-center min-h-[50vh]">
@@ -368,80 +374,179 @@ export default function ProfilePage() {
     const currentPlanTier = subscription?.planTier || "free"
     const canUsePdfBranding = hasPdfBrandingAccess(currentPlanTier)
     const canUsePdfTemplate = hasPdfTemplateAccess(currentPlanTier)
+    const stripeStatusLabel = getStripeStatusLabel(stripeConnectStatus)
+
+    const handleExportBackup = async () => {
+        try {
+            const latestEstimates = await getEstimates()
+            const backup = generateFullBackupJSON(profile, latestEstimates, priceList)
+            const blob = new Blob([backup], { type: "application/json" })
+            const url = URL.createObjectURL(blob)
+            const link = document.createElement("a")
+            link.href = url
+            link.download = `snapquote-backup-${new Date().toISOString().split("T")[0]}.json`
+            link.click()
+            URL.revokeObjectURL(url)
+            toast("✅ Backup exported.", "success")
+        } catch (error) {
+            console.error("Failed to export backup:", error)
+            toast("❌ Failed to export backup.", "error")
+        }
+    }
 
     return (
-        <div className="max-w-md mx-auto space-y-6 pb-20">
-            <CardHeader className="px-0">
-                <CardTitle className="text-2xl font-bold flex items-center gap-2">
-                    <Building2 className="h-6 w-6" />
-                    Business Profile
-                </CardTitle>
-                <CardDescription>
-                    This information will appear on your estimates and PDFs.
-                </CardDescription>
-            </CardHeader>
-
-            <Card className="border-primary/20">
-                <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between gap-3">
-                        <div>
-                            <CardTitle className="text-lg flex items-center gap-2">
-                                <Sparkles className="h-5 w-5" />
-                                PDF Branding Kit
-                            </CardTitle>
-                            <CardDescription>
-                                Make estimate PDFs look like your company, not generic software.
-                            </CardDescription>
-                        </div>
-                        <span className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-primary">
-                            {currentPlanTier}
-                        </span>
-                    </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                    <div className={`rounded-lg border p-3 ${canUsePdfBranding ? "border-emerald-300 bg-emerald-50/70" : "border-amber-300 bg-amber-50/70"}`}>
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <p className="text-sm font-semibold text-slate-900">Starter Branding</p>
-                                <p className="text-xs text-slate-700">
-                                    Add your company logo so the PDF header looks like your business.
+        <div className="mx-auto max-w-5xl space-y-6 px-4 pb-20 pt-6">
+            <Card className="overflow-hidden border-primary/[0.15] bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
+                <CardContent className="space-y-6 p-6">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="space-y-3">
+                            <div className="w-fit rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-white">
+                                Business Profile
+                            </div>
+                            <div className="space-y-2">
+                                <h1 className="text-3xl font-semibold tracking-[-0.04em]">Branding, payments, and workspace setup</h1>
+                                <p className="max-w-2xl text-sm leading-6 text-slate-300">
+                                    Configure what customers see on PDFs, manage company-owned payments, and keep team and pricing operations aligned from one control surface.
                                 </p>
                             </div>
-                            <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-700">
-                                {canUsePdfBranding ? "Unlocked" : "Starter+"}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-full border border-white/[0.15] bg-white/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-white">
+                                {currentPlanTier}
                             </span>
+                            <Button
+                                className="bg-white text-slate-950 hover:bg-slate-100"
+                                onClick={handleSave}
+                                disabled={saving}
+                            >
+                                {saving ? (
+                                    <>
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                        Saving...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Save className="mr-2 h-4 w-4" />
+                                        Save Profile
+                                    </>
+                                )}
+                            </Button>
                         </div>
                     </div>
 
-                    <div className={`rounded-lg border p-3 ${canUsePdfTemplate ? "border-sky-300 bg-sky-50/70" : "border-slate-200 bg-slate-50"}`}>
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <p className="text-sm font-semibold text-slate-900">Pro Template Background</p>
-                                <p className="text-xs text-slate-700">
-                                    Upload a full-page estimate background for a custom branded PDF layout.
-                                </p>
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="flex items-center justify-between">
+                                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">PDF branding</p>
+                                <Sparkles className="h-4 w-4 text-slate-400" />
                             </div>
-                            <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-700">
-                                {canUsePdfTemplate ? "Unlocked" : "Pro+"}
-                            </span>
+                            <p className="mt-3 text-2xl font-semibold">{canUsePdfTemplate ? "Pro kit" : canUsePdfBranding ? "Starter kit" : "Locked"}</p>
+                            <p className="mt-1 text-xs text-slate-400">
+                                {canUsePdfTemplate ? "Logo and full-page template unlocked" : canUsePdfBranding ? "Logo branding unlocked" : "Upgrade to unlock branded PDFs"}
+                            </p>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="flex items-center justify-between">
+                                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Stripe</p>
+                                <CreditCard className="h-4 w-4 text-slate-400" />
+                            </div>
+                            <p className="mt-3 text-2xl font-semibold">{stripeStatusLabel}</p>
+                            <p className="mt-1 text-xs text-slate-400">
+                                {stripeConnectStatus?.accountId ? stripeConnectStatus.accountId : "No company payment account linked yet"}
+                            </p>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="flex items-center justify-between">
+                                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Price list</p>
+                                <DollarSign className="h-4 w-4 text-slate-400" />
+                            </div>
+                            <p className="mt-3 text-2xl font-semibold">{priceList.length}</p>
+                            <p className="mt-1 text-xs text-slate-400">{priceListCategoryCount} active pricing categories</p>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div className="flex items-center justify-between">
+                                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Local storage</p>
+                                <Database className="h-4 w-4 text-slate-400" />
+                            </div>
+                            <p className="mt-3 text-2xl font-semibold">{storageStats.estimateCount}</p>
+                            <p className="mt-1 text-xs text-slate-400">{storageStats.storageUsed} used in this browser</p>
                         </div>
                     </div>
-
-                    {!canUsePdfBranding && (
-                        <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-slate-700">
-                            Upgrade to Starter to unlock logo branding on PDFs, or Pro to unlock a full custom background template.
-                            <div className="mt-3">
-                                <Button asChild size="sm">
-                                    <Link href="/pricing">See PDF branding plans</Link>
-                                </Button>
-                            </div>
-                        </div>
-                    )}
                 </CardContent>
             </Card>
 
-            <Card>
-                <CardContent className="pt-6 space-y-4">
+            <div className="grid gap-6 xl:grid-cols-[1.08fr_0.92fr]">
+                <div className="space-y-6">
+                    <Card className="border-primary/20">
+                        <CardHeader className="pb-3">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <CardTitle className="flex items-center gap-2 text-lg">
+                                        <Sparkles className="h-5 w-5" />
+                                        PDF Branding Kit
+                                    </CardTitle>
+                                    <CardDescription>
+                                        Make estimate PDFs look like your company, not generic software.
+                                    </CardDescription>
+                                </div>
+                                <span className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-primary">
+                                    {currentPlanTier}
+                                </span>
+                            </div>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                            <div className={`rounded-2xl border p-4 ${canUsePdfBranding ? "border-emerald-300 bg-emerald-50/70" : "border-amber-300 bg-amber-50/70"}`}>
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-semibold text-slate-900">Starter Branding</p>
+                                        <p className="text-xs text-slate-700">
+                                            Add your company logo so the PDF header looks like your business.
+                                        </p>
+                                    </div>
+                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-700">
+                                        {canUsePdfBranding ? "Unlocked" : "Starter+"}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className={`rounded-2xl border p-4 ${canUsePdfTemplate ? "border-sky-300 bg-sky-50/70" : "border-slate-200 bg-slate-50"}`}>
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-semibold text-slate-900">Pro Template Background</p>
+                                        <p className="text-xs text-slate-700">
+                                            Upload a full-page estimate background for a custom branded PDF layout.
+                                        </p>
+                                    </div>
+                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-700">
+                                        {canUsePdfTemplate ? "Unlocked" : "Pro+"}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {!canUsePdfBranding ? (
+                                <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm text-slate-700">
+                                    Upgrade to Starter to unlock logo branding on PDFs, or Pro to unlock a full custom background template.
+                                    <div className="mt-3">
+                                        <Button asChild size="sm">
+                                            <Link href="/pricing?plan=starter">See PDF branding plans</Link>
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : null}
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader className="pb-3">
+                            <CardTitle className="flex items-center gap-2 text-lg">
+                                <Building2 className="h-5 w-5" />
+                                Business Details
+                            </CardTitle>
+                            <CardDescription>
+                                This information appears on estimates, PDFs, and fallback payment details.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
                     {/* Logo Upload */}
                     <div className="space-y-2">
                         <Label>Business Logo</Label>
@@ -606,7 +711,7 @@ export default function ProfilePage() {
                             id="state_province"
                             value={profile.state_province || "ON"}
                             onChange={(e) => setProfile({ ...profile, state_province: e.target.value })}
-                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="flex h-11 w-full rounded-xl border border-input/80 bg-background/80 px-3.5 py-2 text-sm shadow-[0_14px_28px_-22px_rgba(15,23,42,0.8)] transition-[border-color,box-shadow,background-color] duration-200 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <option value="ON">Ontario (Canada)</option>
                             <option value="BC">British Columbia (Canada)</option>
@@ -648,38 +753,22 @@ export default function ProfilePage() {
                             HST/GST rate for your region (e.g., Ontario = 13%)
                         </p>
                     </div>
-                </CardContent>
-            </Card>
+                        </CardContent>
+                    </Card>
+                </div>
 
-            <Button
-                className="w-full h-12 text-lg font-semibold"
-                onClick={handleSave}
-                disabled={saving}
-            >
-                {saving ? (
-                    <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saving...
-                    </>
-                ) : (
-                    <>
-                        <Save className="mr-2 h-4 w-4" />
-                        Save Profile
-                    </>
-                )}
-            </Button>
-
-            <Card className="border-primary/30">
-                <CardHeader className="pb-3">
-                    <CardTitle className="text-lg flex items-center gap-2">
-                        <Link2 className="h-5 w-5" />
-                        Stripe Connect (Company-Owned Payments)
-                    </CardTitle>
-                    <CardDescription>
-                        Each business manages its own payments, payouts, refunds, and disputes in Stripe.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
+                <div className="space-y-6">
+                    <Card className="border-primary/30">
+                        <CardHeader className="pb-3">
+                            <CardTitle className="flex items-center gap-2 text-lg">
+                                <CreditCard className="h-5 w-5" />
+                                Stripe Connect
+                            </CardTitle>
+                            <CardDescription>
+                                Each business manages its own payments, payouts, refunds, and disputes in Stripe.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
                     {stripeStatusLoading ? (
                         <p className="text-sm text-muted-foreground flex items-center gap-2">
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -687,7 +776,7 @@ export default function ProfilePage() {
                         </p>
                     ) : (
                         <>
-                            <div className="rounded-lg border p-3 bg-muted/40">
+                            <div className="rounded-2xl border border-border/70 p-4 bg-muted/40">
                                 {!stripeConnectStatus ? (
                                     <p className="text-sm text-muted-foreground">
                                         Log in to connect your company Stripe account.
@@ -713,7 +802,7 @@ export default function ProfilePage() {
                                 )}
                             </div>
 
-                            <div className="flex gap-2">
+                            <div className="flex flex-wrap gap-2">
                                 <Button
                                     className="flex-1"
                                     onClick={handleConnectStripe}
@@ -762,49 +851,68 @@ export default function ProfilePage() {
                             )}
                         </>
                     )}
-                </CardContent>
-            </Card>
+                        </CardContent>
+                    </Card>
 
-            <ReferralStatusCard />
+                    <Card className="border-border/70">
+                        <CardHeader className="pb-3">
+                            <CardTitle className="flex items-center gap-2 text-lg">
+                                <Link2 className="h-5 w-5" />
+                                QuickBooks Entry Point
+                            </CardTitle>
+                            <CardDescription>
+                                Invoice sync is managed from History so you can push won estimates into QuickBooks with live record context.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                            <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                                Open History to connect QuickBooks, review sync status, and push sent or paid estimates into your company ledger.
+                            </div>
+                            <Button asChild variant="outline" className="w-full">
+                                <Link href="/history">Open History & QuickBooks</Link>
+                            </Button>
+                        </CardContent>
+                    </Card>
 
-            <Card className="border-primary/20">
-                <CardHeader className="pb-3">
-                    <CardTitle className="text-lg flex items-center gap-2">
-                        <Users className="h-5 w-5" />
-                        Team Workspace
-                    </CardTitle>
-                    <CardDescription>
-                        Team plan members can invite crew, share synced estimates, and standardize quoting across the workspace.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                    <p className="text-sm text-muted-foreground">
-                        Team workspace access is live. Invite members, manage crew roles, and review synced estimate activity from one shared feed.
-                    </p>
-                    <Button asChild variant="outline" className="w-full">
-                        <Link href="/team">Open Team Workspace</Link>
-                    </Button>
-                </CardContent>
-            </Card>
+                    <ReferralStatusCard />
 
-            {/* Price List Section */}
-            <Card>
-                <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <DollarSign className="h-5 w-5" />
-                            <CardTitle className="text-lg">My Price List</CardTitle>
-                        </div>
-                        <Button size="sm" onClick={handleAddPriceItem}>
-                            <Plus className="h-4 w-4 mr-1" />
-                            Add
-                        </Button>
-                    </div>
-                    <CardDescription>
-                        AI will use these fixed prices for consistent estimates.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2">
+                    <Card className="border-primary/20">
+                        <CardHeader className="pb-3">
+                            <CardTitle className="flex items-center gap-2 text-lg">
+                                <Users className="h-5 w-5" />
+                                Team Workspace
+                            </CardTitle>
+                            <CardDescription>
+                                Team plan members can invite crew, share synced estimates, and standardize quoting across the workspace.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                            <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                                Team workspace access is live. Invite members, manage crew roles, and review synced estimate activity from one shared feed.
+                            </div>
+                            <Button asChild variant="outline" className="w-full">
+                                <Link href="/team">Open Team Workspace</Link>
+                            </Button>
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader className="pb-3">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <DollarSign className="h-5 w-5" />
+                                    <CardTitle className="text-lg">My Price List</CardTitle>
+                                </div>
+                                <Button size="sm" onClick={handleAddPriceItem}>
+                                    <Plus className="h-4 w-4 mr-1" />
+                                    Add
+                                </Button>
+                            </div>
+                            <CardDescription>
+                                AI will use these fixed prices for consistent estimates.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
                     {priceList.length === 0 ? (
                         <div className="text-center py-6 text-muted-foreground">
                             <DollarSign className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -843,8 +951,59 @@ export default function ProfilePage() {
                             })}
                         </div>
                     )}
-                </CardContent>
-            </Card>
+                        </CardContent>
+                    </Card>
+
+                    <Card className="border-dashed">
+                        <CardHeader className="pb-3">
+                            <CardTitle className="flex items-center gap-2 text-lg">
+                                <Database className="h-5 w-5" />
+                                Local Data
+                            </CardTitle>
+                            <CardDescription>
+                                Export a browser backup before clearing local data or moving devices.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                                <div className="rounded-2xl border border-border/70 p-4">
+                                    <p className="text-muted-foreground">Estimates Saved</p>
+                                    <p className="font-bold text-lg">{storageStats.estimateCount}</p>
+                                </div>
+                                <div className="rounded-2xl border border-border/70 p-4">
+                                    <p className="text-muted-foreground">Storage Used</p>
+                                    <p className="font-bold text-lg">{storageStats.storageUsed}</p>
+                                </div>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                All data is stored locally in your browser for offline-first quoting.
+                            </p>
+                            <Button variant="outline" className="w-full" onClick={() => void handleExportBackup()}>
+                                <ShieldCheck className="mr-2 h-4 w-4" />
+                                Export Backup JSON
+                            </Button>
+                        </CardContent>
+                    </Card>
+
+                    <Card className="border-destructive/50">
+                        <CardHeader className="pb-3">
+                            <CardTitle className="text-lg text-destructive">Danger Zone</CardTitle>
+                            <CardDescription>
+                                Clear all estimates and profile data from this browser.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <Button
+                                variant="destructive"
+                                className="w-full"
+                                onClick={handleClearData}
+                            >
+                                Clear All Data
+                            </Button>
+                        </CardContent>
+                    </Card>
+                </div>
+            </div>
 
             {/* Price List Modal */}
             <PriceListModal
@@ -856,47 +1015,6 @@ export default function ProfilePage() {
                 onSave={handleSavePriceItem}
                 editItem={editingPriceItem}
             />
-
-            {/* Storage Info */}
-            <Card className="border-dashed">
-                <CardContent className="pt-6">
-                    <div className="space-y-3">
-                        <h3 className="font-semibold text-sm">📊 Storage Information</h3>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div>
-                                <p className="text-muted-foreground">Estimates Saved</p>
-                                <p className="font-bold text-lg">{storageStats.estimateCount}</p>
-                            </div>
-                            <div>
-                                <p className="text-muted-foreground">Storage Used</p>
-                                <p className="font-bold text-lg">{storageStats.storageUsed}</p>
-                            </div>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                            💡 All data is stored locally in your browser
-                        </p>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* Clear Data Section */}
-            <Card className="border-destructive/50">
-                <CardContent className="pt-6">
-                    <div className="space-y-3">
-                        <h3 className="font-semibold text-sm text-destructive">⚠️ Danger Zone</h3>
-                        <p className="text-sm text-muted-foreground">
-                            Clear all estimates and profile data from this browser.
-                        </p>
-                        <Button
-                            variant="destructive"
-                            className="w-full"
-                            onClick={handleClearData}
-                        >
-                            Clear All Data
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
         </div>
     )
 }

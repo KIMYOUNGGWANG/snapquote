@@ -2,12 +2,14 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useHaptic } from "@/hooks/use-haptic"
 import { Home, PlusCircle, Receipt, Bot, MoreHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MoreMenu } from "@/components/more-menu"
 
 export function BottomNav() {
     const pathname = usePathname()
+    const haptic = useHaptic()
 
     const links = [
         { href: "/", label: "Home", icon: Home },
@@ -18,8 +20,8 @@ export function BottomNav() {
     ]
 
     return (
-        <div className="fixed bottom-6 left-4 right-4 z-50 flex justify-center pointer-events-none">
-            <nav className="flex items-center justify-between px-2 py-2 bg-background/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl shadow-black/50 pointer-events-auto w-full max-w-sm">
+        <div className="fixed bottom-6 left-0 right-0 z-[100] flex justify-center pointer-events-none w-full">
+            <nav className="flex items-center justify-between px-2 py-2 mx-auto bg-background/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl shadow-black/50 pointer-events-auto w-[calc(100%-2rem)] max-w-sm pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
                 {links.map(({ href, label, icon: Icon, isMain, isTrigger }) => {
                     const isActive = pathname === href
 
@@ -28,6 +30,9 @@ export function BottomNav() {
                             <Link
                                 key={href}
                                 href={href}
+                                aria-label={label}
+                                title={label}
+                                onClick={() => haptic.medium()}
                                 className="relative -top-6 mx-2"
                             >
                                 <div className={cn(
@@ -35,6 +40,7 @@ export function BottomNav() {
                                     "bg-gradient-to-tr from-blue-600 to-blue-400 text-white shadow-blue-500/30"
                                 )}>
                                     <PlusCircle className="h-7 w-7" />
+                                    <span className="sr-only">{label}</span>
                                 </div>
                             </Link>
                         )
@@ -44,6 +50,7 @@ export function BottomNav() {
                         return (
                             <MoreMenu key="more-menu">
                                 <button
+                                    onClick={() => haptic.light()}
                                     className={cn(
                                         "flex flex-col items-center justify-center w-12 h-12 rounded-xl transition-all duration-300",
                                         "text-muted-foreground hover:text-foreground hover:bg-white/5"
@@ -60,6 +67,7 @@ export function BottomNav() {
                         <Link
                             key={href}
                             href={href}
+                            onClick={() => haptic.light()}
                             className={cn(
                                 "flex flex-col items-center justify-center w-12 h-12 rounded-xl transition-all duration-300",
                                 isActive
@@ -76,4 +84,3 @@ export function BottomNav() {
         </div>
     )
 }
-

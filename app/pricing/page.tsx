@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, Sparkles, ArrowRight } from "lucide-react"
@@ -18,70 +18,24 @@ import {
     type BillingSubscriptionStatusResponse,
     type PricingOfferResponse,
 } from "@/lib/pricing"
+import { MARKETING_PLAN_OPTIONS, getMarketingPlan } from "@/lib/marketing-plans"
 import { toast } from "@/components/toast"
 import { supabase } from "@/lib/supabase"
 import { FREE_PLAN_MARKETING_QUOTE_LIMIT } from "@/lib/free-tier"
-
-const PLAN_OPTIONS: Array<{
-    tier: BillingPaidPlanTier
-    label: string
-    priceLabel: string
-    bestFor: string
-    includes: string[]
-}> = [
-        {
-            tier: "starter",
-            label: "Starter",
-            priceLabel: "CAD $34/mo",
-            bestFor: "Solo owner-operators who speak Spanish or Korean on site and need clean English quotes out fast",
-            includes: [
-                "Up to 80 field estimates per month",
-                "60 transcription minutes for multilingual on-site scope notes",
-                "60 sent estimate emails per month",
-                "Branded PDF header with your logo and payment link",
-                "Spanish/Korean voice capture plus offline quote drafting",
-            ],
-        },
-        {
-            tier: "pro",
-            label: "Pro",
-            priceLabel: "CAD $59/mo",
-            bestFor: "Owner-operators who want cleaner English wording, faster approvals, and deposit requests",
-            includes: [
-                "Up to 250 estimates per month",
-                "180 transcription minutes for service-call volume",
-                "200 sent estimate emails per month",
-                "Custom full-page PDF background template",
-                "QuickBooks sync and photo estimate workflow",
-                "Receipt scan, English quote cleanup, and better fit for higher-ticket jobs",
-            ],
-        },
-        {
-            tier: "team",
-            label: "Team",
-            priceLabel: "CAD $129/mo",
-            bestFor: "2-10 tech crews standardizing English quote output across multilingual field teams",
-            includes: [
-                "Up to 800 estimates per month",
-                "Shared English quote standards across techs",
-                "Shared premium PDF branding workflow",
-                "Automation included",
-                "Built for higher-volume quoting and follow-up",
-            ],
-        },
-    ]
 
 type BillingInterval = "monthly" | "annual"
 
 export default function PricingPage() {
     const router = useRouter()
+    const searchParams = useSearchParams()
+    const initialPlanTier = getMarketingPlan(searchParams.get("plan")).tier as BillingPaidPlanTier
     const [loading, setLoading] = useState(true)
     const [offer, setOffer] = useState<PricingOfferResponse | null>(null)
     const [subscription, setSubscription] = useState<BillingSubscriptionStatusResponse | null>(null)
     const [usageSnapshot, setUsageSnapshot] = useState<BillingUsageSnapshot | null>(null)
     const [checkoutLoading, setCheckoutLoading] = useState(false)
     const [portalLoading, setPortalLoading] = useState(false)
-    const [selectedPlanTier, setSelectedPlanTier] = useState<BillingPaidPlanTier>("starter")
+    const [selectedPlanTier, setSelectedPlanTier] = useState<BillingPaidPlanTier>(initialPlanTier)
     const [billingInterval, setBillingInterval] = useState<BillingInterval>("monthly")
     const [isAuthed, setIsAuthed] = useState(false)
 
@@ -144,7 +98,7 @@ export default function PricingPage() {
     }, [])
 
     const variant = offer?.ok && offer.variant ? offer.variant : null
-    const selectedPlan = PLAN_OPTIONS.find((plan) => plan.tier === selectedPlanTier) || PLAN_OPTIONS[0]
+    const selectedPlan = getMarketingPlan(selectedPlanTier)
     const billingConfig = offer?.ok ? offer.billing.plans[selectedPlanTier] : null
     const usageRows = usageSnapshot ? [
         {
@@ -225,7 +179,7 @@ export default function PricingPage() {
             <div className="ambient-orb left-[-80px] top-8 h-40 w-40 bg-sky-500/20" />
             <div className="ambient-orb right-[-40px] top-24 h-36 w-36 bg-amber-500/[0.15]" />
 
-            <Card className="premium-panel mesh-border mx-auto w-full max-w-sm overflow-hidden border-primary/20">
+            <Card className="premium-panel mesh-border mx-auto w-full max-w-5xl overflow-hidden border-primary/20">
                 <CardHeader className="pb-3">
                     <div className="section-eyebrow w-fit">
                         <Sparkles className="h-4 w-4" />
@@ -250,8 +204,8 @@ export default function PricingPage() {
                         Pay for turning Spanish or Korean field talk into clean English quotes, not for bloated office software you barely open.
                     </div>
 
-                    <div className="grid grid-cols-1 gap-3">
-                        {PLAN_OPTIONS.map((plan) => (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                        {MARKETING_PLAN_OPTIONS.map((plan) => (
                             <button
                                 key={plan.tier}
                                 type="button"
@@ -268,7 +222,7 @@ export default function PricingPage() {
                                         <p className="mt-1 text-sm text-slate-300">{plan.priceLabel}</p>
                                     </div>
                                     <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${selectedPlanTier === plan.tier
-                                        ? "bg-sky-300/15 text-sky-100"
+                                        ? "bg-sky-300/[0.15] text-sky-100"
                                         : "bg-white/[0.08] text-slate-300"
                                         }`}>
                                         {plan.tier}
