@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -25,7 +25,7 @@ import { FREE_PLAN_MARKETING_QUOTE_LIMIT } from "@/lib/free-tier"
 
 type BillingInterval = "monthly" | "annual"
 
-export default function PricingPage() {
+function PricingPageContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
     const initialPlanTier = getMarketingPlan(searchParams.get("plan")).tier as BillingPaidPlanTier
@@ -437,5 +437,21 @@ export default function PricingPage() {
                 </CardContent>
             </Card>
         </div>
+    )
+}
+
+function PricingPageFallback() {
+    return (
+        <div className="flex min-h-[50vh] items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+    )
+}
+
+export default function PricingPage() {
+    return (
+        <Suspense fallback={<PricingPageFallback />}>
+            <PricingPageContent />
+        </Suspense>
     )
 }
