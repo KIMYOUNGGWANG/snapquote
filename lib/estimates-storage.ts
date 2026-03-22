@@ -1,5 +1,5 @@
-import { saveEstimateToDB, getEstimatesFromDB, initDB } from "./db.ts"
-import { emitOfflineQueueChanged } from "./offline-events.ts"
+import { saveEstimateToDB, getEstimatesFromDB, initDB } from "./db"
+import { emitOfflineQueueChanged } from "./offline-events"
 
 // Unit types for professional estimating
 export type EstimateUnit = 'ea' | 'LS' | 'hr' | 'day' | 'SF' | 'LF' | '%' | 'other'

@@ -1,6 +1,6 @@
 import { openDB, DBSchema } from 'idb';
 import type { PriceListItem, PriceCategory, PriceUnit } from '@/types';
-import { emitOfflineQueueChanged } from './offline-events.ts';
+import { emitOfflineQueueChanged } from "./offline-events";
 
 interface SnapQuoteDB extends DBSchema {
     estimates: {

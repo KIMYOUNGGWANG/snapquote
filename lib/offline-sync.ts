@@ -1,5 +1,5 @@
-import { getUnprocessedAudio } from "./db.ts"
-import { getEstimates, type LocalEstimate } from "./estimates-storage.ts"
+import { getUnprocessedAudio } from "./db"
+import { getEstimates, type LocalEstimate } from "./estimates-storage"
 
 export interface PendingSyncSummary {
     draftCount: number
