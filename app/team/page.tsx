@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { useAuthGuard } from "@/lib/use-auth-guard"
@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge"
 import { toast } from "@/components/toast"
 import { Loader2, RefreshCw, Users, Copy, Lock, ArrowRight } from "lucide-react"
 
-export default function TeamPage() {
+function TeamPageContent() {
     const { authResolved, isAuthenticated } = useAuthGuard("/team")
     const searchParams = useSearchParams()
     const inviteToken = searchParams.get("invite")?.trim() || ""
@@ -304,5 +304,21 @@ export default function TeamPage() {
                 </>
             )}
         </div>
+    )
+}
+
+function TeamPageFallback() {
+    return (
+        <div className="flex items-center justify-center min-h-[50vh]">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+    )
+}
+
+export default function TeamPage() {
+    return (
+        <Suspense fallback={<TeamPageFallback />}>
+            <TeamPageContent />
+        </Suspense>
     )
 }
