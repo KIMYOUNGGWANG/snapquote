@@ -227,7 +227,7 @@ export default function Home() {
       {/* Main Container */}
       <div className="app-shell flex flex-col min-h-screen pb-32 px-4 pt-6 space-y-6">
         <div className="ambient-orb left-[-80px] top-10 h-44 w-44 bg-sky-500/20" />
-        <div className="ambient-orb right-[-40px] top-28 h-36 w-36 bg-amber-500/15" />
+        <div className="ambient-orb right-[-40px] top-28 h-36 w-36 bg-amber-500/[0.15]" />
         <div className="ambient-orb bottom-28 left-1/2 h-48 w-48 -translate-x-1/2 bg-cyan-400/10" />
 
         {/* If Setup Wizard is active, hide the rest of the dashboard */}
@@ -328,7 +328,7 @@ export default function Home() {
                   </span>
                 </div>
 
-                <p className="rounded-2xl border border-white/8 bg-slate-950/60 px-3 py-3 text-sm leading-6 text-slate-200">
+                <p className="rounded-2xl border border-white/[0.08] bg-slate-950/60 px-3 py-3 text-sm leading-6 text-slate-200">
                   <TypewriterText text="Replace damaged trim, reset fixture, patch access, haul away debris..." />
                 </p>
               </div>
@@ -353,7 +353,7 @@ export default function Home() {
                   </Button>
                 </Link>
                 <Link href="/new-estimate" className="block" data-testid="home-try-free-cta">
-                  <Button size="lg" variant="outline" className="w-full h-14 rounded-[22px] border-white/15 bg-white/5 text-white hover:bg-white/10">
+                  <Button size="lg" variant="outline" className="w-full h-14 rounded-[22px] border-white/[0.15] bg-white/5 text-white hover:bg-white/10">
                     Try {FREE_PLAN_MARKETING_QUOTE_LIMIT} Free Field Quotes
                   </Button>
                 </Link>

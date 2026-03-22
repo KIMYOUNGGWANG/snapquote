@@ -223,7 +223,7 @@ export default function PricingPage() {
     return (
         <div className="app-shell space-y-4 px-4 pb-32 pt-6">
             <div className="ambient-orb left-[-80px] top-8 h-40 w-40 bg-sky-500/20" />
-            <div className="ambient-orb right-[-40px] top-24 h-36 w-36 bg-amber-500/15" />
+            <div className="ambient-orb right-[-40px] top-24 h-36 w-36 bg-amber-500/[0.15]" />
 
             <Card className="premium-panel mesh-border mx-auto w-full max-w-sm overflow-hidden border-primary/20">
                 <CardHeader className="pb-3">
@@ -246,7 +246,7 @@ export default function PricingPage() {
                         </div>
                     )}
 
-                    <div className="rounded-[24px] border border-sky-300/10 bg-gradient-to-r from-sky-500/12 via-cyan-400/10 to-amber-400/10 p-4 text-sm leading-6 text-slate-300">
+                    <div className="rounded-[24px] border border-sky-300/10 bg-gradient-to-r from-sky-500/[0.12] via-cyan-400/10 to-amber-400/10 p-4 text-sm leading-6 text-slate-300">
                         Pay for turning Spanish or Korean field talk into clean English quotes, not for bloated office software you barely open.
                     </div>
 
@@ -269,7 +269,7 @@ export default function PricingPage() {
                                     </div>
                                     <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${selectedPlanTier === plan.tier
                                         ? "bg-sky-300/15 text-sky-100"
-                                        : "bg-white/8 text-slate-300"
+                                        : "bg-white/[0.08] text-slate-300"
                                         }`}>
                                         {plan.tier}
                                     </span>
@@ -324,7 +324,7 @@ export default function PricingPage() {
                         </p>
                     </div>
 
-                    <div className="rounded-[24px] border border-white/10 bg-slate-950/45 p-4 space-y-2">
+                    <div className="rounded-[24px] border border-white/10 bg-slate-950/[0.45] p-4 space-y-2">
                         <p className="text-sm text-muted-foreground">Selected plan</p>
                         <p className="text-3xl font-semibold tracking-[-0.04em] text-white">
                             {selectedPlan.priceLabel}
@@ -463,7 +463,7 @@ export default function PricingPage() {
                         <Button
                             asChild
                             variant="outline"
-                            className="h-12 w-full rounded-[22px] border-white/15 bg-white/5 text-white hover:bg-white/10"
+                            className="h-12 w-full rounded-[22px] border-white/[0.15] bg-white/5 text-white hover:bg-white/10"
                         >
                             <Link href="/new-estimate">
                                 Try {FREE_PLAN_MARKETING_QUOTE_LIMIT} free English quote drafts first
@@ -474,7 +474,7 @@ export default function PricingPage() {
                                 variant="outline"
                                 onClick={handleManageBillingClick}
                                 disabled={loading || portalLoading || !subscription?.customerId}
-                                className="h-12 w-full rounded-[22px] border-white/15 bg-white/5 text-white hover:bg-white/10"
+                                className="h-12 w-full rounded-[22px] border-white/[0.15] bg-white/5 text-white hover:bg-white/10"
                             >
                                 {portalLoading ? "Opening portal..." : "Manage billing in Stripe"}
                             </Button>

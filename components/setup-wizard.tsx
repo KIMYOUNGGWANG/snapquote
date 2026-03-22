@@ -339,7 +339,7 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
                     <CardDescription>Add a logo now so your very first PDF already looks like your business.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5">
-                    <div className="rounded-2xl border border-primary/15 bg-primary/5 p-4">
+                    <div className="rounded-2xl border border-primary/[0.15] bg-primary/5 p-4">
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                             {logoPreview ? (
                                 <div className="relative h-24 w-24 overflow-hidden rounded-xl border bg-background">
@@ -433,7 +433,7 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
                         </div>
                     </div>
 
-                    <div className="space-y-3 rounded-2xl border border-primary/15 bg-primary/5 p-4">
+                    <div className="space-y-3 rounded-2xl border border-primary/[0.15] bg-primary/5 p-4">
                         <div className="flex items-center gap-2">
                             <Package className="h-4 w-4 text-primary" />
                             <p className="text-sm font-medium">Optional: add one custom starter item</p>
