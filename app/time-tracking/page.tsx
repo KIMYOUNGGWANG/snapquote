@@ -3,21 +3,25 @@
 import { useState, useEffect, useRef } from "react"
 import { Clock, Play, Pause, Trash2, ArrowLeft, Calendar } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import Link from "next/link"
 import { saveTimeEntry, updateTimeEntry, getTimeEntries, deleteTimeEntry, type TimeEntry } from "@/lib/db"
+import { getEstimates, type LocalEstimate } from "@/lib/estimates-storage"
 import { toast } from "@/components/toast"
 
 export default function TimeTrackingPage() {
     const [entries, setEntries] = useState<TimeEntry[]>([])
     const [activeEntry, setActiveEntry] = useState<TimeEntry | null>(null)
+    const [estimates, setEstimates] = useState<LocalEstimate[]>([])
+    const [selectedEstimateId, setSelectedEstimateId] = useState<string>("")
     const [projectName, setProjectName] = useState("")
     const [elapsedTime, setElapsedTime] = useState(0) // seconds
     const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
     useEffect(() => {
-        loadEntries()
+        void loadEntries()
+        void loadEstimates()
     }, [])
 
     // Timer effect
@@ -41,24 +45,30 @@ export default function TimeTrackingPage() {
         // Find active entry (no endTime)
         const active = data.find(e => !e.endTime)
         setActiveEntry(active || null)
-        if (active) {
-            setProjectName(active.projectName || "")
-        }
+        setProjectName(active?.projectName || "")
+        setSelectedEstimateId(active?.estimateId || "")
         setEntries(data.filter(e => e.endTime).reverse()) // Completed entries, recent first
+    }
+
+    async function loadEstimates(): Promise<void> {
+        const data = await getEstimates()
+        setEstimates(data.filter((estimate) => estimate.status === "sent" || estimate.status === "paid"))
     }
 
     const handleStart = async () => {
         const now = new Date()
-        const id = await saveTimeEntry({
+        const linkedEstimate = estimates.find((estimate) => estimate.id === selectedEstimateId)
+        const entry: Omit<TimeEntry, "id"> = {
             projectName: projectName || undefined,
+            estimateId: linkedEstimate?.id,
+            estimateNumber: linkedEstimate?.estimateNumber,
             startTime: now.toISOString(),
             date: now.toISOString().split('T')[0],
-        })
+        }
+        const id = await saveTimeEntry(entry)
         setActiveEntry({
             id,
-            projectName: projectName || undefined,
-            startTime: now.toISOString(),
-            date: now.toISOString().split('T')[0],
+            ...entry,
         })
         toast("⏱️ Timer started!", "success")
     }
@@ -77,14 +87,15 @@ export default function TimeTrackingPage() {
 
         setActiveEntry(null)
         setProjectName("")
+        setSelectedEstimateId("")
         toast(`✅ Logged ${formatDuration(duration)}`, "success")
-        loadEntries()
+        await loadEntries()
     }
 
     const handleDelete = async (id: string) => {
         await deleteTimeEntry(id)
         toast("🗑️ Entry deleted", "success")
-        loadEntries()
+        await loadEntries()
     }
 
     const formatDuration = (minutes: number): string => {
@@ -145,12 +156,32 @@ export default function TimeTrackingPage() {
 
                     {/* Project Name */}
                     {!activeEntry && (
-                        <Input
-                            placeholder="Project name (optional)"
-                            value={projectName}
-                            onChange={(e) => setProjectName(e.target.value)}
-                            className="mb-4"
-                        />
+                        <>
+                            <Input
+                                placeholder="Project name (optional)"
+                                value={projectName}
+                                onChange={(e) => setProjectName(e.target.value)}
+                                className="mb-4"
+                            />
+                            <div className="mb-4">
+                                <label htmlFor="estimate-select" className="mb-2 block text-sm font-medium">
+                                    연결할 견적 선택
+                                </label>
+                                <select
+                                    id="estimate-select"
+                                    value={selectedEstimateId}
+                                    onChange={(e) => setSelectedEstimateId(e.target.value)}
+                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                                >
+                                    <option value="">선택 안 함</option>
+                                    {estimates.map((estimate) => (
+                                        <option key={estimate.id} value={estimate.id}>
+                                            {estimate.estimateNumber} - {estimate.clientName}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </>
                     )}
 
                     {/* Start/Stop Button */}
@@ -203,7 +234,14 @@ export default function TimeTrackingPage() {
                     <Card key={entry.id}>
                         <CardContent className="py-3 flex items-center justify-between">
                             <div>
-                                <p className="font-medium">{entry.projectName || "No project"}</p>
+                                <div className="flex items-center gap-2">
+                                    <p className="font-medium">{entry.projectName || "No project"}</p>
+                                    {entry.estimateNumber && (
+                                        <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                                            📋 #{entry.estimateNumber}
+                                        </span>
+                                    )}
+                                </div>
                                 <p className="text-xs text-muted-foreground">{entry.date}</p>
                             </div>
                             <div className="flex items-center gap-3">

@@ -37,6 +37,7 @@ function normalizeHttpUrl(value: unknown, maxLength: number): string | null {
 export async function POST(req: Request) {
     try {
         let quotaContext: Awaited<ReturnType<typeof enforceUsageQuota>>["context"] = null
+        let quotaUsed: number | undefined
         if (process.env.RESEND_API_KEY) {
             const quota = await enforceUsageQuota(req, "send_email")
             if (!quota.ok) {
@@ -52,6 +53,7 @@ export async function POST(req: Request) {
                 )
             }
             quotaContext = quota.context
+            quotaUsed = quota.used
         }
 
         const ip = getClientIp(req)
@@ -120,6 +122,7 @@ export async function POST(req: Request) {
             planTier,
             referralUrl: safeReferralUrl || undefined,
             businessName: businessName || undefined,
+            quotesUsed: quotaUsed,
         })
         const footerHtml = buildEmailFooterHtml({
             planTier,

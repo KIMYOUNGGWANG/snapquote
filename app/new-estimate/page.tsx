@@ -44,6 +44,8 @@ const ReceiptScanner = dynamic(() => import("@/components/receipt-scanner").then
 import { Mail, FileSpreadsheet, Users, PenTool, Sparkles, Receipt, MessageSquare } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 const SignaturePad = dynamic(() => import("@/components/signature-pad").then(mod => mod.SignaturePad), { ssr: false })
+import { EstimateProgressStepper } from "@/components/estimate-progress-stepper"
+import { PriceListAutocomplete } from "@/components/pricelist-autocomplete"
 
 // Unit and Category types for professional estimating
 type EstimateUnit = 'ea' | 'LS' | 'hr' | 'day' | 'SF' | 'LF' | '%' | 'other'
@@ -1480,6 +1482,7 @@ export default function NewEstimatePage() {
 
     return (
         <div className="max-w-2xl mx-auto space-y-6 px-4 pb-20">
+            <EstimateProgressStepper currentStep={step} />
             <CardHeader className="px-0 pb-2">
                 <CardTitle className="text-2xl font-bold">
                     {step === "input" && "New Estimate"}
@@ -2142,11 +2145,17 @@ export default function NewEstimatePage() {
                                                     <option value="SERVICE">📋 Service</option>
                                                     <option value="OTHER">📦 Other</option>
                                                 </select>
-                                                <Input
+                                                <PriceListAutocomplete
                                                     value={item.description}
-                                                    onChange={(e) => handleItemChange(index, "description", e.target.value)}
-                                                    className="font-medium border px-2 h-auto focus-visible:ring-1 flex-1 bg-white text-gray-900"
+                                                    onChange={(value) => handleItemChange(index, "description", value)}
+                                                    onSelect={(priceItem) => {
+                                                        handleItemChange(index, "description", priceItem.name)
+                                                        handleItemChange(index, "unit_price", priceItem.price)
+                                                        handleItemChange(index, "unit", priceItem.unit)
+                                                        handleItemChange(index, "category", priceItem.category)
+                                                    }}
                                                     placeholder="Item Description"
+                                                    className="flex-1"
                                                 />
                                                 <Button
                                                     variant="ghost"
@@ -2290,11 +2299,17 @@ export default function NewEstimatePage() {
                                                                         <option value="SERVICE">📋</option>
                                                                         <option value="OTHER">📦</option>
                                                                     </select>
-                                                                    <Input
+                                                                    <PriceListAutocomplete
                                                                         value={item.description}
-                                                                        onChange={(e) => handleSectionItemChange(section.id, itemIdx, "description", e.target.value)}
-                                                                        className="flex-1 h-8 text-sm bg-white"
+                                                                        onChange={(value) => handleSectionItemChange(section.id, itemIdx, "description", value)}
+                                                                        onSelect={(priceItem) => {
+                                                                            handleSectionItemChange(section.id, itemIdx, "description", priceItem.name)
+                                                                            handleSectionItemChange(section.id, itemIdx, "unit_price", priceItem.price)
+                                                                            handleSectionItemChange(section.id, itemIdx, "unit", priceItem.unit)
+                                                                            handleSectionItemChange(section.id, itemIdx, "category", priceItem.category)
+                                                                        }}
                                                                         placeholder="Description"
+                                                                        className="flex-1"
                                                                     />
                                                                     <Button
                                                                         variant="ghost"
@@ -2716,7 +2731,10 @@ export default function NewEstimatePage() {
                                                         hasPaymentLink: includePaymentLink && Boolean(paymentLink),
                                                     },
                                                 })
-                                                await persistCurrentEstimateAsSent()
+                                                const sentEstimate = await persistCurrentEstimateAsSent()
+                                                if (sentEstimate && email) {
+                                                    await updateEstimate(sentEstimate.id, { clientEmail: email })
+                                                }
                                                 toast('✅ Email sent with PDF attached!', 'success')
                                             }
                                         } catch (error: any) {

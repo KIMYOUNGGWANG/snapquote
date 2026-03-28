@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Mic, FileText, ArrowRight, Clock, Send, DollarSign, Sparkles, Languages, Signal, ShieldCheck } from "lucide-react"
+import { Mic, FileText, ArrowRight, Clock, Send, DollarSign, Sparkles, Languages, Signal, ShieldCheck, Mail } from "lucide-react"
 import dynamic from "next/dynamic"
 
 const OnboardingModal = dynamic(() => import("@/components/onboarding-modal").then(mod => mod.OnboardingModal), { ssr: false })
@@ -202,6 +202,16 @@ export default function Home() {
     const text = generateFollowUpMessage(item.estimate.clientName, item.estimate.estimateNumber)
     navigator.clipboard.writeText(text)
     toast("📋 Message copied!", "success")
+  }
+
+  const handleOpenEmailFollowUp: (item: FollowUpItem) => void = (item) => {
+    const message = generateFollowUpMessage(item.estimate.clientName, item.estimate.estimateNumber)
+    const subject = item.estimate.clientName
+      ? `Follow Up for ${item.estimate.clientName}`
+      : "Estimate Follow Up"
+    const recipient = item.estimate.clientEmail ?? ""
+    const mailtoUrl = `mailto:${encodeURIComponent(recipient)}?subject=${encodeURIComponent(subject).replace(/%20/g, "+")}&body=${encodeURIComponent(message)}`
+    window.open(mailtoUrl, "_blank")
   }
 
   const heroTitle = isSignedIn
@@ -446,6 +456,15 @@ export default function Home() {
                     >
                       <Send className="w-3 h-3 mr-2" />
                       Copy Message
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleOpenEmailFollowUp(followUps[0])}
+                      className="w-full h-9 text-xs border-blue-500/20 text-blue-400 hover:bg-blue-500/10 bg-transparent"
+                    >
+                      <Mail className="w-3 h-3 mr-2" />
+                      Open Email App
                     </Button>
                   </div>
                 </div>

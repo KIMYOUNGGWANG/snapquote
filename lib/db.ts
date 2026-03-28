@@ -75,6 +75,8 @@ interface SnapQuoteDB extends DBSchema {
         value: {
             id: string;
             projectName?: string;
+            estimateId?: string;
+            estimateNumber?: string;
             startTime: string;     // ISO datetime
             endTime?: string;
             duration?: number;     // minutes
@@ -362,6 +364,8 @@ export async function deleteReceipt(id: string): Promise<void> {
 export interface TimeEntry {
     id: string;
     projectName?: string;
+    estimateId?: string;
+    estimateNumber?: string;
     startTime: string;
     endTime?: string;
     duration?: number; // minutes

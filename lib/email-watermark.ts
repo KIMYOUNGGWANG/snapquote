@@ -5,6 +5,7 @@ export interface EmailWatermarkOptions {
     referralUrl?: string
     appUrl?: string
     businessName?: string
+    quotesUsed?: number
 }
 
 const DEFAULT_APP_URL = "https://snapquote.app"
@@ -70,9 +71,16 @@ function buildPaidWatermarkHtml(appUrl: string): string {
 </div>`.trim()
 }
 
+export function hasFreeWatermarkExemption(quotesUsed: number): boolean {
+    return quotesUsed < 5
+}
+
 export function buildEmailWatermarkHtml(options: EmailWatermarkOptions): string {
     const appUrl = normalizeHttpUrl(options.appUrl, DEFAULT_APP_URL)
     if (options.planTier !== "free") return buildPaidWatermarkHtml(appUrl)
+    if (hasFreeWatermarkExemption(options.quotesUsed ?? 999)) {
+        return buildPaidWatermarkHtml(appUrl)
+    }
 
     const referralUrl = normalizeOptionalHttpUrl(options.referralUrl)
     return buildFreeWatermarkHtml(appUrl, referralUrl)

@@ -3,10 +3,10 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Mic, Zap, Send, X, ArrowRight, ChevronLeft, ChevronRight, Check, Hammer, Droplets, HardHat, Thermometer, Sparkles } from "lucide-react"
+import { Zap, Send, X, ChevronLeft, ChevronRight, Check, Hammer, Droplets, HardHat, Thermometer, Sparkles } from "lucide-react"
 import { TRADE_PRESETS, TradeType } from "@/lib/trade-presets"
 import { savePriceListItem } from "@/lib/db"
-import { getProfile, saveProfile, BusinessInfo } from "@/lib/estimates-storage"
+import { getProfile, saveProfile } from "@/lib/estimates-storage"
 
 interface OnboardingModalProps {
     open: boolean
@@ -25,20 +25,12 @@ const STEPS = [
         isTradeSelection: true
     },
     {
-        id: "speak",
-        icon: Mic,
-        iconBg: "bg-blue-500",
-        title: "Speak Your Job",
-        description: "Just describe the work into your microphone. AI will understand and organize it.",
-        example: '"Bathroom renovation, 50 sqft tile, toilet replacement, 4 hours labor"',
-    },
-    {
-        id: "ai",
+        id: "how-it-works",
         icon: Zap,
-        iconBg: "bg-amber-500",
-        title: "AI Creates Your Estimate",
-        description: "In 30 seconds, get a professional estimate with Parts, Labor, and Service itemized.",
-        example: "Parts: $450 | Labor: $320 | Tax: $100 | Total: $870",
+        iconBg: "bg-blue-500",
+        title: "Speak & Get Estimate",
+        description: "Describe the job in your words. AI creates a professional estimate with Parts, Labor, and pricing in 30 seconds.",
+        example: "",
     },
     {
         id: "send",
@@ -51,7 +43,7 @@ const STEPS = [
     },
 ]
 
-export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalProps) {
+export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalProps): JSX.Element | null {
     const [currentStep, setCurrentStep] = useState(0)
     const [isAnimating, setIsAnimating] = useState(false)
     const [termsAccepted, setTermsAccepted] = useState(false)

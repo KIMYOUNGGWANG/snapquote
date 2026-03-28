@@ -1,5 +1,18 @@
 # 기능 배포 및 성능 이력 (Feature & Performance History)
 
+## [2026-03-25] UX 최적화 리뷰 (P0/P1 개선)
+
+### 🚀 Before vs After 예상 성능 (UX Audit)
+- **온보딩 마찰 절감**: 8스텝에 달하던 온보딩/초기 설정 과정이 3스텝(`components/onboarding-modal.tsx`)으로 축소되어, 첫 사용자(Trial)의 이탈률을 유의미하게 낮출 것으로 기대됩니다.
+- **네비게이션 최적화**: History, Clients 탭이 `components/bottom-nav.tsx` 1뎁스에 노출되어, 견적 조회 및 고객 관리에 필요한 클릭 뎁스와 인지 부하가 감소했습니다.
+- **이메일 팔로우업 속도**: `app/page.tsx`에 즉각적인 메일 앱 연동 버튼이 추가되어, Follow-Up 카드의 행동 유도(Call-to-Action) 실행 속도가 단축되었습니다.
+
+### 🛡️ 보안 검토 요약 (Security Review)
+- 새로운 백엔드 API 추가 및 권한 모델 변경이 없으므로 추가적인 IDOR, 인가 우회 취약점은 존재하지 않습니다.
+- URL 및 파라미터 조작을 통한 XSS 공격 벡터(`mailto:` 인코딩 포함)에 대한 방어 로직이 적용되어 있어 안전합니다.
+- 기능적 결함 문제 없이 `/ship`이 가능한 상태입니다.
+
+
 ## [2026-03-20] 종합 성능 최적화 및 보안 리뷰 (v5.1 기준)
 
 ### 🚀 Before vs After 예상 성능 (Static Audit)

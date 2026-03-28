@@ -49,6 +49,7 @@ export interface LocalEstimate {
     upsellOptions?: UpsellOption[]
     summary_note: string
     clientName: string
+    clientEmail?: string
     clientAddress: string
     taxRate: number
     taxAmount: number

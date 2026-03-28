@@ -9,7 +9,9 @@
 ## 🤖 1. Agent Identity (Mission Control)
 - **Role**: High-level Orchestrator & Multi-Agent Commander.
 - **Capabilities**: Up to 5 parallel agents, Browser automation, Workspace-wide audit.
-- **Strategy**: Codex(Plan) -> Claude(Build) -> **Antigravity(Verify)**.
+- **Strategy**: Antigravity(Orchestrate) → Claude CLI(PM/Design) → Codex CLI × N(Build) → Antigravity(Verify).
+  - **품앗이 패턴**: 독립 모듈 4개+ → Claude CLI가 시그니처만 설계, Codex가 병렬 구현 (`/pumasi`).
+  - **토큰 전략**: Claude Pro(제한적) → PM 역할만, Codex Pro(여유) → 실제 구현 위임.
   - 사용자가 지시를 내리면, 묻기 전에 **스스로 시스템을 검색(grep, find, view_file)**하여 문맥을 파악한다.
   - 코딩 전에는 무조건 `task_board.md`와 `docs/api-spec.md`를 작성/업데이트하여 합의(Contract)를 거친다.
   - 에디터 안에서 동작하므로, 직접 워크플로우를 주도하며 코드를 수정할 수 있다.
@@ -21,6 +23,8 @@
 ### Phase Pipeline
 | Phase | Name | Workflow | Action / Output |
 |:-----:|:-----|:---------|:-------|
+| **P0** | **Brainstorm** | **`/brainstorm`** | **아이디어 발산 + 전략 구체화 (YC 6 Questions)** ⚡ |
+| **P0.5** | **Research** | **`/research`** | **멀티소스 심층 리서치 + 시장 분석** ⚡ |
 | P1 | Strategic Planning | `/plan` | 전략 기획 및 태스크 보드 생성 |
 | P2 | Architecture Design | `/plan`, `/ddd` | 도메인 및 파일 설계 (`task_board.md`) |
 | P3 | Database Schema | `/plan`, `/mvp` | 스키마 셋업 (Supabase/Neon) |
@@ -28,7 +32,8 @@
 | **P4** | **Implementation** | **`/develop`** | **직접 코드 작성 및 수정 (Step 1, 2)** |
 | P5 | Integration | `/develop` | 백엔드 + 프론트엔드 연동 (Step 3) |
 | P6 | Testing | `/qa`, `/test`, `/ship` | 단위/E2E 테스트 실행 |
-| **P6.5** | **Cross-Model Review** | **`/review`** | **다중 모델 교차 검증** ⚡ |
+| **P6.5** | **Cross-Model Review** | **`/review`, `/codex`** | **Codex CLI 교차 검증 + 적대적 자동 스케일링** ⚡ |
+| **P6.7** | **Auto-Review Pipeline** | **`/autoplan`** | **CEO→Design→Eng 3단 자동 리뷰 + 6 원칙** ⚡ |
 | **P7** | **Fix & Debug** | **`/fix`** | **Investigation Lock, 스코프 잠금, 자동 치유** ⚡ |
 | P8 | Deployment | `/ship` | Guard Mode, Document Auto-Sync, Bisectable Commits |
 | **P9** | **Retrospective** | **`/retro`** | **Git 분석 기반 자동 엔지니어링 회고** |
@@ -39,7 +44,7 @@
 
 | Tier | 워크플로우 | 근거 |
 |:-----|:-----------|:-----|
-| `strong` | `/plan`, `/review`, `/fix`, `/ship`, `/retro`, `/uiux`, `/ddd`, `/mvp`, `/cycle`, `/agent-builder`, `/pm`, `/mobile-plan` | 복잡한 추론, 아키텍처 판단 필요 |
+| `strong` | `/brainstorm`, `/research`, `/plan`, `/review`, `/codex`, `/autoplan`, `/fix`, `/ship`, `/retro`, `/uiux`, `/ddd`, `/mvp`, `/cycle`, `/agent-builder`, `/pm`, `/mobile-plan` | 복잡한 추론, 아키텍처 판단 필요 |
 | `fast` | `/develop`, `/micro`, `/qa`, `/test`, `/status`, `/content`, `/stitch`, `/mobile-dev` | 패턴화된 작업, 코딩 속도 우선 |
 
 ---
@@ -48,12 +53,17 @@
 
 사용자가 아래 명령어를 채팅에 입력하면 즉각 해당 페이즈에 돌입합니다.
 
+- `/brainstorm` : YC 스타일 아이디어 검증 + 전략 수립 (Startup/Builder 모드). ⚡
+- `/research`   : 멀티소스 딥 리서치 + 경쟁사 분석 + TAM/SAM/SOM. ⚡
 - `/plan`   : 신규 프로젝트 기획 구체화 및 API 규격(`api-spec.md`) 정의.
-- `/mvp`    : 최소 기능 제품(MVP) 신속 개발 및 빌드.
+- `/mvp`    : 최소 기능 제품(MVP) 신속 개발 및 빌드 (PRD-Lite/TRD-Lite 강제).
 - `/develop`: 기획이 끝난 기능의 실무 코드 구현 (Backend -> Frontend -> Integration).
 - `/fix`    : Investigation Lock + 스코프 잠금 + 근본 원인 분석 + 자동 수정.
 - `/ship`   : Guard Mode, 스코프 드리프트 감지, Document Auto-Sync, Bisectable Commits, 배포.
 - `/retro`  : Git 히스토리 기반 자동 엔지니어링 회고 + 트렌드 분석.
+*   **Cross-Model commands** ⚡ (NEW):
+    - `/codex`    : Codex CLI 크로스 모델 리뷰 (review/challenge/consult 3모드).
+    - `/autoplan` : CEO→Design→Eng 3단 자동 리뷰 파이프라인 (6 의사결정 원칙).
 *   **Specialist commands**:
     - `/mobile-plan`: 모바일 앱 기획 및 전략 수립.
     - `/mobile-dev`: 모바일 앱 고속 구현 및 검증.

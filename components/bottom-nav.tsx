@@ -3,26 +3,25 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useHaptic } from "@/hooks/use-haptic"
-import { Home, PlusCircle, Receipt, Bot, MoreHorizontal } from "lucide-react"
+import { History, Home, PlusCircle, Settings, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { MoreMenu } from "@/components/more-menu"
 
-export function BottomNav() {
+export function BottomNav(): JSX.Element {
     const pathname = usePathname()
     const haptic = useHaptic()
 
     const links = [
         { href: "/", label: "Home", icon: Home },
-        { href: "/receipts", label: "Receipts", icon: Receipt },
+        { href: "/history", label: "History", icon: History },
         { href: "/new-estimate", label: "New", icon: PlusCircle, isMain: true },
-        { href: "/automation", label: "Auto", icon: Bot },
-        { href: "more", label: "More", icon: MoreHorizontal, isTrigger: true },
+        { href: "/clients", label: "Clients", icon: Users },
+        { href: "/profile", label: "Profile", icon: Settings },
     ]
 
     return (
         <div className="fixed bottom-6 left-0 right-0 z-[100] flex justify-center pointer-events-none w-full">
             <nav className="flex items-center justify-between px-2 py-2 mx-auto bg-background/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl shadow-black/50 pointer-events-auto w-[calc(100%-2rem)] max-w-sm pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
-                {links.map(({ href, label, icon: Icon, isMain, isTrigger }) => {
+                {links.map(({ href, label, icon: Icon, isMain }) => {
                     const isActive = pathname === href
 
                     if (isMain) {
@@ -43,23 +42,6 @@ export function BottomNav() {
                                     <span className="sr-only">{label}</span>
                                 </div>
                             </Link>
-                        )
-                    }
-
-                    if (isTrigger) {
-                        return (
-                            <MoreMenu key="more-menu">
-                                <button
-                                    onClick={() => haptic.light()}
-                                    className={cn(
-                                        "flex flex-col items-center justify-center w-12 h-12 rounded-xl transition-all duration-300",
-                                        "text-muted-foreground hover:text-foreground hover:bg-white/5"
-                                    )}
-                                >
-                                    <Icon className="h-5 w-5 mb-0.5" />
-                                    <span className="text-[9px] font-medium">{label}</span>
-                                </button>
-                            </MoreMenu>
                         )
                     }
 

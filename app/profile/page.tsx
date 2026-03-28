@@ -19,6 +19,7 @@ import { generateFullBackupJSON } from "@/lib/export-service"
 import { withAuthHeaders } from "@/lib/auth-headers"
 import { useAuthGuard } from "@/lib/use-auth-guard"
 import { ReferralStatusCard } from "@/components/referral-status-card"
+import { LanguageSelector } from "@/components/language-selector"
 import { getBillingSubscriptionStatus, type BillingSubscriptionStatusResponse } from "@/lib/pricing"
 import { hasPdfBrandingAccess, hasPdfTemplateAccess } from "@/lib/pdf-branding"
 
@@ -875,6 +876,17 @@ export default function ProfilePage() {
                     </Card>
 
                     <ReferralStatusCard />
+
+                    <Card>
+                        <CardHeader className="pb-3">
+                            <CardTitle className="flex items-center gap-2 text-lg">
+                                App Language
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <LanguageSelector />
+                        </CardContent>
+                    </Card>
 
                     <Card className="border-primary/20">
                         <CardHeader className="pb-3">
