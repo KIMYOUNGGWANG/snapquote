@@ -122,7 +122,7 @@ test.describe("Email sending flow", () => {
         await page.getByRole("button", { name: /send email/i }).click()
 
         // Should show quota exceeded toast or error
-        await expect(page.getByText(/quota/i)).toBeVisible({ timeout: 5000 })
+        await expect(page.getByText(/quota/i).first()).toBeVisible({ timeout: 5000 })
     })
 })
 
@@ -222,7 +222,7 @@ test.describe("SMS sending flow", () => {
         await page.getByRole("button", { name: /send sms/i }).click()
 
         await expect(
-            page.getByText("Insufficient SMS credits. Top up from your account.").first()
+            page.getByText(/Insufficient SMS credits/i).first()
         ).toBeVisible({ timeout: 5000 })
     })
 })

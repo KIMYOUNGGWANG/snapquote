@@ -3,18 +3,19 @@ import { CheckCircle2, FileText, History, ShieldCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 type PaymentSuccessPageProps = {
-    searchParams?: {
+    searchParams?: Promise<{
         session_id?: string
         estimateNumber?: string
-    }
+    }>
 }
 
-export default function PaymentSuccessPage({ searchParams }: PaymentSuccessPageProps) {
-    const estimateNumber = typeof searchParams?.estimateNumber === "string"
-        ? searchParams.estimateNumber.trim()
+export default async function PaymentSuccessPage({ searchParams }: PaymentSuccessPageProps) {
+    const resolvedSearchParams = await searchParams
+    const estimateNumber = typeof resolvedSearchParams?.estimateNumber === "string"
+        ? resolvedSearchParams.estimateNumber.trim()
         : ""
-    const sessionId = typeof searchParams?.session_id === "string"
-        ? searchParams.session_id.trim()
+    const sessionId = typeof resolvedSearchParams?.session_id === "string"
+        ? resolvedSearchParams.session_id.trim()
         : ""
     const shortSessionId = sessionId ? sessionId.slice(-12) : ""
 

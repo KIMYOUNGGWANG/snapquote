@@ -1,19 +1,19 @@
 === 🤖 Orchestrator 5.3 — Multi-Agent Synergy Bridge ===
-Last Pulse: 2026-03-26 06:52:51
+Last Pulse: 2026-03-29 15:41:01
 Protocol: [Antigravity x Claude] Master-Slave Harmony
 Mode: [FULL — Complete context loaded.]
 Your role is defined in the workflow below.
 
 --- [ 0. Live Context ] ---
-## 📡 Live Context — 2026-03-26 06:52
+## 📡 Live Context — 2026-03-29 15:41
 
 ### Git
 - Branch: `feat/ux-optimization`
-- Uncommitted changes: 20 files
+- Uncommitted changes: 8 files
 - Recent commits:
+  - 4650878 feat(ux): optimize onboarding, navigation, and follow-ups
   - 2d5e05a fix(pricing): wrap search params usage in suspense
   - 13ed6b1 fix(profile): import estimate backup dependency
-  - 5c124e4 merge: bring latest ui updates into develop
 
 ### Build Health
 - Lint: ⚠️ Issues (exit 127)
@@ -1214,9 +1214,9 @@ Response: `text/plain` outputting `User-Agent: *` and appropriate `Allow`/`Disal
 
 --- [ 3. Precision Skills ] ---
 Auto-detected tech:  next react supabase
-Traceback (most recent call last):
-  File "<stdin>", line 43, in <module>
-ValueError: invalid literal for int() with base 10: '--concat'
+
+🔍 Smart Skill Loader — Searching index for: " next react supabase"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️  No matching skills found for: " next react supabase"
 💡 Try broader keywords or run: bash generate-skill-map.sh
 
@@ -3053,6 +3053,8 @@ agent-preference: any
 - [ ] **Model Router**: Planning is `[HEAVY]` → Recommend Pro/Sonnet.
 - [ ] **Smart Skill Discovery** ⚡: Run `bash .agent/scripts/smart-skill-loader.sh "architecture api design database brainstorming planning discovery strategy market-research" --concat --strict` → read `.agent/memory/current_loaded_skills.md`.
 - [ ] **Learnings Preload**: If `.agent/memory/learnings.md` exists → read it.
+- [ ] **Brainstorm Preload** ⚡: If `.agent/memory/brainstorm/` exists → read `diagnostic.md`, `ideas.md`, `strategy.md` to build on prior ideation.
+- [ ] **Research Preload** ⚡: If `docs/research/` exists → read latest market research to inform PRD drafting.
 - [ ] **Environment Scan**: Run `bash .agent/scripts/audit-status.sh`.
 - [ ] **Board Init**: Initialize `.agent/memory/task_board.md`.
 - [ ] **Existing Docs Check**: Read `docs/prd.md`, `docs/api-spec.md`, `docs/trd.md` if they exist (incremental planning).

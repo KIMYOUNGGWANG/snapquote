@@ -38,7 +38,11 @@ export function EmailModal({ open, onClose, onSend, clientEmail = "", estimateTo
             await onSend(email, message)
             onClose()
         } catch (err) {
-            setError("Failed to send email. Please try again.")
+            setError(
+                err instanceof Error && err.message.trim()
+                    ? err.message
+                    : "Failed to send email. Please try again."
+            )
         } finally {
             setSending(false)
         }
