@@ -12,7 +12,9 @@ import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
 import { saveEstimate, generateEstimateNumber, getProfile, saveProfile, getEstimates, updateEstimate } from "@/lib/estimates-storage"
 import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI, getClients, type Client } from "@/lib/db"
-import type { BusinessInfo } from "@/lib/estimates-storage"
+import type { BusinessInfo, EstimateItem, EstimateSection } from "@/lib/estimates-storage"
+import { normalizeCategory, normalizeEstimateItem, normalizeEstimatePayload, normalizeUnit, type EstimateDraft } from "@/lib/estimates/normalize"
+import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
 import { toast } from "@/components/toast"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
@@ -45,51 +47,7 @@ import { Mail, FileSpreadsheet, Users, PenTool, Sparkles, Receipt, MessageSquare
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 const SignaturePad = dynamic(() => import("@/components/signature-pad").then(mod => mod.SignaturePad), { ssr: false })
 
-// Unit and Category types for professional estimating
-type EstimateUnit = 'ea' | 'LS' | 'hr' | 'day' | 'SF' | 'LF' | '%' | 'other'
-type EstimateCategory = 'PARTS' | 'LABOR' | 'SERVICE' | 'OTHER'
-
-interface EstimateItem {
-    id: string
-    itemNumber: number
-    category: EstimateCategory
-    description: string
-    quantity: number
-    unit: EstimateUnit
-    unit_price: number
-    total: number
-    is_value_add?: boolean
-    notes?: string
-}
-
-// Section for Division-based grouping
-interface EstimateSection {
-    id: string
-    name: string                // e.g., "Concrete Work", "Electrical"
-    divisionCode?: string       // e.g., "03", "16"
-    items: EstimateItem[]
-}
-
-interface UpsellOption {
-    tier: "better" | "best"
-    title: string
-    description: string
-    addedItems: EstimateItem[]
-}
-
-interface Estimate {
-    items: EstimateItem[]          // Legacy flat items (for backward compat)
-    sections?: EstimateSection[]   // NEW: Division-based grouping
-    summary_note: string
-    clientSignature?: string // NEW
-    signedAt?: string // NEW
-    status?: 'draft' | 'sent' | 'paid' // NEW
-    warnings?: string[]
-    payment_terms?: string
-    closing_note?: string
-    upsellOptions?: UpsellOption[]
-    photoAnalysis?: PhotoEstimateAnalysis
-}
+type Estimate = EstimateDraft
 
 type ReceiptScanResult = {
     items: Array<{
@@ -106,24 +64,7 @@ type ReceiptScanResult = {
 type Step = "input" | "transcribing" | "verifying" | "generating" | "result"
 type SourceLanguage = "auto" | "en" | "es" | "ko"
 type GenerateWorkflow = "standard" | "photo_estimate"
-type PricingConfidence = "low" | "medium" | "high"
 
-type PhotoEstimateMaterialSuggestion = {
-    label: string
-    quantity: number
-    unit: string
-    reason: string
-}
-
-type PhotoEstimateAnalysis = {
-    observations: string[]
-    suggestedScope: string[]
-    materialSuggestions: PhotoEstimateMaterialSuggestion[]
-    pricingConfidence: PricingConfidence
-}
-
-const ESTIMATE_CATEGORIES: EstimateCategory[] = ["PARTS", "LABOR", "SERVICE", "OTHER"]
-const ESTIMATE_UNITS: EstimateUnit[] = ["ea", "LS", "hr", "day", "SF", "LF", "%", "other"]
 const SOURCE_LANGUAGE_OPTIONS: Array<{ value: SourceLanguage; label: string; hint: string }> = [
     { value: "auto", label: "Auto", hint: "Detect mixed site language" },
     { value: "es", label: "Spanish Beta", hint: "Best for Spanish field notes" },
@@ -138,216 +79,40 @@ const SOURCE_LANGUAGE_EXAMPLES: Record<SourceLanguage, string> = {
 }
 const PHOTO_ESTIMATE_PRO_TIERS = new Set(["pro", "team"])
 
-function isRecord(value: unknown): value is Record<string, any> {
-    return value !== null && typeof value === "object"
-}
-
-function toSafeNumber(value: unknown, fallback = 0): number {
-    if (typeof value === "number" && Number.isFinite(value)) return value
-    if (typeof value === "string") {
-        const parsed = Number(value)
-        if (Number.isFinite(parsed)) return parsed
+function getErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error) return error.message || fallback
+    if (error && typeof error === "object" && "message" in error) {
+        const message = (error as { message?: unknown }).message
+        if (typeof message === "string" && message.trim()) return message
     }
     return fallback
 }
 
-function toSafeString(value: unknown, fallback = ""): string {
-    return typeof value === "string" ? value : fallback
-}
+function updateEstimateItemField(
+    item: EstimateItem,
+    field: keyof EstimateItem,
+    value: string | number | boolean
+): EstimateItem {
+    if (field === "description") return { ...item, description: String(value) }
+    if (field === "notes") return { ...item, notes: String(value) }
+    if (field === "id") return { ...item, id: String(value) }
+    if (field === "category") return { ...item, category: normalizeCategory(value) }
+    if (field === "unit") return { ...item, unit: normalizeUnit(value) }
+    if (field === "is_value_add") return { ...item, is_value_add: Boolean(value) }
 
-function normalizeCategory(value: unknown): EstimateCategory {
-    if (typeof value !== "string") return "PARTS"
-    const normalized = value.trim().toUpperCase()
-    return ESTIMATE_CATEGORIES.includes(normalized as EstimateCategory)
-        ? (normalized as EstimateCategory)
-        : "PARTS"
-}
-
-function normalizeUnit(value: unknown): EstimateUnit {
-    if (typeof value !== "string") return "ea"
-    const normalized = value.trim()
-    return ESTIMATE_UNITS.includes(normalized as EstimateUnit)
-        ? (normalized as EstimateUnit)
-        : "ea"
-}
-
-function normalizeEstimateItem(input: unknown, index: number): EstimateItem {
-    const item = isRecord(input) ? input : {}
-    const quantity = Math.max(0, toSafeNumber(item.quantity, 1))
-    const unitPrice = Math.max(0, toSafeNumber(item.unit_price, 0))
-    const total = toSafeNumber(item.total, quantity * unitPrice)
-    const id = toSafeString(item.id).trim()
-    const description = toSafeString(item.description).trim()
-
-    return {
-        id: id || `item-${index + 1}`,
-        itemNumber: Math.max(1, Math.floor(toSafeNumber(item.itemNumber, index + 1))),
-        category: normalizeCategory(item.category),
-        description,
-        quantity,
-        unit: normalizeUnit(item.unit),
-        unit_price: unitPrice,
-        total,
-        is_value_add: typeof item.is_value_add === "boolean" ? item.is_value_add : undefined,
-        notes: typeof item.notes === "string" ? item.notes : undefined,
+    const numericValue = Number(value)
+    if (field === "itemNumber") return { ...item, itemNumber: numericValue }
+    if (field === "quantity") {
+        const nextItem = { ...item, quantity: numericValue }
+        return { ...nextItem, total: nextItem.quantity * nextItem.unit_price }
     }
-}
-
-function normalizeEstimateSection(input: unknown, sectionIndex: number): EstimateSection {
-    const section = isRecord(input) ? input : {}
-    const rawItems = Array.isArray(section.items) ? section.items : []
-    const items = rawItems
-        .map((item, itemIndex) => normalizeEstimateItem(item, itemIndex))
-        .filter((item) => item.description !== "")
-    const id = toSafeString(section.id).trim()
-    const name = toSafeString(section.name).trim()
-    const divisionCode = toSafeString(section.divisionCode).trim()
-
-    return {
-        id: id || `section-${sectionIndex + 1}`,
-        name: name || `Section ${sectionIndex + 1}`,
-        divisionCode: divisionCode || undefined,
-        items,
+    if (field === "unit_price") {
+        const nextItem = { ...item, unit_price: numericValue }
+        return { ...nextItem, total: nextItem.quantity * nextItem.unit_price }
     }
-}
+    if (field === "total") return { ...item, total: numericValue }
 
-function normalizeUpsellTier(value: unknown, fallback: "better" | "best"): "better" | "best" {
-    if (typeof value !== "string") return fallback
-    const normalized = value.trim().toLowerCase()
-    if (normalized === "better" || normalized === "best") return normalized
-    return fallback
-}
-
-function normalizeUpsellOption(input: unknown, optionIndex: number): UpsellOption | null {
-    const option = isRecord(input) ? input : {}
-    const fallbackTier = optionIndex === 0 ? "better" : "best"
-    const tier = normalizeUpsellTier(option.tier, fallbackTier)
-    const addedItems = (Array.isArray(option.addedItems) ? option.addedItems : [])
-        .map((item, itemIndex) => normalizeEstimateItem(item, itemIndex))
-        .filter((item) => item.description !== "")
-
-    if (addedItems.length === 0) return null
-
-    return {
-        tier,
-        title: toSafeString(option.title).trim() || (tier === "better" ? "Better Option" : "Best Option"),
-        description: toSafeString(option.description).trim(),
-        addedItems,
-    }
-}
-
-function normalizeUpsellOptions(input: unknown): UpsellOption[] {
-    if (!Array.isArray(input)) return []
-    return input
-        .map((option, optionIndex) => normalizeUpsellOption(option, optionIndex))
-        .filter((option): option is UpsellOption => option !== null)
-}
-
-function normalizePricingConfidence(value: unknown): PricingConfidence {
-    if (typeof value !== "string") return "medium"
-    const normalized = value.trim().toLowerCase()
-    if (normalized === "low" || normalized === "medium" || normalized === "high") {
-        return normalized
-    }
-    return "medium"
-}
-
-function normalizeStringList(input: unknown, maxItems: number, maxLength: number): string[] {
-    if (!Array.isArray(input)) return []
-
-    return input
-        .filter((value): value is string => typeof value === "string")
-        .map((value) => value.trim().slice(0, maxLength))
-        .filter(Boolean)
-        .slice(0, maxItems)
-}
-
-function normalizePhotoEstimateAnalysis(input: unknown): PhotoEstimateAnalysis | undefined {
-    const analysis = isRecord(input) ? input : null
-    if (!analysis) return undefined
-
-    const observations = normalizeStringList(analysis.observations, 6, 180)
-    const suggestedScope = normalizeStringList(analysis.suggestedScope, 6, 180)
-    const materialSuggestions = (Array.isArray(analysis.materialSuggestions) ? analysis.materialSuggestions : [])
-        .map((suggestion) => {
-            const suggestionRecord = isRecord(suggestion) ? suggestion : null
-            const label = toSafeString(suggestionRecord?.label).trim()
-            if (!label) return null
-
-            return {
-                label,
-                quantity: Math.max(0, toSafeNumber(suggestionRecord?.quantity, 1)),
-                unit: toSafeString(suggestionRecord?.unit, "ea").trim() || "ea",
-                reason:
-                    toSafeString(
-                        suggestionRecord?.reason,
-                        "Visible condition from the jobsite photo."
-                    ).trim() || "Visible condition from the jobsite photo.",
-            }
-        })
-        .filter((suggestion): suggestion is PhotoEstimateMaterialSuggestion => suggestion !== null)
-        .slice(0, 8)
-
-    if (observations.length === 0 && suggestedScope.length === 0 && materialSuggestions.length === 0) {
-        return undefined
-    }
-
-    return {
-        observations,
-        suggestedScope,
-        materialSuggestions,
-        pricingConfidence: normalizePricingConfidence(analysis.pricingConfidence),
-    }
-}
-
-function normalizeEstimatePayload(input: unknown): Estimate {
-    const estimate = isRecord(input) ? input : {}
-    const rawItems = Array.isArray(estimate.items) ? estimate.items : []
-    const rawSections = Array.isArray(estimate.sections) ? estimate.sections : []
-    const rawWarnings = Array.isArray(estimate.warnings) ? estimate.warnings : []
-    const rawUpsellOptions = Array.isArray(estimate.upsellOptions) ? estimate.upsellOptions : []
-
-    const items = rawItems
-        .map((item, index) => normalizeEstimateItem(item, index))
-        .filter((item) => item.description !== "")
-
-    const sections = rawSections
-        .map((section, sectionIndex) => normalizeEstimateSection(section, sectionIndex))
-        .filter((section) => section.items.length > 0)
-
-    const warnings = rawWarnings
-        .filter((warning): warning is string => typeof warning === "string")
-        .map((warning) => warning.trim())
-        .filter(Boolean)
-    const upsellOptions = normalizeUpsellOptions(rawUpsellOptions)
-    const photoAnalysis = normalizePhotoEstimateAnalysis(estimate.photoAnalysis)
-
-    return {
-        items,
-        ...(sections.length > 0 ? { sections } : {}),
-        summary_note: toSafeString(estimate.summary_note),
-        payment_terms: toSafeString(estimate.payment_terms),
-        closing_note: toSafeString(estimate.closing_note),
-        warnings,
-        ...(upsellOptions.length > 0 ? { upsellOptions } : {}),
-        ...(photoAnalysis ? { photoAnalysis } : {}),
-    }
-}
-
-function lineTotal(item: EstimateItem | null | undefined): number {
-    if (!item) return 0
-    const quantity = toSafeNumber(item.quantity, 0)
-    const unitPrice = toSafeNumber(item.unit_price, 0)
-    return toSafeNumber(item.total, quantity * unitPrice)
-}
-
-function getAllItemsFromEstimate(est: Estimate): EstimateItem[] {
-    const flatItems = Array.isArray(est.items) ? est.items : []
-    const sectionItems = Array.isArray(est.sections)
-        ? est.sections.flatMap((section) => (Array.isArray(section?.items) ? section.items : []))
-        : []
-
-    return [...flatItems, ...sectionItems].map((item, index) => normalizeEstimateItem(item, index))
+    return item
 }
 
 export default function NewEstimatePage() {
@@ -516,12 +281,13 @@ export default function NewEstimatePage() {
             if (!session.active) {
                 toast("Team estimate loaded. Claim editing when you're ready to make changes.", "info")
             }
-        } catch (error: any) {
-            if (String(error?.message || "").toLowerCase().includes("log in required")) {
+        } catch (error: unknown) {
+            const errorMessage = getErrorMessage(error, "Failed to open Team estimate.")
+            if (errorMessage.toLowerCase().includes("log in required")) {
                 redirectToLoginForTeamEstimate(estimateId)
                 return
             }
-            toast(`❌ ${error.message || "Failed to open Team estimate."}`, "error")
+            toast(`❌ ${errorMessage}`, "error")
         } finally {
             setTeamEstimateLoading(false)
         }
@@ -541,8 +307,8 @@ export default function NewEstimatePage() {
             } else if (action === "release") {
                 toast("ℹ️ Team editing session released.", "info")
             }
-        } catch (error: any) {
-            toast(`❌ ${error.message || "Failed to update Team editing session."}`, "error")
+        } catch (error: unknown) {
+            toast(`❌ ${getErrorMessage(error, "Failed to update Team editing session.")}`, "error")
         } finally {
             setTeamSessionMutating(false)
         }
@@ -931,14 +697,17 @@ export default function NewEstimatePage() {
             setEstimate(normalizeEstimatePayload(data))
             setStep("result")
             toast("✅ Estimate generated successfully!", "success")
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Generate error:", error)
 
             // Determine error type for better messaging
-            const isNetworkError = error.message?.includes("fetch") || error.message?.includes("network")
+            const generationErrorMessage = getErrorMessage(error, "Failed to generate estimate.")
+            const isNetworkError =
+                generationErrorMessage.includes("fetch") ||
+                generationErrorMessage.includes("network")
             const errorMessage = isNetworkError
                 ? "Network error. Check your connection and try again."
-                : error.message || "Failed to generate estimate."
+                : generationErrorMessage
 
             toast(`❌ ${errorMessage}`, "error")
             setStep("verifying")
@@ -948,20 +717,9 @@ export default function NewEstimatePage() {
     const handleItemChange = (index: number, field: keyof EstimateItem, value: string | number | boolean) => {
         if (!estimate) return
         const newItems = [...estimate.items]
-        const item = { ...newItems[index] }
-        if (field === "description" || field === "notes" || field === "id") {
-            (item as any)[field] = value as string
-        } else if (field === "category") {
-            item.category = value as EstimateCategory
-        } else if (field === "unit") {
-            item.unit = value as EstimateUnit
-        } else if (field === "is_value_add") {
-            item.is_value_add = value as boolean
-        } else {
-            (item as any)[field] = Number(value)
-            item.total = item.quantity * item.unit_price
-        }
-        newItems[index] = item
+        const item = newItems[index]
+        if (!item) return
+        newItems[index] = updateEstimateItemField(item, field, value)
         setEstimate({ ...estimate, items: newItems })
     }
 
@@ -1051,19 +809,9 @@ export default function NewEstimatePage() {
         const updated = estimate.sections.map(section => {
             if (section.id !== sectionId) return section
             const newItems = [...(section.items || [])]
-            const item = { ...newItems[itemIndex] }
-            if (!newItems[itemIndex]) return section
-            if (field === "description" || field === "notes" || field === "id") {
-                (item as any)[field] = value as string
-            } else if (field === "category") {
-                item.category = value as EstimateCategory
-            } else if (field === "unit") {
-                item.unit = value as EstimateUnit
-            } else {
-                (item as any)[field] = Number(value)
-                item.total = item.quantity * item.unit_price
-            }
-            newItems[itemIndex] = item
+            const item = newItems[itemIndex]
+            if (!item) return section
+            newItems[itemIndex] = updateEstimateItemField(item, field, value)
             return { ...section, items: newItems }
         })
         setEstimate({ ...estimate, sections: updated })
@@ -2719,9 +2467,9 @@ export default function NewEstimatePage() {
                                                 await persistCurrentEstimateAsSent()
                                                 toast('✅ Email sent with PDF attached!', 'success')
                                             }
-                                        } catch (error: any) {
+                                        } catch (error: unknown) {
                                             console.error('Email send error:', error)
-                                            toast(`❌ ${error.message || 'Failed to send. Try again.'}`, 'error')
+                                            toast(`❌ ${getErrorMessage(error, 'Failed to send. Try again.')}`, 'error')
                                             throw error
                                         }
                                     }}
@@ -2767,9 +2515,9 @@ export default function NewEstimatePage() {
                             })
                             await persistCurrentEstimateAsSent()
                             toast('✅ SMS sent!', 'success')
-                        } catch (error: any) {
+                        } catch (error: unknown) {
                             console.error('SMS send error:', error)
-                            toast(`❌ ${error.message || 'Failed to send. Try again.'}`, 'error')
+                            toast(`❌ ${getErrorMessage(error, 'Failed to send. Try again.')}`, 'error')
                             throw error
                         }
                     }}
