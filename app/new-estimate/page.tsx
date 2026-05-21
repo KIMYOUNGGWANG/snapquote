@@ -1,18 +1,28 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react"
-import { Camera, Upload, X, Loader2, Save, Share2, Download, Plus, Trash2, ArrowRight, Edit2, CheckCircle2, CreditCard, Mic, SlidersHorizontal, ChevronDown, ChevronUp } from "lucide-react"
+import { ArrowRight, Camera, CheckCircle2, ChevronDown, ChevronUp, CreditCard, Download, Loader2, Mail, MessageSquare, Mic, PenTool, Save, Share2, SlidersHorizontal, Sparkles, Users, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { FreeTierQuotaBanner } from "@/components/free-tier-quota-banner"
+import { ClientLoadDialog } from "@/components/new-estimate/client-load-dialog"
+import { EstimateLineItemsEditor } from "@/components/new-estimate/estimate-line-items-editor"
+import {
+    DemoTutorialBanner,
+    PhotoEstimateAnalysisCard,
+    UpsellOptionsCard,
+} from "@/components/new-estimate/result-assist-panels"
+import { TeamEstimateStatusCard } from "@/components/new-estimate/team-estimate-status-card"
 import Image from "next/image"
 import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
 import { saveEstimate, generateEstimateNumber, getProfile, saveProfile, getEstimates, updateEstimate } from "@/lib/estimates-storage"
 import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI, getClients, type Client } from "@/lib/db"
-import type { BusinessInfo } from "@/lib/estimates-storage"
+import type { BusinessInfo, EstimateItem, EstimateSection } from "@/lib/estimates-storage"
+import { normalizeCategory, normalizeEstimateItem, normalizeEstimatePayload, normalizeUnit, type EstimateDraft } from "@/lib/estimates/normalize"
+import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
 import { toast } from "@/components/toast"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
@@ -41,57 +51,11 @@ const EmailModal = dynamic(() => import("@/components/email-modal").then(mod => 
 const SmsModal = dynamic(() => import("@/components/sms-modal").then(mod => mod.SmsModal), { ssr: false })
 const ExcelImportModal = dynamic(() => import("@/components/excel-import-modal").then(mod => mod.ExcelImportModal), { ssr: false })
 const ReceiptScanner = dynamic(() => import("@/components/receipt-scanner").then(mod => mod.ReceiptScanner), { ssr: false })
-import { Mail, FileSpreadsheet, Users, PenTool, Sparkles, Receipt, MessageSquare } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 const SignaturePad = dynamic(() => import("@/components/signature-pad").then(mod => mod.SignaturePad), { ssr: false })
 import { EstimateProgressStepper } from "@/components/estimate-progress-stepper"
-import { PriceListAutocomplete } from "@/components/pricelist-autocomplete"
 
-// Unit and Category types for professional estimating
-type EstimateUnit = 'ea' | 'LS' | 'hr' | 'day' | 'SF' | 'LF' | '%' | 'other'
-type EstimateCategory = 'PARTS' | 'LABOR' | 'SERVICE' | 'OTHER'
-
-interface EstimateItem {
-    id: string
-    itemNumber: number
-    category: EstimateCategory
-    description: string
-    quantity: number
-    unit: EstimateUnit
-    unit_price: number
-    total: number
-    is_value_add?: boolean
-    notes?: string
-}
-
-// Section for Division-based grouping
-interface EstimateSection {
-    id: string
-    name: string                // e.g., "Concrete Work", "Electrical"
-    divisionCode?: string       // e.g., "03", "16"
-    items: EstimateItem[]
-}
-
-interface UpsellOption {
-    tier: "better" | "best"
-    title: string
-    description: string
-    addedItems: EstimateItem[]
-}
-
-interface Estimate {
-    items: EstimateItem[]          // Legacy flat items (for backward compat)
-    sections?: EstimateSection[]   // NEW: Division-based grouping
-    summary_note: string
-    clientSignature?: string // NEW
-    signedAt?: string // NEW
-    status?: 'draft' | 'sent' | 'paid' // NEW
-    warnings?: string[]
-    payment_terms?: string
-    closing_note?: string
-    upsellOptions?: UpsellOption[]
-    photoAnalysis?: PhotoEstimateAnalysis
-}
+type Estimate = EstimateDraft
 
 type ReceiptScanResult = {
     items: Array<{
@@ -108,24 +72,7 @@ type ReceiptScanResult = {
 type Step = "input" | "transcribing" | "verifying" | "generating" | "result"
 type SourceLanguage = "auto" | "en" | "es" | "ko"
 type GenerateWorkflow = "standard" | "photo_estimate"
-type PricingConfidence = "low" | "medium" | "high"
 
-type PhotoEstimateMaterialSuggestion = {
-    label: string
-    quantity: number
-    unit: string
-    reason: string
-}
-
-type PhotoEstimateAnalysis = {
-    observations: string[]
-    suggestedScope: string[]
-    materialSuggestions: PhotoEstimateMaterialSuggestion[]
-    pricingConfidence: PricingConfidence
-}
-
-const ESTIMATE_CATEGORIES: EstimateCategory[] = ["PARTS", "LABOR", "SERVICE", "OTHER"]
-const ESTIMATE_UNITS: EstimateUnit[] = ["ea", "LS", "hr", "day", "SF", "LF", "%", "other"]
 const SOURCE_LANGUAGE_OPTIONS: Array<{ value: SourceLanguage; label: string; hint: string }> = [
     { value: "auto", label: "Auto", hint: "Detect mixed site language" },
     { value: "es", label: "Spanish Beta", hint: "Best for Spanish field notes" },
@@ -140,216 +87,40 @@ const SOURCE_LANGUAGE_EXAMPLES: Record<SourceLanguage, string> = {
 }
 const PHOTO_ESTIMATE_PRO_TIERS = new Set(["pro", "team"])
 
-function isRecord(value: unknown): value is Record<string, any> {
-    return value !== null && typeof value === "object"
-}
-
-function toSafeNumber(value: unknown, fallback = 0): number {
-    if (typeof value === "number" && Number.isFinite(value)) return value
-    if (typeof value === "string") {
-        const parsed = Number(value)
-        if (Number.isFinite(parsed)) return parsed
+function getErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error) return error.message || fallback
+    if (error && typeof error === "object" && "message" in error) {
+        const message = (error as { message?: unknown }).message
+        if (typeof message === "string" && message.trim()) return message
     }
     return fallback
 }
 
-function toSafeString(value: unknown, fallback = ""): string {
-    return typeof value === "string" ? value : fallback
-}
+function updateEstimateItemField(
+    item: EstimateItem,
+    field: keyof EstimateItem,
+    value: string | number | boolean
+): EstimateItem {
+    if (field === "description") return { ...item, description: String(value) }
+    if (field === "notes") return { ...item, notes: String(value) }
+    if (field === "id") return { ...item, id: String(value) }
+    if (field === "category") return { ...item, category: normalizeCategory(value) }
+    if (field === "unit") return { ...item, unit: normalizeUnit(value) }
+    if (field === "is_value_add") return { ...item, is_value_add: Boolean(value) }
 
-function normalizeCategory(value: unknown): EstimateCategory {
-    if (typeof value !== "string") return "PARTS"
-    const normalized = value.trim().toUpperCase()
-    return ESTIMATE_CATEGORIES.includes(normalized as EstimateCategory)
-        ? (normalized as EstimateCategory)
-        : "PARTS"
-}
-
-function normalizeUnit(value: unknown): EstimateUnit {
-    if (typeof value !== "string") return "ea"
-    const normalized = value.trim()
-    return ESTIMATE_UNITS.includes(normalized as EstimateUnit)
-        ? (normalized as EstimateUnit)
-        : "ea"
-}
-
-function normalizeEstimateItem(input: unknown, index: number): EstimateItem {
-    const item = isRecord(input) ? input : {}
-    const quantity = Math.max(0, toSafeNumber(item.quantity, 1))
-    const unitPrice = Math.max(0, toSafeNumber(item.unit_price, 0))
-    const total = toSafeNumber(item.total, quantity * unitPrice)
-    const id = toSafeString(item.id).trim()
-    const description = toSafeString(item.description).trim()
-
-    return {
-        id: id || `item-${index + 1}`,
-        itemNumber: Math.max(1, Math.floor(toSafeNumber(item.itemNumber, index + 1))),
-        category: normalizeCategory(item.category),
-        description,
-        quantity,
-        unit: normalizeUnit(item.unit),
-        unit_price: unitPrice,
-        total,
-        is_value_add: typeof item.is_value_add === "boolean" ? item.is_value_add : undefined,
-        notes: typeof item.notes === "string" ? item.notes : undefined,
+    const numericValue = Number(value)
+    if (field === "itemNumber") return { ...item, itemNumber: numericValue }
+    if (field === "quantity") {
+        const nextItem = { ...item, quantity: numericValue }
+        return { ...nextItem, total: nextItem.quantity * nextItem.unit_price }
     }
-}
-
-function normalizeEstimateSection(input: unknown, sectionIndex: number): EstimateSection {
-    const section = isRecord(input) ? input : {}
-    const rawItems = Array.isArray(section.items) ? section.items : []
-    const items = rawItems
-        .map((item, itemIndex) => normalizeEstimateItem(item, itemIndex))
-        .filter((item) => item.description !== "")
-    const id = toSafeString(section.id).trim()
-    const name = toSafeString(section.name).trim()
-    const divisionCode = toSafeString(section.divisionCode).trim()
-
-    return {
-        id: id || `section-${sectionIndex + 1}`,
-        name: name || `Section ${sectionIndex + 1}`,
-        divisionCode: divisionCode || undefined,
-        items,
+    if (field === "unit_price") {
+        const nextItem = { ...item, unit_price: numericValue }
+        return { ...nextItem, total: nextItem.quantity * nextItem.unit_price }
     }
-}
+    if (field === "total") return { ...item, total: numericValue }
 
-function normalizeUpsellTier(value: unknown, fallback: "better" | "best"): "better" | "best" {
-    if (typeof value !== "string") return fallback
-    const normalized = value.trim().toLowerCase()
-    if (normalized === "better" || normalized === "best") return normalized
-    return fallback
-}
-
-function normalizeUpsellOption(input: unknown, optionIndex: number): UpsellOption | null {
-    const option = isRecord(input) ? input : {}
-    const fallbackTier = optionIndex === 0 ? "better" : "best"
-    const tier = normalizeUpsellTier(option.tier, fallbackTier)
-    const addedItems = (Array.isArray(option.addedItems) ? option.addedItems : [])
-        .map((item, itemIndex) => normalizeEstimateItem(item, itemIndex))
-        .filter((item) => item.description !== "")
-
-    if (addedItems.length === 0) return null
-
-    return {
-        tier,
-        title: toSafeString(option.title).trim() || (tier === "better" ? "Better Option" : "Best Option"),
-        description: toSafeString(option.description).trim(),
-        addedItems,
-    }
-}
-
-function normalizeUpsellOptions(input: unknown): UpsellOption[] {
-    if (!Array.isArray(input)) return []
-    return input
-        .map((option, optionIndex) => normalizeUpsellOption(option, optionIndex))
-        .filter((option): option is UpsellOption => option !== null)
-}
-
-function normalizePricingConfidence(value: unknown): PricingConfidence {
-    if (typeof value !== "string") return "medium"
-    const normalized = value.trim().toLowerCase()
-    if (normalized === "low" || normalized === "medium" || normalized === "high") {
-        return normalized
-    }
-    return "medium"
-}
-
-function normalizeStringList(input: unknown, maxItems: number, maxLength: number): string[] {
-    if (!Array.isArray(input)) return []
-
-    return input
-        .filter((value): value is string => typeof value === "string")
-        .map((value) => value.trim().slice(0, maxLength))
-        .filter(Boolean)
-        .slice(0, maxItems)
-}
-
-function normalizePhotoEstimateAnalysis(input: unknown): PhotoEstimateAnalysis | undefined {
-    const analysis = isRecord(input) ? input : null
-    if (!analysis) return undefined
-
-    const observations = normalizeStringList(analysis.observations, 6, 180)
-    const suggestedScope = normalizeStringList(analysis.suggestedScope, 6, 180)
-    const materialSuggestions = (Array.isArray(analysis.materialSuggestions) ? analysis.materialSuggestions : [])
-        .map((suggestion) => {
-            const suggestionRecord = isRecord(suggestion) ? suggestion : null
-            const label = toSafeString(suggestionRecord?.label).trim()
-            if (!label) return null
-
-            return {
-                label,
-                quantity: Math.max(0, toSafeNumber(suggestionRecord?.quantity, 1)),
-                unit: toSafeString(suggestionRecord?.unit, "ea").trim() || "ea",
-                reason:
-                    toSafeString(
-                        suggestionRecord?.reason,
-                        "Visible condition from the jobsite photo."
-                    ).trim() || "Visible condition from the jobsite photo.",
-            }
-        })
-        .filter((suggestion): suggestion is PhotoEstimateMaterialSuggestion => suggestion !== null)
-        .slice(0, 8)
-
-    if (observations.length === 0 && suggestedScope.length === 0 && materialSuggestions.length === 0) {
-        return undefined
-    }
-
-    return {
-        observations,
-        suggestedScope,
-        materialSuggestions,
-        pricingConfidence: normalizePricingConfidence(analysis.pricingConfidence),
-    }
-}
-
-function normalizeEstimatePayload(input: unknown): Estimate {
-    const estimate = isRecord(input) ? input : {}
-    const rawItems = Array.isArray(estimate.items) ? estimate.items : []
-    const rawSections = Array.isArray(estimate.sections) ? estimate.sections : []
-    const rawWarnings = Array.isArray(estimate.warnings) ? estimate.warnings : []
-    const rawUpsellOptions = Array.isArray(estimate.upsellOptions) ? estimate.upsellOptions : []
-
-    const items = rawItems
-        .map((item, index) => normalizeEstimateItem(item, index))
-        .filter((item) => item.description !== "")
-
-    const sections = rawSections
-        .map((section, sectionIndex) => normalizeEstimateSection(section, sectionIndex))
-        .filter((section) => section.items.length > 0)
-
-    const warnings = rawWarnings
-        .filter((warning): warning is string => typeof warning === "string")
-        .map((warning) => warning.trim())
-        .filter(Boolean)
-    const upsellOptions = normalizeUpsellOptions(rawUpsellOptions)
-    const photoAnalysis = normalizePhotoEstimateAnalysis(estimate.photoAnalysis)
-
-    return {
-        items,
-        ...(sections.length > 0 ? { sections } : {}),
-        summary_note: toSafeString(estimate.summary_note),
-        payment_terms: toSafeString(estimate.payment_terms),
-        closing_note: toSafeString(estimate.closing_note),
-        warnings,
-        ...(upsellOptions.length > 0 ? { upsellOptions } : {}),
-        ...(photoAnalysis ? { photoAnalysis } : {}),
-    }
-}
-
-function lineTotal(item: EstimateItem | null | undefined): number {
-    if (!item) return 0
-    const quantity = toSafeNumber(item.quantity, 0)
-    const unitPrice = toSafeNumber(item.unit_price, 0)
-    return toSafeNumber(item.total, quantity * unitPrice)
-}
-
-function getAllItemsFromEstimate(est: Estimate): EstimateItem[] {
-    const flatItems = Array.isArray(est.items) ? est.items : []
-    const sectionItems = Array.isArray(est.sections)
-        ? est.sections.flatMap((section) => (Array.isArray(section?.items) ? section.items : []))
-        : []
-
-    return [...flatItems, ...sectionItems].map((item, index) => normalizeEstimateItem(item, index))
+    return item
 }
 
 export default function NewEstimatePage() {
@@ -518,12 +289,13 @@ export default function NewEstimatePage() {
             if (!session.active) {
                 toast("Team estimate loaded. Claim editing when you're ready to make changes.", "info")
             }
-        } catch (error: any) {
-            if (String(error?.message || "").toLowerCase().includes("log in required")) {
+        } catch (error: unknown) {
+            const errorMessage = getErrorMessage(error, "Failed to open Team estimate.")
+            if (errorMessage.toLowerCase().includes("log in required")) {
                 redirectToLoginForTeamEstimate(estimateId)
                 return
             }
-            toast(`❌ ${error.message || "Failed to open Team estimate."}`, "error")
+            toast(`❌ ${errorMessage}`, "error")
         } finally {
             setTeamEstimateLoading(false)
         }
@@ -543,8 +315,8 @@ export default function NewEstimatePage() {
             } else if (action === "release") {
                 toast("ℹ️ Team editing session released.", "info")
             }
-        } catch (error: any) {
-            toast(`❌ ${error.message || "Failed to update Team editing session."}`, "error")
+        } catch (error: unknown) {
+            toast(`❌ ${getErrorMessage(error, "Failed to update Team editing session.")}`, "error")
         } finally {
             setTeamSessionMutating(false)
         }
@@ -933,14 +705,17 @@ export default function NewEstimatePage() {
             setEstimate(normalizeEstimatePayload(data))
             setStep("result")
             toast("✅ Estimate generated successfully!", "success")
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Generate error:", error)
 
             // Determine error type for better messaging
-            const isNetworkError = error.message?.includes("fetch") || error.message?.includes("network")
+            const generationErrorMessage = getErrorMessage(error, "Failed to generate estimate.")
+            const isNetworkError =
+                generationErrorMessage.includes("fetch") ||
+                generationErrorMessage.includes("network")
             const errorMessage = isNetworkError
                 ? "Network error. Check your connection and try again."
-                : error.message || "Failed to generate estimate."
+                : generationErrorMessage
 
             toast(`❌ ${errorMessage}`, "error")
             setStep("verifying")
@@ -950,20 +725,9 @@ export default function NewEstimatePage() {
     const handleItemChange = (index: number, field: keyof EstimateItem, value: string | number | boolean) => {
         if (!estimate) return
         const newItems = [...estimate.items]
-        const item = { ...newItems[index] }
-        if (field === "description" || field === "notes" || field === "id") {
-            (item as any)[field] = value as string
-        } else if (field === "category") {
-            item.category = value as EstimateCategory
-        } else if (field === "unit") {
-            item.unit = value as EstimateUnit
-        } else if (field === "is_value_add") {
-            item.is_value_add = value as boolean
-        } else {
-            (item as any)[field] = Number(value)
-            item.total = item.quantity * item.unit_price
-        }
-        newItems[index] = item
+        const item = newItems[index]
+        if (!item) return
+        newItems[index] = updateEstimateItemField(item, field, value)
         setEstimate({ ...estimate, items: newItems })
     }
 
@@ -1053,19 +817,9 @@ export default function NewEstimatePage() {
         const updated = estimate.sections.map(section => {
             if (section.id !== sectionId) return section
             const newItems = [...(section.items || [])]
-            const item = { ...newItems[itemIndex] }
-            if (!newItems[itemIndex]) return section
-            if (field === "description" || field === "notes" || field === "id") {
-                (item as any)[field] = value as string
-            } else if (field === "category") {
-                item.category = value as EstimateCategory
-            } else if (field === "unit") {
-                item.unit = value as EstimateUnit
-            } else {
-                (item as any)[field] = Number(value)
-                item.total = item.quantity * item.unit_price
-            }
-            newItems[itemIndex] = item
+            const item = newItems[itemIndex]
+            if (!item) return section
+            newItems[itemIndex] = updateEstimateItemField(item, field, value)
             return { ...section, items: newItems }
         })
         setEstimate({ ...estimate, sections: updated })
@@ -1501,67 +1255,14 @@ export default function NewEstimatePage() {
                 />
             ) : null}
 
-            {teamEstimateLoading ? (
-                <Card className="border-sky-300/30 bg-sky-50/70">
-                    <CardContent className="flex items-center gap-3 py-4 text-sm text-sky-900">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Loading shared Team estimate...
-                    </CardContent>
-                </Card>
-            ) : null}
-
-            {teamEstimateContext ? (
-                <Card className="border-primary/20">
-                    <CardContent className="space-y-3 py-4">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                                <p className="text-sm font-semibold">Shared Team estimate</p>
-                                <p className="text-xs text-muted-foreground">
-                                    {teamEstimateContext.ownerBusinessName || teamEstimateContext.ownerUserId} · {teamEstimateContext.estimateNumber}
-                                </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                {teamEstimateSession?.active ? (
-                                    <span className={`rounded-full px-2 py-1 text-xs font-medium ${teamEstimateSession.ownedByCaller ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
-                                        {teamEstimateSession.ownedByCaller ? "You hold edit session" : "Locked by teammate"}
-                                    </span>
-                                ) : (
-                                    <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-medium text-sky-800">
-                                        No active editor
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                            {teamEstimateSession?.active
-                                ? teamEstimateSession.ownedByCaller
-                                    ? "Shared saves go straight to the Team workspace while your edit session stays active."
-                                    : `${activeTeamEditorLabel} is editing this estimate right now. Claim or take over the session before saving.`
-                                : "Claim the edit session before saving shared changes to this Team estimate."}
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                            {!teamEstimateSession?.active ? (
-                                <Button size="sm" onClick={() => void handleTeamSessionAction("claim")} disabled={teamSessionMutating}>
-                                    {teamSessionMutating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                    Claim editing
-                                </Button>
-                            ) : null}
-                            {teamEstimateSession?.active && !teamEstimateSession.ownedByCaller ? (
-                                <Button size="sm" variant="outline" onClick={() => void handleTeamSessionAction("takeover")} disabled={teamSessionMutating}>
-                                    {teamSessionMutating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                    Take over
-                                </Button>
-                            ) : null}
-                            {teamEstimateSession?.ownedByCaller ? (
-                                <Button size="sm" variant="outline" onClick={() => void handleTeamSessionAction("release")} disabled={teamSessionMutating}>
-                                    {teamSessionMutating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                                    Release session
-                                </Button>
-                            ) : null}
-                        </div>
-                    </CardContent>
-                </Card>
-            ) : null}
+            <TeamEstimateStatusCard
+                activeEditorLabel={activeTeamEditorLabel}
+                context={teamEstimateContext}
+                isLoading={teamEstimateLoading}
+                isMutating={teamSessionMutating}
+                onAction={(action) => void handleTeamSessionAction(action)}
+                session={teamEstimateSession}
+            />
 
             {/* STEP 1: INPUT */}
             {step === "input" && (
@@ -1923,34 +1624,12 @@ export default function NewEstimatePage() {
             {/* STEP 5: RESULT */}
             {step === "result" && estimate && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-                    {showDemoTutorial && (
-                        <Card className="border-blue-500/30 bg-blue-500/5" data-testid="demo-tutorial-banner">
-                            <CardContent className="pt-5 space-y-3">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div>
-                                        <p className="text-sm font-semibold text-blue-300">First-quote tutorial</p>
-                                        <p className="mt-1 text-xs text-muted-foreground">
-                                            This sample stays fully editable. Replace the customer, tune the pricing, then save or send it.
-                                        </p>
-                                    </div>
-                                    <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-blue-300" />
-                                </div>
-                                <div className="grid gap-2 text-xs text-muted-foreground">
-                                    <p>1. Update the scope and totals to match the real job.</p>
-                                    <p>2. Replace the demo customer details before sharing.</p>
-                                    <p>3. Use Save, PDF, Email, or SMS once the draft is ready.</p>
-                                </div>
-                                <div className="flex gap-2">
-                                    <Button size="sm" onClick={handleDismissDemoTutorial} className="flex-1">
-                                        Keep Editing
-                                    </Button>
-                                    <Button size="sm" variant="outline" onClick={handleExitDemoTutorial} className="flex-1">
-                                        Start Blank
-                                    </Button>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    )}
+                    {showDemoTutorial ? (
+                        <DemoTutorialBanner
+                            onDismiss={handleDismissDemoTutorial}
+                            onStartBlank={handleExitDemoTutorial}
+                        />
+                    ) : null}
                     <Card>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                             <CardTitle className="text-xl font-bold" data-testid="estimate-draft-title">Estimate Draft</CardTitle>
@@ -1961,59 +1640,7 @@ export default function NewEstimatePage() {
                         </CardHeader>
                         <CardContent className="space-y-4">
                             {estimate.photoAnalysis ? (
-                                <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 space-y-4">
-                                    <div className="flex items-start justify-between gap-3">
-                                        <div>
-                                            <p className="text-sm font-semibold text-sky-900">Photo Estimate Analysis</p>
-                                            <p className="mt-1 text-xs text-sky-800">
-                                                Pricing confidence: <span className="font-semibold uppercase">{estimate.photoAnalysis.pricingConfidence}</span>
-                                            </p>
-                                        </div>
-                                        <Camera className="mt-0.5 h-4 w-4 shrink-0 text-sky-700" />
-                                    </div>
-                                    {estimate.photoAnalysis.observations.length > 0 ? (
-                                        <div className="space-y-2">
-                                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-900">Observed</p>
-                                            <ul className="space-y-1 text-sm text-sky-950">
-                                                {estimate.photoAnalysis.observations.map((observation, index) => (
-                                                    <li key={`observation-${index}`}>• {observation}</li>
-                                                ))}
-                                            </ul>
-                                        </div>
-                                    ) : null}
-                                    {estimate.photoAnalysis.suggestedScope.length > 0 ? (
-                                        <div className="space-y-2">
-                                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-900">Suggested scope</p>
-                                            <ul className="space-y-1 text-sm text-sky-950">
-                                                {estimate.photoAnalysis.suggestedScope.map((scopeItem, index) => (
-                                                    <li key={`scope-${index}`}>• {scopeItem}</li>
-                                                ))}
-                                            </ul>
-                                        </div>
-                                    ) : null}
-                                    {estimate.photoAnalysis.materialSuggestions.length > 0 ? (
-                                        <div className="space-y-2">
-                                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-900">Material suggestions</p>
-                                            <div className="space-y-2">
-                                                {estimate.photoAnalysis.materialSuggestions.map((suggestion, index) => (
-                                                    <div key={`material-${index}`} className="rounded-xl border border-sky-200 bg-white/80 p-3">
-                                                        <div className="flex items-start justify-between gap-3">
-                                                            <div>
-                                                                <p className="text-sm font-medium text-slate-950">
-                                                                    {suggestion.label}
-                                                                </p>
-                                                                <p className="mt-1 text-xs text-slate-600">{suggestion.reason}</p>
-                                                            </div>
-                                                            <span className="text-xs font-semibold text-sky-900">
-                                                                {suggestion.quantity} {suggestion.unit}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ) : null}
-                                </div>
+                                <PhotoEstimateAnalysisCard analysis={estimate.photoAnalysis} />
                             ) : null}
                             {/* Warnings */}
                             {estimate.warnings && estimate.warnings.length > 0 && (
@@ -2028,53 +1655,12 @@ export default function NewEstimatePage() {
                                     </ul>
                                 </div>
                             )}
-                            {estimate.upsellOptions && estimate.upsellOptions.length > 0 && (
-                                <div className="space-y-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
-                                    <p className="text-sm font-semibold text-primary">
-                                        ✨ Auto-Upsell Packages
-                                    </p>
-                                    <div className="space-y-3">
-                                        {estimate.upsellOptions.map((option, index) => {
-                                            const addedTotal = option.addedItems.reduce((sum, item) => sum + lineTotal(item), 0)
-                                            return (
-                                                <div key={`${option.tier}-${index}`} className="rounded-md border bg-background p-3 space-y-2">
-                                                    <div className="flex items-start justify-between gap-2">
-                                                        <div>
-                                                            <p className="text-sm font-semibold">
-                                                                {option.tier === "better" ? "Better" : "Best"}: {option.title}
-                                                            </p>
-                                                            {option.description && (
-                                                                <p className="text-xs text-muted-foreground mt-1">{option.description}</p>
-                                                            )}
-                                                        </div>
-                                                        <p className="text-sm font-bold text-primary">+${addedTotal.toFixed(2)}</p>
-                                                    </div>
-                                                    <ul className="space-y-1">
-                                                        {option.addedItems.map((item, itemIndex) => (
-                                                            <li
-                                                                key={`${item.id}-${itemIndex}`}
-                                                                className="text-xs text-muted-foreground flex justify-between gap-2"
-                                                            >
-                                                                <span>{item.description}</span>
-                                                                <span className="font-medium text-foreground">+${lineTotal(item).toFixed(2)}</span>
-                                                            </li>
-                                                        ))}
-                                                    </ul>
-                                                    <Button
-                                                        variant="outline"
-                                                        size="sm"
-                                                        className="w-full"
-                                                        onClick={() => handleApplyUpsellOption(option.tier)}
-                                                    >
-                                                        <Plus className="h-3 w-3 mr-2" />
-                                                        Add {option.tier === "better" ? "Better" : "Best"} Package
-                                                    </Button>
-                                                </div>
-                                            )
-                                        })}
-                                    </div>
-                                </div>
-                            )}
+                            {estimate.upsellOptions ? (
+                                <UpsellOptionsCard
+                                    onApply={handleApplyUpsellOption}
+                                    options={estimate.upsellOptions}
+                                />
+                            ) : null}
                             {/* Client Info */}
                             <div className="grid grid-cols-2 gap-4 bg-muted p-4 rounded-lg">
                                 <div>
@@ -2120,289 +1706,24 @@ export default function NewEstimatePage() {
                                 />
                             </div>
 
-                            <div className="space-y-4">
-                                {(estimate.items || []).map((item, index) => {
-                                    // Use the new category field directly (with fallback for old data)
-                                    const currentCategory = item.category || 'PARTS'
-                                    const currentUnit = item.unit || 'ea'
-
-                                    return (
-                                        <div key={item.id || index} className="flex flex-col gap-2 py-3 border-b last:border-0">
-                                            {/* Row 1: Item #, Category, Description, Delete */}
-                                            <div className="flex items-start gap-2">
-                                                {/* Item Number */}
-                                                <span className="w-6 h-9 flex items-center justify-center text-xs font-mono text-muted-foreground">
-                                                    #{item.itemNumber || index + 1}
-                                                </span>
-                                                {/* Category Dropdown */}
-                                                <select
-                                                    value={currentCategory}
-                                                    onChange={(e) => handleItemChange(index, "category", e.target.value)}
-                                                    className="h-9 px-2 rounded-md border bg-white text-xs font-medium text-gray-700 shrink-0"
-                                                >
-                                                    <option value="PARTS">🔧 Parts</option>
-                                                    <option value="LABOR">👷 Labor</option>
-                                                    <option value="SERVICE">📋 Service</option>
-                                                    <option value="OTHER">📦 Other</option>
-                                                </select>
-                                                <PriceListAutocomplete
-                                                    value={item.description}
-                                                    onChange={(value) => handleItemChange(index, "description", value)}
-                                                    onSelect={(priceItem) => {
-                                                        handleItemChange(index, "description", priceItem.name)
-                                                        handleItemChange(index, "unit_price", priceItem.price)
-                                                        handleItemChange(index, "unit", priceItem.unit)
-                                                        handleItemChange(index, "category", priceItem.category)
-                                                    }}
-                                                    placeholder="Item Description"
-                                                    className="flex-1"
-                                                />
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-6 w-6 text-destructive hover:text-destructive"
-                                                    onClick={() => handleDeleteItem(index)}
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                            {/* Row 2: Qty, Unit, Unit Price, Total */}
-                                            <div className="flex gap-2 items-center ml-8">
-                                                <div className="w-16">
-                                                    <label className="text-[10px] text-muted-foreground">Qty</label>
-                                                    <Input
-                                                        type="number"
-                                                        value={item.quantity}
-                                                        onChange={(e) => handleItemChange(index, "quantity", e.target.value)}
-                                                        className="h-8 text-gray-900 bg-white border"
-                                                    />
-                                                </div>
-                                                <div className="w-20">
-                                                    <label className="text-[10px] text-muted-foreground">Unit</label>
-                                                    <select
-                                                        value={currentUnit}
-                                                        onChange={(e) => handleItemChange(index, "unit", e.target.value)}
-                                                        className="w-full h-8 px-2 rounded-md border bg-white text-xs text-gray-700"
-                                                    >
-                                                        <option value="ea">ea</option>
-                                                        <option value="LS">LS</option>
-                                                        <option value="hr">hr</option>
-                                                        <option value="day">day</option>
-                                                        <option value="SF">SF</option>
-                                                        <option value="LF">LF</option>
-                                                        <option value="%">%</option>
-                                                        <option value="other">other</option>
-                                                    </select>
-                                                </div>
-                                                <div className="flex-1">
-                                                    <label className="text-[10px] text-muted-foreground">Unit $ ({currentUnit})</label>
-                                                    <Input
-                                                        type="number"
-                                                        value={item.unit_price}
-                                                        onChange={(e) => handleItemChange(index, "unit_price", e.target.value)}
-                                                        className="h-8 text-gray-900 bg-white border"
-                                                    />
-                                                </div>
-                                                <div className="w-24 text-right">
-                                                    <label className="text-[10px] text-muted-foreground">Total</label>
-                                                    <p className="font-bold py-1">
-                                                        ${lineTotal(item).toFixed(2)}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )
-                                })}
-                            </div>
-
-                            {/* Action Buttons: Add Item / Add Section / Upload CSV / Scan Receipt */}
-                            <div className="flex gap-2 flex-wrap">
-                                <Button
-                                    variant="outline"
-                                    className="flex-1"
-                                    onClick={() => setIsReceiptScannerOpen(true)}
-                                >
-                                    <Receipt className="h-4 w-4 mr-2" />
-                                    Scan Receipt
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    className="flex-1"
-                                    onClick={handleAddItem}
-                                >
-                                    <Plus className="h-4 w-4 mr-2" />
-                                    Add Item
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    className="flex-1"
-                                    onClick={handleAddSection}
-                                >
-                                    <Plus className="h-4 w-4 mr-2" />
-                                    📁 Section
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    className="flex-1"
-                                    onClick={() => setIsExcelModalOpen(true)}
-                                >
-                                    <FileSpreadsheet className="h-4 w-4 mr-2" />
-                                    📊 CSV
-                                </Button>
-                            </div>
-
-                            {/* ========== Sections (Division Groups) ========== */}
-                            {estimate.sections && estimate.sections.length > 0 && (
-                                <div className="space-y-4 mt-4">
-                                    {estimate.sections.map((section) => {
-                                        const sectionItems = section.items || []
-                                        const sectionSubtotal = sectionItems.reduce((sum, item) => sum + lineTotal(item), 0)
-                                        return (
-                                            <div key={section.id} className="border-2 border-primary/30 rounded-lg p-3 bg-primary/5">
-                                                {/* Section Header */}
-                                                <div className="flex items-center justify-between mb-3">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-lg">📁</span>
-                                                        <Input
-                                                            value={section.name}
-                                                            onChange={(e) => handleEditSectionName(section.id, e.target.value)}
-                                                            className="font-semibold text-primary bg-transparent border-0 border-b focus-visible:ring-0 px-0 h-7"
-                                                            placeholder="Section Name"
-                                                        />
-                                                    </div>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="text-destructive hover:text-destructive h-7 px-2"
-                                                        onClick={() => handleDeleteSection(section.id)}
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                </div>
-
-                                                {/* Section Items */}
-                                                <div className="space-y-2">
-                                                    {sectionItems.map((item, itemIdx) => {
-                                                        const currentCategory = item.category || 'PARTS'
-                                                        const currentUnit = item.unit || 'ea'
-                                                        return (
-                                                            <div key={item.id || itemIdx} className="flex flex-col gap-1 py-2 border-b border-primary/20 last:border-0">
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="w-5 text-xs font-mono text-muted-foreground">#{item.itemNumber || itemIdx + 1}</span>
-                                                                    <select
-                                                                        value={currentCategory}
-                                                                        onChange={(e) => handleSectionItemChange(section.id, itemIdx, "category", e.target.value)}
-                                                                        className="h-8 px-2 rounded-md border bg-white text-xs font-medium text-gray-700"
-                                                                    >
-                                                                        <option value="PARTS">🔧</option>
-                                                                        <option value="LABOR">👷</option>
-                                                                        <option value="SERVICE">📋</option>
-                                                                        <option value="OTHER">📦</option>
-                                                                    </select>
-                                                                    <PriceListAutocomplete
-                                                                        value={item.description}
-                                                                        onChange={(value) => handleSectionItemChange(section.id, itemIdx, "description", value)}
-                                                                        onSelect={(priceItem) => {
-                                                                            handleSectionItemChange(section.id, itemIdx, "description", priceItem.name)
-                                                                            handleSectionItemChange(section.id, itemIdx, "unit_price", priceItem.price)
-                                                                            handleSectionItemChange(section.id, itemIdx, "unit", priceItem.unit)
-                                                                            handleSectionItemChange(section.id, itemIdx, "category", priceItem.category)
-                                                                        }}
-                                                                        placeholder="Description"
-                                                                        className="flex-1"
-                                                                    />
-                                                                    <Button
-                                                                        variant="ghost"
-                                                                        size="icon"
-                                                                        className="h-6 w-6 text-destructive"
-                                                                        onClick={() => handleDeleteSectionItem(section.id, itemIdx)}
-                                                                    >
-                                                                        <Trash2 className="h-3 w-3" />
-                                                                    </Button>
-                                                                </div>
-                                                                <div className="flex gap-2 ml-5">
-                                                                    <Input
-                                                                        type="number"
-                                                                        value={item.quantity}
-                                                                        onChange={(e) => handleSectionItemChange(section.id, itemIdx, "quantity", e.target.value)}
-                                                                        className="w-16 h-7 text-xs bg-white"
-                                                                        placeholder="Qty"
-                                                                    />
-                                                                    <select
-                                                                        value={currentUnit}
-                                                                        onChange={(e) => handleSectionItemChange(section.id, itemIdx, "unit", e.target.value)}
-                                                                        className="w-16 h-7 px-1 rounded-md border bg-white text-xs"
-                                                                    >
-                                                                        <option value="ea">ea</option>
-                                                                        <option value="LS">LS</option>
-                                                                        <option value="hr">hr</option>
-                                                                        <option value="day">day</option>
-                                                                        <option value="SF">SF</option>
-                                                                        <option value="LF">LF</option>
-                                                                    </select>
-                                                                    <Input
-                                                                        type="number"
-                                                                        value={item.unit_price}
-                                                                        onChange={(e) => handleSectionItemChange(section.id, itemIdx, "unit_price", e.target.value)}
-                                                                        className="w-20 h-7 text-xs bg-white"
-                                                                        placeholder="$"
-                                                                    />
-                                                                    <span className="text-sm font-semibold w-20 text-right">
-                                                                        ${lineTotal(item).toFixed(2)}
-                                                                    </span>
-                                                                </div>
-                                                            </div>
-                                                        )
-                                                    })}
-                                                </div>
-
-                                                {/* Add Item to Section + Subtotal */}
-                                                <div className="flex items-center justify-between mt-2 pt-2 border-t border-primary/20">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="text-primary h-7"
-                                                        onClick={() => handleAddItemToSection(section.id)}
-                                                    >
-                                                        <Plus className="h-3 w-3 mr-1" />
-                                                        Add Item
-                                                    </Button>
-                                                    <div className="text-sm font-semibold text-primary">
-                                                        Subtotal: ${sectionSubtotal.toFixed(2)}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            )}
-
-                            {/* Totals Calculation */}
-                            <div className="space-y-2 pt-4 border-t">
-                                <div className="flex justify-between items-center text-sm">
-                                    <span className="text-muted-foreground">Subtotal</span>
-                                    <span>${getAllItemsFromEstimate(estimate).reduce((sum, item) => sum + lineTotal(item), 0).toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between items-center text-sm">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-muted-foreground">Tax</span>
-                                        <Input
-                                            type="number"
-                                            value={taxRate}
-                                            onChange={(e) => setTaxRate(Number(e.target.value))}
-                                            className="w-16 h-6 text-xs text-center"
-                                        />
-                                        <span className="text-muted-foreground text-xs">%</span>
-                                    </div>
-                                    <span>${(resultSubtotal * taxRate / 100).toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between items-center pt-2 border-t">
-                                    <p className="font-bold text-lg">Total</p>
-                                    <p className="font-bold text-xl text-primary">
-                                        ${resultTotal.toFixed(2)}
-                                    </p>
-                                </div>
-                            </div>
+                            <EstimateLineItemsEditor
+                                estimate={estimate}
+                                onAddItem={handleAddItem}
+                                onAddItemToSection={handleAddItemToSection}
+                                onAddSection={handleAddSection}
+                                onDeleteItem={handleDeleteItem}
+                                onDeleteSection={handleDeleteSection}
+                                onDeleteSectionItem={handleDeleteSectionItem}
+                                onEditSectionName={handleEditSectionName}
+                                onItemChange={handleItemChange}
+                                onOpenExcelImport={() => setIsExcelModalOpen(true)}
+                                onScanReceipt={() => setIsReceiptScannerOpen(true)}
+                                onSectionItemChange={handleSectionItemChange}
+                                onTaxRateChange={setTaxRate}
+                                resultSubtotal={resultSubtotal}
+                                resultTotal={resultTotal}
+                                taxRate={taxRate}
+                            />
 
                             {/* Action Buttons - 2x2 Grid */}
                             <div className="grid grid-cols-2 gap-3 mt-4">
@@ -2737,9 +2058,9 @@ export default function NewEstimatePage() {
                                                 }
                                                 toast('✅ Email sent with PDF attached!', 'success')
                                             }
-                                        } catch (error: any) {
+                                        } catch (error: unknown) {
                                             console.error('Email send error:', error)
-                                            toast(`❌ ${error.message || 'Failed to send. Try again.'}`, 'error')
+                                            toast(`❌ ${getErrorMessage(error, 'Failed to send. Try again.')}`, 'error')
                                             throw error
                                         }
                                     }}
@@ -2785,9 +2106,9 @@ export default function NewEstimatePage() {
                             })
                             await persistCurrentEstimateAsSent()
                             toast('✅ SMS sent!', 'success')
-                        } catch (error: any) {
+                        } catch (error: unknown) {
                             console.error('SMS send error:', error)
-                            toast(`❌ ${error.message || 'Failed to send. Try again.'}`, 'error')
+                            toast(`❌ ${getErrorMessage(error, 'Failed to send. Try again.')}`, 'error')
                             throw error
                         }
                     }}
@@ -2810,45 +2131,21 @@ export default function NewEstimatePage() {
                 />
             )}
 
-            {/* Client Load Modal */}
-            <Dialog open={isClientModalOpen} onOpenChange={setIsClientModalOpen}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Select Client</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-                        {availableClients.length === 0 ? (
-                            <p className="text-center text-muted-foreground py-4">No clients found.</p>
-                        ) : (
-                            availableClients.map(client => (
-                                <div
-                                    key={client.id}
-                                    className="p-3 border rounded-lg hover:bg-muted cursor-pointer transition-colors"
-                                    onClick={() => {
-                                        setClientName(client.name)
-                                        if (client.address) setClientAddress(client.address)
-                                        setIsClientModalOpen(false)
-                                        toast(`✅ Loaded ${client.name}`, "success")
-                                    }}
-                                >
-                                    <p className="font-bold">{client.name}</p>
-                                    {client.address && <p className="text-xs text-muted-foreground">{client.address}</p>}
-                                </div>
-                            ))
-                        )}
-                        <Button
-                            variant="outline"
-                            className="w-full mt-2"
-                            onClick={() => {
-                                setIsClientModalOpen(false)
-                                router.push('/clients')
-                            }}
-                        >
-                            <Plus className="h-4 w-4 mr-2" /> Add New Client
-                        </Button>
-                    </div>
-                </DialogContent>
-            </Dialog>
+            <ClientLoadDialog
+                clients={availableClients}
+                onAddClient={() => {
+                    setIsClientModalOpen(false)
+                    router.push('/clients')
+                }}
+                onOpenChange={setIsClientModalOpen}
+                onSelectClient={(client) => {
+                    setClientName(client.name)
+                    if (client.address) setClientAddress(client.address)
+                    setIsClientModalOpen(false)
+                    toast(`✅ Loaded ${client.name}`, "success")
+                }}
+                open={isClientModalOpen}
+            />
             {/* Signature Modal */}
             <Dialog open={isSignatureModalOpen} onOpenChange={setIsSignatureModalOpen}>
                 <DialogContent>

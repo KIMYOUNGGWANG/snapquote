@@ -23,6 +23,13 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "public/workbox-*.js",
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".opencode/**",
+    "conductor/**",
+    "inkdesk/**",
   ]),
 ]);
 

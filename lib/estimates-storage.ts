@@ -16,6 +16,8 @@ export interface EstimateItem {
     unit: EstimateUnit
     unit_price: number
     total: number
+    is_value_add?: boolean
+    notes?: string
 }
 
 // Attachments for dispute prevention
@@ -40,6 +42,22 @@ export interface UpsellOption {
     addedItems: EstimateItem[]
 }
 
+export type PricingConfidence = 'low' | 'medium' | 'high'
+
+export interface PhotoEstimateMaterialSuggestion {
+    label: string
+    quantity: number
+    unit: string
+    reason: string
+}
+
+export interface PhotoEstimateAnalysis {
+    observations: string[]
+    suggestedScope: string[]
+    materialSuggestions: PhotoEstimateMaterialSuggestion[]
+    pricingConfidence: PricingConfidence
+}
+
 export interface LocalEstimate {
     id: string
     estimateNumber: string
@@ -47,6 +65,9 @@ export interface LocalEstimate {
     items: EstimateItem[]      // Legacy: flat items (for backward compatibility)
     sections?: EstimateSection[] // NEW: Division-based grouping
     upsellOptions?: UpsellOption[]
+    payment_terms?: string
+    closing_note?: string
+    photoAnalysis?: PhotoEstimateAnalysis
     summary_note: string
     clientName: string
     clientEmail?: string
