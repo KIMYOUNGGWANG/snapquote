@@ -49,9 +49,15 @@ snapquote_plan_v2.md
 prompt_v5_lite_analysis.md
 
 *.md
-!GEMINI.md
+!AGENTS.md
 
 .env
 .env.local
 .env.production
 # All markdown files
+.agent/
+.agents/
+.claude/
+.codex/
+conductor/
+inkdesk/

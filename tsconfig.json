@@ -41,6 +41,12 @@
     "supabase",
     "codex",
     ".agent",
-    ".agent_backup_*"
+    ".agents",
+    ".claude",
+    ".codex",
+    ".agent_backup_*",
+    ".opencode",
+    "conductor",
+    "inkdesk"
   ]
 }
