@@ -1,0 +1,224 @@
+pumasi:
+  defaults:
+    command: "codex exec --dangerously-bypass-approvals-and-sandbox --ephemeral"
+    emoji: "🤖"
+
+  tasks:
+    - name: progress-stepper
+      instruction: |
+        /Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/components/estimate-progress-stepper.tsx 파일을 새로 생성하세요.
+
+        ## 프로젝트 컨텍스트
+        - Next.js 16+ App Router, TypeScript, Tailwind CSS, Shadcn UI
+        - "use client" 컴포넌트
+        - 5단계 흐름: input → transcribing → verifying → generating → result
+
+        ## 타입 정의
+        type EstimateStep = "input" | "transcribing" | "verifying" | "generating" | "result"
+
+        interface EstimateProgressStepperProps {
+          currentStep: EstimateStep
+        }
+
+        ## 시그니처
+        export function EstimateProgressStepper(props: EstimateProgressStepperProps): JSX.Element | null
+
+        ## 요구사항
+        - "input" 단계에서는 null 반환 (초기 화면에서는 숨김)
+        - 나머지 4단계에서 상단에 가로 스테퍼 표시
+        - 각 단계별 라벨:
+          - transcribing: "🎙 분석 중"
+          - verifying: "✏️ 확인"
+          - generating: "⚡ 생성 중"
+          - result: "✅ 완료"
+        - 현재 단계는 강조(텍스트 흰색 + 파란 배경 pill)
+        - 완료된 단계는 체크 표시(✓) + 파란색 텍스트
+        - 미완료 단계는 회색 텍스트
+        - 단계 사이 구분선(›) 표시
+        - Tailwind CSS 사용, 모바일 우선 디자인
+        - 배경: bg-background/80 backdrop-blur, 상단 고정 스타일
+
+        ## 제약사항
+        - "use client" 선언 필수
+        - 외부 라이브러리 추가 금지 (lucide-react, Tailwind만 사용)
+        - TypeScript strict, any 금지
+
+      gates:
+        - name: "파일 존재"
+          command: "[ -f '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/components/estimate-progress-stepper.tsx' ]"
+        - name: "EstimateProgressStepper export 존재"
+          command: "grep -q 'EstimateProgressStepper' '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/components/estimate-progress-stepper.tsx'"
+        - name: "5개 step 처리"
+          command: "grep -q 'transcribing' '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/components/estimate-progress-stepper.tsx' && grep -q 'generating' '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/components/estimate-progress-stepper.tsx'"
+        - name: "타입 체크"
+          command: "cd '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)' && npx tsc --noEmit 2>&1 | grep -v node_modules | grep -c 'error' | xargs -I{} test {} -eq 0"
+
+    - name: pricelist-autocomplete
+      instruction: |
+        /Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/components/pricelist-autocomplete.tsx 파일을 새로 생성하세요.
+
+        ## 프로젝트 컨텍스트
+        - Next.js 16+ App Router, TypeScript, Tailwind CSS, Shadcn UI
+        - "use client" 컴포넌트
+        - PriceListItem 타입: { id, name, price, unit, category, keywords, description?, usageCount }
+        - getPriceList(): Promise<PriceListItem[]> — lib/db에서 import
+
+        ## 공통 타입
+        import type { PriceListItem } from '@/types'
+        import { getPriceList } from '@/lib/db'
+
+        ## 타입 정의
+        interface PriceListAutocompleteProps {
+          value: string
+          onChange: (value: string) => void
+          onSelect: (item: PriceListItem) => void
+          placeholder?: string
+          className?: string
+        }
+
+        ## 시그니처
+        export function PriceListAutocomplete(props: PriceListAutocompleteProps): JSX.Element
+
+        ## 요구사항
+        - Input 필드 렌더링 (value/onChange 연결)
+        - 사용자 입력 시 getPriceList()로 불러온 항목 중 name/keywords 기준 fuzzy 검색 (toLowerCase 포함 여부 확인)
+        - 검색 결과를 드롭다운 팝오버로 표시 (최대 6개)
+        - 각 항목 표시: name (bold) + price + unit + category badge
+        - 항목 선택 시 onSelect 콜백 호출 후 드롭다운 닫기
+        - 드롭다운 외부 클릭 시 닫힘 (useEffect + mousedown 이벤트)
+        - 항목 없으면 드롭다운 미표시
+        - AI 참조 표시: 매칭된 항목 옆에 "💡 가격표" 배지 표시
+        - Tailwind CSS, 다크 테마 호환
+
+        ## 제약사항
+        - "use client" 선언 필수
+        - TypeScript strict, any 금지
+        - 추가 라이브러리 설치 금지 (Shadcn Input, Tailwind만)
+
+      gates:
+        - name: "파일 존재"
+          command: "[ -f '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/components/pricelist-autocomplete.tsx' ]"
+        - name: "PriceListAutocomplete export 존재"
+          command: "grep -q 'PriceListAutocomplete' '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/components/pricelist-autocomplete.tsx'"
+        - name: "onSelect prop 존재"
+          command: "grep -q 'onSelect' '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/components/pricelist-autocomplete.tsx'"
+        - name: "getPriceList import"
+          command: "grep -q 'getPriceList' '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/components/pricelist-autocomplete.tsx'"
+        - name: "타입 체크"
+          command: "cd '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)' && npx tsc --noEmit 2>&1 | grep -v node_modules | grep -c 'error' | xargs -I{} test {} -eq 0"
+
+    - name: i18n-core
+      instruction: |
+        두 파일을 생성하세요:
+        1. /Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/lib/i18n.ts
+        2. /Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/components/language-selector.tsx
+
+        ## 프로젝트 컨텍스트
+        - Next.js 16+ App Router, TypeScript, Tailwind CSS
+        - 타겟 언어: English(en), Spanish(es), Korean(ko)
+        - localStorage key: "snapquote_language"
+
+        ## lib/i18n.ts 시그니처
+        export type Language = "en" | "es" | "ko"
+        export type TranslationKey = keyof typeof translations.en
+
+        export const translations: Record<Language, Record<string, string>>
+        // 번역 키 목록 (최소 아래 포함):
+        // new_estimate, history, clients, profile, home, receipts
+        // send, save, copy, cancel, back, next, done
+        // follow_up_needed, copy_message, open_email
+        // speak_job, creating_estimate, estimate_ready
+        // select_trade, send_instantly
+
+        export function t(key: string, lang: Language): string
+        export function getStoredLanguage(): Language
+        export function setStoredLanguage(lang: Language): void
+        export function useLanguage(): { lang: Language; setLang: (l: Language) => void; t: (key: string) => string }
+
+        ## components/language-selector.tsx 시그니처
+        export function LanguageSelector(): JSX.Element
+        // 3개 버튼(EN/ES/KO) 토글 UI
+        // useLanguage hook 사용
+        // 현재 선택된 언어 강조 표시
+
+        ## 요구사항
+        - translations 객체: en/es/ko 3개 언어, 위 키 전부 포함
+        - t(key, lang): 키 없으면 key 그대로 반환 (fallback)
+        - getStoredLanguage: localStorage 없는 환경(SSR) 대비 try-catch 처리
+        - useLanguage hook: useState + useEffect로 localStorage 동기화
+        - LanguageSelector: "use client", 작은 pill 버튼 3개 (EN · ES · KO)
+
+        ## 제약사항
+        - 추가 i18n 라이브러리 설치 금지 (순수 TypeScript)
+        - "use client"는 components/language-selector.tsx에만 선언
+        - lib/i18n.ts는 서버/클라이언트 모두 호환 (localStorage는 함수 내부에서만)
+        - TypeScript strict, any 금지
+
+      gates:
+        - name: "lib/i18n.ts 존재"
+          command: "[ -f '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/lib/i18n.ts' ]"
+        - name: "language-selector.tsx 존재"
+          command: "[ -f '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/components/language-selector.tsx' ]"
+        - name: "3개 언어 존재"
+          command: "grep -q '\"es\"' '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/lib/i18n.ts' && grep -q '\"ko\"' '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/lib/i18n.ts'"
+        - name: "useLanguage hook 존재"
+          command: "grep -q 'useLanguage' '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/lib/i18n.ts'"
+        - name: "타입 체크"
+          command: "cd '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)' && npx tsc --noEmit 2>&1 | grep -v node_modules | grep -c 'error' | xargs -I{} test {} -eq 0"
+
+    - name: time-estimate-link
+      instruction: |
+        두 파일을 수정하세요:
+        1. /Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/lib/db.ts — TimeEntry에 estimateId 필드 추가
+        2. /Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/app/time-tracking/page.tsx — 견적 연동 UI 추가
+
+        ## 프로젝트 컨텍스트
+        - Next.js 16+ App Router, TypeScript, Tailwind CSS, Shadcn UI
+        - "use client" 컴포넌트
+        - LocalEstimate: { id, estimateNumber, clientName, totalAmount, status, ... } — lib/estimates-storage에서 import
+        - 현재 TimeEntry: { id, projectName?, startTime, endTime?, duration?, date }
+
+        ## lib/db.ts 변경
+        TimeEntry 인터페이스에 필드 추가:
+        interface TimeEntry {
+          // 기존 필드 유지
+          estimateId?: string   // 연결된 견적 ID
+          estimateNumber?: string  // 표시용 견적 번호
+        }
+
+        ## app/time-tracking/page.tsx 변경 시그니처
+        // 추가할 state
+        const [estimates, setEstimates] = useState<LocalEstimate[]>([])
+        const [selectedEstimateId, setSelectedEstimateId] = useState<string>("")
+
+        // 추가할 함수
+        async function loadEstimates(): Promise<void>  // getEstimates() 호출하여 sent/paid만 필터링
+
+        ## 요구사항
+        - lib/db.ts: TimeEntry에 estimateId?, estimateNumber? 추가 (기존 필드 수정 금지)
+        - time-tracking/page.tsx:
+          - 컴포넌트 마운트 시 getEstimates()로 sent/paid 상태 견적 불러오기
+          - 타이머 시작 전 "연결할 견적 선택" select 드롭다운 표시
+          - 드롭다운: "선택 안 함" + sent/paid 견적 목록 (estimateNumber + clientName)
+          - handleStart 수정: selectedEstimateId가 있으면 estimateId, estimateNumber 포함하여 저장
+          - 완료된 타임 엔트리 목록에서 estimateNumber 있으면 "📋 #{estimateNumber}" 배지 표시
+        - getEstimates import: import { getEstimates, LocalEstimate } from '@/lib/estimates-storage'
+
+        ## 제약사항
+        - "use client" 유지
+        - TypeScript strict, any 금지
+        - 기존 타이머 로직(handleStart/handleStop/handleDelete) 수정 최소화
+        - Shadcn Select 대신 native <select> 사용 가능
+
+      gates:
+        - name: "TimeEntry estimateId 존재"
+          command: "grep -q 'estimateId' '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/lib/db.ts'"
+        - name: "time-tracking 견적 연동 코드"
+          command: "grep -q 'getEstimates' '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/app/time-tracking/page.tsx'"
+        - name: "selectedEstimateId state"
+          command: "grep -q 'selectedEstimateId' '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)/app/time-tracking/page.tsx'"
+        - name: "타입 체크"
+          command: "cd '/Users/kim-young-gwang/Desktop/SnapQuote (Trade-Focused AI Estimator)' && npx tsc --noEmit 2>&1 | grep -v node_modules | grep -c 'error' | xargs -I{} test {} -eq 0"
+
+  settings:
+    timeout: 3600

@@ -4,6 +4,7 @@ import { FileSpreadsheet, Plus, Receipt, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { PriceListAutocomplete } from "@/components/pricelist-autocomplete"
 import type { EstimateItem } from "@/lib/estimates-storage"
 import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
 import type { EstimateDraft } from "@/lib/estimates/normalize"
@@ -185,11 +186,17 @@ function FlatEstimateItemRow({
                     <option value="SERVICE">📋 Service</option>
                     <option value="OTHER">📦 Other</option>
                 </select>
-                <Input
+                <PriceListAutocomplete
                     value={item.description}
-                    onChange={(event) => onItemChange(index, "description", event.target.value)}
-                    className="font-medium border px-2 h-auto focus-visible:ring-1 flex-1 bg-white text-gray-900"
+                    onChange={(value) => onItemChange(index, "description", value)}
+                    onSelect={(priceItem) => {
+                        onItemChange(index, "description", priceItem.name)
+                        onItemChange(index, "unit_price", priceItem.price)
+                        onItemChange(index, "unit", priceItem.unit)
+                        onItemChange(index, "category", priceItem.category)
+                    }}
                     placeholder="Item Description"
+                    className="flex-1"
                 />
                 <Button
                     variant="ghost"
@@ -340,11 +347,17 @@ function SectionEstimateItemRow({
                     <option value="SERVICE">📋</option>
                     <option value="OTHER">📦</option>
                 </select>
-                <Input
+                <PriceListAutocomplete
                     value={item.description}
-                    onChange={(event) => onItemChange(itemIndex, "description", event.target.value)}
-                    className="flex-1 h-8 text-sm bg-white"
+                    onChange={(value) => onItemChange(itemIndex, "description", value)}
+                    onSelect={(priceItem) => {
+                        onItemChange(itemIndex, "description", priceItem.name)
+                        onItemChange(itemIndex, "unit_price", priceItem.price)
+                        onItemChange(itemIndex, "unit", priceItem.unit)
+                        onItemChange(itemIndex, "category", priceItem.category)
+                    }}
                     placeholder="Description"
+                    className="flex-1"
                 />
                 <Button
                     variant="ghost"

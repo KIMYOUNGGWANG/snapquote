@@ -53,6 +53,7 @@ const ExcelImportModal = dynamic(() => import("@/components/excel-import-modal")
 const ReceiptScanner = dynamic(() => import("@/components/receipt-scanner").then(mod => mod.ReceiptScanner), { ssr: false })
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 const SignaturePad = dynamic(() => import("@/components/signature-pad").then(mod => mod.SignaturePad), { ssr: false })
+import { EstimateProgressStepper } from "@/components/estimate-progress-stepper"
 
 type Estimate = EstimateDraft
 
@@ -1235,6 +1236,7 @@ export default function NewEstimatePage() {
 
     return (
         <div className="max-w-2xl mx-auto space-y-6 px-4 pb-20">
+            <EstimateProgressStepper currentStep={step} />
             <CardHeader className="px-0 pb-2">
                 <CardTitle className="text-2xl font-bold">
                     {step === "input" && "New Estimate"}
@@ -2050,7 +2052,10 @@ export default function NewEstimatePage() {
                                                         hasPaymentLink: includePaymentLink && Boolean(paymentLink),
                                                     },
                                                 })
-                                                await persistCurrentEstimateAsSent()
+                                                const sentEstimate = await persistCurrentEstimateAsSent()
+                                                if (sentEstimate && email) {
+                                                    await updateEstimate(sentEstimate.id, { clientEmail: email })
+                                                }
                                                 toast('✅ Email sent with PDF attached!', 'success')
                                             }
                                         } catch (error: unknown) {

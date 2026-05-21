@@ -1,5 +1,5 @@
-import { saveEstimateToDB, getEstimatesFromDB, initDB } from "./db"
-import { emitOfflineQueueChanged } from "./offline-events"
+import { saveEstimateToDB, getEstimatesFromDB, initDB } from "@/lib/db"
+import { emitOfflineQueueChanged } from "@/lib/offline-events"
 
 // Unit types for professional estimating
 export type EstimateUnit = 'ea' | 'LS' | 'hr' | 'day' | 'SF' | 'LF' | '%' | 'other'
@@ -70,6 +70,7 @@ export interface LocalEstimate {
     photoAnalysis?: PhotoEstimateAnalysis
     summary_note: string
     clientName: string
+    clientEmail?: string
     clientAddress: string
     taxRate: number
     taxAmount: number
