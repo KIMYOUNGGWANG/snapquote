@@ -158,6 +158,9 @@ test.describe("Payment link flow", () => {
 test.describe("Offline handling", () => {
     test("offline banner appears when network is unavailable", async ({ page, context }) => {
         await page.goto("/new-estimate")
+        await expect(page.getByTestId("load-demo-quote-button")).toBeVisible()
+        await page.waitForLoadState("networkidle")
+        await expect(page.getByRole("button", { name: /syncing|synced|saved/i })).toBeVisible({ timeout: 10000 })
 
         // Simulate going offline
         await context.setOffline(true)
@@ -166,10 +169,13 @@ test.describe("Offline handling", () => {
         })
 
         // The offline banner should appear
-        await expect(page.getByText(/you're offline|some features may be limited/i)).toBeVisible({ timeout: 5000 })
+        await expect(page.getByTestId("offline-banner")).toContainText(/you're offline/i, { timeout: 5000 })
 
         // Restore connectivity
         await context.setOffline(false)
+        await page.evaluate(() => {
+            window.dispatchEvent(new Event("online"))
+        })
     })
 
     test("estimate can be saved offline and persists to localStorage", async ({ page, context }) => {

@@ -62,6 +62,7 @@ export function OfflineBanner() {
 
     return (
         <div
+            data-testid="offline-banner"
             className={`fixed top-0 left-0 right-0 z-50 px-4 py-2 text-center text-sm font-medium transition-all duration-300 ${isOffline
                     ? "bg-amber-500 text-amber-950"
                     : "bg-green-500 text-green-950"
