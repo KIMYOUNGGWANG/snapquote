@@ -6,7 +6,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { trackReferralEvent } from "@/lib/referrals"
-import { buildPostAuthRedirectPath, normalizeIntent, normalizeNextPath } from "@/lib/auth/oauth-callback"
+import {
+    buildAuthCallbackRedirectPath,
+    buildPostAuthRedirectPath,
+    normalizeIntent,
+    normalizeNextPath,
+} from "@/lib/auth/oauth-callback"
 
 const REFERRAL_TOKEN_PATTERN = /^[a-z0-9]{8,32}$/
 
@@ -73,16 +78,13 @@ export default function LoginPage() {
         e.preventDefault()
         setLoading(true)
         setMessage("")
-        const redirectUrl = new URL(nextPath, window.location.origin)
-        if (intent) {
-            redirectUrl.searchParams.set("intent", intent)
-        }
+        const callbackUrl = new URL(buildAuthCallbackRedirectPath(nextPath, intent), window.location.origin)
 
         const { error } = await supabase.auth.signInWithOtp({
             email,
             options: {
                 shouldCreateUser: true,
-                emailRedirectTo: redirectUrl.toString(),
+                emailRedirectTo: callbackUrl.toString(),
             },
         })
         if (error) {
@@ -101,9 +103,7 @@ export default function LoginPage() {
         setMessage("")
         setOauthLoading(true)
 
-        const callbackPath = buildPostAuthRedirectPath("/auth/callback", intent)
-        const callbackUrl = new URL(callbackPath, window.location.origin)
-        callbackUrl.searchParams.set("next", nextPath)
+        const callbackUrl = new URL(buildAuthCallbackRedirectPath(nextPath, intent), window.location.origin)
 
         const { error } = await supabase.auth.signInWithOAuth({
             provider: "google",

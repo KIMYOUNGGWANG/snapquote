@@ -37,6 +37,18 @@ export function buildPostAuthRedirectPath(nextPath: string, intent: string): str
     return `${target.pathname}${target.search}${target.hash}`
 }
 
+export function buildAuthCallbackRedirectPath(nextPath: string, intent: string): string {
+    const params = new URLSearchParams()
+    params.set("next", normalizeNextPath(nextPath))
+
+    const normalizedIntent = normalizeIntent(intent)
+    if (normalizedIntent) {
+        params.set("intent", normalizedIntent)
+    }
+
+    return `/auth/callback?${params.toString()}`
+}
+
 export function buildLoginErrorRedirectPath(nextPath: string, intent: string, errorMessage: string): string {
     const params = new URLSearchParams()
     params.set("next", normalizeNextPath(nextPath))

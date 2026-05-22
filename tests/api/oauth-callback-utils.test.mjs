@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { describe, test } from "node:test"
 
 import {
+  buildAuthCallbackRedirectPath,
   buildLoginErrorRedirectPath,
   buildPostAuthRedirectPath,
   normalizeIntent,
@@ -29,6 +30,11 @@ describe("OAuth callback helpers", () => {
   test("buildPostAuthRedirectPath preserves query and appends sanitized intent", () => {
     const path = buildPostAuthRedirectPath("/new-estimate?from=login", "payment-link")
     assert.equal(path, "/new-estimate?from=login&intent=payment-link")
+  })
+
+  test("buildAuthCallbackRedirectPath preserves the intended return path", () => {
+    const path = buildAuthCallbackRedirectPath("/new-estimate?from=login", "payment-link")
+    assert.equal(path, "/auth/callback?next=%2Fnew-estimate%3Ffrom%3Dlogin&intent=payment-link")
   })
 
   test("buildLoginErrorRedirectPath keeps next path and sets oauth_error", () => {
