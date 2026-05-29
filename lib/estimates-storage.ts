@@ -71,9 +71,8 @@ export interface LocalEstimate {
     summary_note: string
     clientName: string
     clientEmail?: string
-    clientAddress: string
-    clientEmail?: string
     clientPhone?: string
+    clientAddress: string
     clientNotes?: string
     taxRate: number
     taxAmount: number
