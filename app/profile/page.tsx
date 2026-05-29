@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import { Loader2, Save, Building2, Upload, X, Plus, Pencil, Trash2, DollarSign, Link2, ExternalLink, RefreshCw, Sparkles, Lock, Users, CreditCard, Database, ShieldCheck } from "lucide-react"
+import { CheckCircle2, Loader2, Save, Building2, Upload, X, Plus, Pencil, Trash2, DollarSign, Link2, ExternalLink, RefreshCw, Sparkles, Lock, Users, CreditCard, Database, ShieldCheck } from "lucide-react"
 import Image from "next/image"
 import { getEstimates, getProfile, saveProfile, clearAllEstimates, getStorageStats, type BusinessInfo } from "@/lib/estimates-storage"
 import { getPriceList, savePriceListItem, deletePriceListItem } from "@/lib/db"
@@ -18,10 +18,13 @@ import type { PriceListItem, CreatePriceListItem } from "@/types"
 import { generateFullBackupJSON } from "@/lib/export-service"
 import { withAuthHeaders } from "@/lib/auth-headers"
 import { useAuthGuard } from "@/lib/use-auth-guard"
+import { AuthGate } from "@/components/auth-gate"
+import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ReferralStatusCard } from "@/components/referral-status-card"
 import { LanguageSelector } from "@/components/language-selector"
 import { getBillingSubscriptionStatus, type BillingSubscriptionStatusResponse } from "@/lib/pricing"
 import { hasPdfBrandingAccess, hasPdfTemplateAccess } from "@/lib/pdf-branding"
+import { validateAndNormalizeBusinessProfile } from "@/lib/profile-validation"
 
 type StripeConnectStatus = {
     connected: boolean
@@ -62,6 +65,8 @@ export default function ProfilePage() {
     const [priceList, setPriceList] = useState<PriceListItem[]>([])
     const [isPriceModalOpen, setIsPriceModalOpen] = useState(false)
     const [editingPriceItem, setEditingPriceItem] = useState<PriceListItem | null>(null)
+    const [priceItemToDelete, setPriceItemToDelete] = useState<PriceListItem | null>(null)
+    const [clearDataConfirmOpen, setClearDataConfirmOpen] = useState(false)
     const [stripeConnectStatus, setStripeConnectStatus] = useState<StripeConnectStatus | null>(null)
     const [stripeStatusLoading, setStripeStatusLoading] = useState(false)
     const [stripeConnecting, setStripeConnecting] = useState(false)
@@ -101,10 +106,10 @@ export default function ProfilePage() {
         if (typeof window === "undefined") return
         const stripeState = new URLSearchParams(window.location.search).get("stripe")
         if (stripeState === "return") {
-            toast("✅ Stripe onboarding returned. Refreshing status...", "success")
+            toast("Stripe onboarding returned. Refreshing status...", "success")
             void loadStripeConnectStatus()
         } else if (stripeState === "refresh") {
-            toast("ℹ️ Stripe onboarding was interrupted. Continue when ready.", "info")
+            toast("Stripe onboarding was interrupted. Continue when ready.", "info")
         }
     }, [loadStripeConnectStatus])
 
@@ -177,7 +182,7 @@ export default function ProfilePage() {
             })
 
             if (response.status === 401) {
-                toast("🔐 Log in first to connect Stripe.", "warning")
+                toast("Log in first to connect Stripe.", "warning")
                 router.push("/login")
                 return
             }
@@ -192,9 +197,9 @@ export default function ProfilePage() {
             }
 
             window.location.href = data.url
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Stripe connect onboarding failed:", error)
-            toast(`❌ ${error.message || "Failed to connect Stripe."}`, "error")
+            toast(error instanceof Error ? error.message : "Failed to connect Stripe.", "error")
         } finally {
             setStripeConnecting(false)
         }
@@ -210,7 +215,7 @@ export default function ProfilePage() {
             })
 
             if (response.status === 401) {
-                toast("🔐 Log in first to open Stripe dashboard.", "warning")
+                toast("Log in first to open Stripe dashboard.", "warning")
                 router.push("/login")
                 return
             }
@@ -225,9 +230,9 @@ export default function ProfilePage() {
             }
 
             window.open(data.url, "_blank", "noopener,noreferrer")
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Stripe dashboard link failed:", error)
-            toast(`❌ ${error.message || "Failed to open Stripe dashboard."}`, "error")
+            toast(error instanceof Error ? error.message : "Failed to open Stripe dashboard.", "error")
         } finally {
             setStripeDashboardLoading(false)
         }
@@ -237,16 +242,21 @@ export default function ProfilePage() {
         await savePriceListItem({ ...item, keywords: item.keywords || [] })
         const prices = await getPriceList()
         setPriceList(prices)
-        toast(item.id ? "✅ Price item updated!" : "✅ Price item added!", "success")
+        toast(item.id ? "Price item updated." : "Price item added.", "success")
     }
 
-    const handleDeletePriceItem = async (id: string) => {
-        if (confirm("Delete this price item?")) {
-            await deletePriceListItem(id)
-            const prices = await getPriceList()
-            setPriceList(prices)
-            toast("🗑️ Price item deleted.", "success")
-        }
+    const handleDeletePriceItem = (item: PriceListItem) => {
+        setPriceItemToDelete(item)
+    }
+
+    const confirmDeletePriceItem = async () => {
+        if (!priceItemToDelete) return
+
+        await deletePriceListItem(priceItemToDelete.id)
+        const prices = await getPriceList()
+        setPriceList(prices)
+        setPriceItemToDelete(null)
+        toast("Price item deleted.", "success")
     }
 
     const handleEditPriceItem = (item: PriceListItem) => {
@@ -260,6 +270,14 @@ export default function ProfilePage() {
     }
 
     const handleSave = async () => {
+        const validation = validateAndNormalizeBusinessProfile(profile)
+        if (!validation.ok) {
+            toast(validation.error, "error")
+            return
+        }
+
+        const normalizedProfile = validation.profile
+
         setSaving(true)
         try {
             // 1. Save to Supabase (Server)
@@ -269,30 +287,31 @@ export default function ProfilePage() {
                     .from("profiles")
                     .upsert({
                         id: session.user.id,
-                        business_name: profile.business_name,
-                        phone: profile.phone,
-                        email: profile.email,
-                        address: profile.address,
-                        license_number: profile.license_number,
-                        tax_rate: profile.tax_rate,
-                        logo_url: profile.logo_url,
-                        state_province: profile.state_province,
-                        payment_link: profile.payment_link,
-                        estimate_template_url: profile.estimate_template_url,
+                        business_name: normalizedProfile.business_name,
+                        phone: normalizedProfile.phone,
+                        email: normalizedProfile.email,
+                        address: normalizedProfile.address,
+                        license_number: normalizedProfile.license_number,
+                        tax_rate: normalizedProfile.tax_rate,
+                        logo_url: normalizedProfile.logo_url,
+                        state_province: normalizedProfile.state_province,
+                        payment_link: normalizedProfile.payment_link,
+                        estimate_template_url: normalizedProfile.estimate_template_url,
                     })
 
                 if (dbError) throw dbError
             }
 
             // 2. Save to Local Storage (Client)
-            saveProfile(profile)
+            saveProfile(normalizedProfile)
+            setProfile(normalizedProfile)
 
-            toast("✅ Profile synced and saved!", "success")
+            toast("Profile synced and saved.", "success")
             const stats = await getStorageStats()
             setStorageStats(stats)
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Error saving profile:", error)
-            toast(`❌ Failed to sync: ${error.message}`, "error")
+            toast(error instanceof Error ? `Failed to sync: ${error.message}` : "Failed to sync profile.", "error")
         } finally {
             setSaving(false)
         }
@@ -300,7 +319,7 @@ export default function ProfilePage() {
 
     const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!canUsePdfBranding) {
-            toast("🔒 Upgrade to Starter or above to brand PDFs with your logo.", "info")
+            toast("Upgrade to Starter or above to brand PDFs with your logo.", "info")
             return
         }
 
@@ -309,7 +328,7 @@ export default function ProfilePage() {
 
         // Validate file type
         if (!file.type.startsWith('image/')) {
-            toast('⚠️ Please upload an image file', 'error')
+            toast('Please upload an image file.', 'error')
             return
         }
 
@@ -324,13 +343,13 @@ export default function ProfilePage() {
                 setUploading(false)
             }
             reader.onerror = () => {
-                toast('❌ Failed to upload logo', 'error')
+                toast('Failed to upload logo.', 'error')
                 setUploading(false)
             }
             reader.readAsDataURL(file)
         } catch (error) {
             console.error('Error uploading logo:', error)
-            toast('❌ Failed to upload logo', 'error')
+            toast('Failed to upload logo.', 'error')
             setUploading(false)
         }
     }
@@ -340,35 +359,64 @@ export default function ProfilePage() {
         setLogoPreview(null)
     }
 
-    const handleClearData = async () => {
-        if (confirm("⚠️ This will delete ALL your estimates and profile data. This cannot be undone. Are you sure?")) {
-            clearAllEstimates()
-            setProfile({
-                business_name: "",
-                phone: "",
-                email: "",
-                address: "",
-                license_number: "",
-                tax_rate: 13,
-                logo_url: "",
-                state_province: "ON",
-                payment_link: "",
-                estimate_template_url: "",
-            })
-            setLogoPreview(null)
-            toast("🗑️ All data cleared.", "success")
-            const stats = await getStorageStats()
-            setStorageStats(stats)
-        }
+    const handleClearData = () => {
+        setClearDataConfirmOpen(true)
+    }
+
+    const confirmClearData = async () => {
+        clearAllEstimates()
+        setProfile({
+            business_name: "",
+            phone: "",
+            email: "",
+            address: "",
+            license_number: "",
+            tax_rate: 13,
+            logo_url: "",
+            state_province: "ON",
+            payment_link: "",
+            estimate_template_url: "",
+        })
+        setLogoPreview(null)
+        setClearDataConfirmOpen(false)
+        toast("All data cleared.", "success")
+        const stats = await getStorageStats()
+        setStorageStats(stats)
     }
 
     const priceListCategoryCount = useMemo(() => new Set(priceList.map((item) => item.category)).size, [priceList])
 
-    if (!authResolved || !isAuthenticated || loading) {
+    if (!authResolved) {
         return (
-            <div className="flex items-center justify-center min-h-[50vh]">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
+            <AuthGate
+                loading
+                nextPath="/profile"
+                title="Sign in to manage profile"
+                description="Business details, price lists, PDF branding, and Stripe settings are saved to your account."
+            />
+        )
+    }
+
+    if (!isAuthenticated) {
+        return (
+            <AuthGate
+                loading={false}
+                nextPath="/profile"
+                title="Sign in to manage profile"
+                description="Business details, price lists, PDF branding, and Stripe settings are saved to your account."
+            />
+        )
+    }
+
+    if (loading) {
+        return (
+            <AuthGate
+                loading
+                nextPath="/profile"
+                title="Loading profile"
+                description="Loading business details, price list, PDF settings, and payment connection status."
+                loadingLabel="Loading profile..."
+            />
         )
     }
 
@@ -376,6 +424,53 @@ export default function ProfilePage() {
     const canUsePdfBranding = hasPdfBrandingAccess(currentPlanTier)
     const canUsePdfTemplate = hasPdfTemplateAccess(currentPlanTier)
     const stripeStatusLabel = getStripeStatusLabel(stripeConnectStatus)
+    const hasBusinessDetails = Boolean(profile.business_name.trim())
+    const hasContactDetails = Boolean(profile.phone.trim() || profile.email.trim())
+    const hasPaymentDestination = Boolean(stripeConnectStatus?.connected && stripeConnectStatus.chargesEnabled) || Boolean(profile.payment_link?.trim())
+    const hasStarterPricing = priceList.length > 0
+    const setupStepCount = [hasBusinessDetails, hasContactDetails, hasPaymentDestination, hasStarterPricing].filter(Boolean).length
+    const setupSteps = [
+        {
+            label: "Business",
+            description: hasBusinessDetails ? profile.business_name : "Add the company name used on PDFs.",
+            status: hasBusinessDetails ? "Ready" : "Required",
+            href: "#business-details",
+            ready: hasBusinessDetails,
+            icon: Building2,
+            testId: "profile-setup-business-details",
+        },
+        {
+            label: "Contact",
+            description: hasContactDetails ? "Phone or email is available for customers." : "Add phone or email for customer-ready estimates.",
+            status: hasContactDetails ? "Ready" : "Missing",
+            href: "#business-details",
+            ready: hasContactDetails,
+            icon: Users,
+            testId: "profile-setup-contact",
+        },
+        {
+            label: "Payments",
+            description: hasPaymentDestination ? "A payment destination is available." : "Connect Stripe or add a manual payment link.",
+            status: hasPaymentDestination ? "Ready" : "Setup",
+            href: "#stripe-connect",
+            ready: hasPaymentDestination,
+            icon: CreditCard,
+            testId: "profile-setup-payments",
+        },
+        {
+            label: "Prices",
+            description: hasStarterPricing ? `${priceList.length} saved item${priceList.length === 1 ? "" : "s"}.` : "Add repeatable labor, service, or part prices.",
+            status: hasStarterPricing ? "Ready" : "Empty",
+            href: "#price-list",
+            ready: hasStarterPricing,
+            icon: DollarSign,
+            testId: "profile-setup-price-list",
+        },
+    ]
+    const canSaveProfile = Boolean(profile.business_name.trim())
+        && Number.isFinite(Number(profile.tax_rate ?? 0))
+        && Number(profile.tax_rate ?? 0) >= 0
+        && Number(profile.tax_rate ?? 0) <= 100
 
     const handleExportBackup = async () => {
         try {
@@ -388,37 +483,33 @@ export default function ProfilePage() {
             link.download = `snapquote-backup-${new Date().toISOString().split("T")[0]}.json`
             link.click()
             URL.revokeObjectURL(url)
-            toast("✅ Backup exported.", "success")
+            toast("Backup exported.", "success")
         } catch (error) {
             console.error("Failed to export backup:", error)
-            toast("❌ Failed to export backup.", "error")
+            toast("Failed to export backup.", "error")
         }
     }
 
     return (
-        <div className="mx-auto max-w-5xl space-y-6 px-4 pb-20 pt-6">
-            <Card className="overflow-hidden border-primary/[0.15] bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
-                <CardContent className="space-y-6 p-6">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="space-y-3">
-                            <div className="w-fit rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-white">
-                                Business Profile
-                            </div>
-                            <div className="space-y-2">
-                                <h1 className="text-3xl font-semibold tracking-[-0.04em]">Branding, payments, and workspace setup</h1>
-                                <p className="max-w-2xl text-sm leading-6 text-slate-300">
-                                    Configure what customers see on PDFs, manage company-owned payments, and keep team and pricing operations aligned from one control surface.
-                                </p>
-                            </div>
+        <div className="profile-console field-app min-h-screen px-4 pb-28 pt-5">
+            <div className="mx-auto max-w-5xl space-y-5">
+            <section className="field-panel p-3 sm:p-5" data-testid="profile-command-center">
+                <div className="space-y-3 sm:space-y-5">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                            <h1 className="text-2xl font-semibold tracking-tight text-white">Business Profile</h1>
+                            <p className="mt-1 hidden max-w-2xl text-sm leading-6 text-slate-400 sm:block">
+                                Branding, payments, and workspace setup for customer-ready estimates.
+                            </p>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <span className="rounded-full border border-white/[0.15] bg-white/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-white">
+                        <div className="flex items-center gap-2">
+                            <span className="rounded-lg border border-white/[0.15] bg-slate-950/60 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-300">
                                 {currentPlanTier}
                             </span>
                             <Button
-                                className="bg-white text-slate-950 hover:bg-slate-100"
+                                className="h-10 rounded-lg"
                                 onClick={handleSave}
-                                disabled={saving}
+                                disabled={saving || !canSaveProfile}
                             >
                                 {saving ? (
                                     <>
@@ -435,97 +526,139 @@ export default function ProfilePage() {
                         </div>
                     </div>
 
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-2 sm:gap-3 xl:grid-cols-4">
+                        <div className="field-mini">
                             <div className="flex items-center justify-between">
-                                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">PDF branding</p>
-                                <Sparkles className="h-4 w-4 text-slate-400" />
+                                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400 sm:text-xs sm:tracking-[0.2em]">PDF</p>
+                                <Sparkles className="hidden h-4 w-4 text-slate-400 sm:block" />
                             </div>
-                            <p className="mt-3 text-2xl font-semibold">{canUsePdfTemplate ? "Pro kit" : canUsePdfBranding ? "Starter kit" : "Locked"}</p>
-                            <p className="mt-1 text-xs text-slate-400">
+                            <p className="mt-2 text-sm font-semibold leading-5 sm:mt-3 sm:text-2xl">{canUsePdfTemplate ? "Pro kit" : canUsePdfBranding ? "Starter" : "Locked"}</p>
+                            <p className="mt-1 hidden text-xs text-slate-400 sm:block">
                                 {canUsePdfTemplate ? "Logo and full-page template unlocked" : canUsePdfBranding ? "Logo branding unlocked" : "Upgrade to unlock branded PDFs"}
                             </p>
                         </div>
-                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div className="field-mini">
                             <div className="flex items-center justify-between">
-                                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Stripe</p>
-                                <CreditCard className="h-4 w-4 text-slate-400" />
+                                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400 sm:text-xs sm:tracking-[0.2em]">Stripe</p>
+                                <CreditCard className="hidden h-4 w-4 text-slate-400 sm:block" />
                             </div>
-                            <p className="mt-3 text-2xl font-semibold">{stripeStatusLabel}</p>
-                            <p className="mt-1 text-xs text-slate-400">
+                            <p className="mt-2 line-clamp-2 text-sm font-semibold leading-5 sm:mt-3 sm:text-2xl">{stripeStatusLabel}</p>
+                            <p className="mt-1 hidden text-xs text-slate-400 sm:block">
                                 {stripeConnectStatus?.accountId ? stripeConnectStatus.accountId : "No company payment account linked yet"}
                             </p>
                         </div>
-                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div className="field-mini">
                             <div className="flex items-center justify-between">
-                                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Price list</p>
-                                <DollarSign className="h-4 w-4 text-slate-400" />
+                                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400 sm:text-xs sm:tracking-[0.2em]">Prices</p>
+                                <DollarSign className="hidden h-4 w-4 text-slate-400 sm:block" />
                             </div>
-                            <p className="mt-3 text-2xl font-semibold">{priceList.length}</p>
-                            <p className="mt-1 text-xs text-slate-400">{priceListCategoryCount} active pricing categories</p>
+                            <p className="mt-2 text-sm font-semibold leading-5 sm:mt-3 sm:text-2xl">{priceList.length}</p>
+                            <p className="mt-1 hidden text-xs text-slate-400 sm:block">{priceListCategoryCount} active pricing categories</p>
                         </div>
-                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div className="field-mini">
                             <div className="flex items-center justify-between">
-                                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Local storage</p>
-                                <Database className="h-4 w-4 text-slate-400" />
+                                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-400 sm:text-xs sm:tracking-[0.2em]">Local</p>
+                                <Database className="hidden h-4 w-4 text-slate-400 sm:block" />
                             </div>
-                            <p className="mt-3 text-2xl font-semibold">{storageStats.estimateCount}</p>
-                            <p className="mt-1 text-xs text-slate-400">{storageStats.storageUsed} used in this browser</p>
+                            <p className="mt-2 text-sm font-semibold leading-5 sm:mt-3 sm:text-2xl">{storageStats.estimateCount}</p>
+                            <p className="mt-1 hidden text-xs text-slate-400 sm:block">{storageStats.storageUsed} used in this browser</p>
                         </div>
                     </div>
-                </CardContent>
-            </Card>
 
-            <div className="grid gap-6 xl:grid-cols-[1.08fr_0.92fr]">
-                <div className="space-y-6">
-                    <Card className="border-primary/20">
-                        <CardHeader className="pb-3">
+                    <div className="rounded-lg border border-white/10 bg-slate-950/55 p-2.5 sm:p-3" data-testid="profile-setup-guide">
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500 sm:text-xs sm:tracking-[0.18em]">Setup path</p>
+                                <p className="mt-1 text-sm font-semibold text-white">{setupStepCount}/4 quote-ready settings complete</p>
+                            </div>
+                            <Button
+                                asChild
+                                size="sm"
+                                className="h-9 shrink-0 rounded-lg"
+                            >
+                                <a href="#business-details">Finish setup</a>
+                            </Button>
+                        </div>
+                        <div className="mt-2 grid grid-cols-4 gap-1.5 sm:mt-3 sm:grid-cols-2 sm:gap-2 xl:grid-cols-4">
+                            {setupSteps.map((step) => {
+                                const Icon = step.icon
+
+                                return (
+                                    <a
+                                        key={step.label}
+                                        href={step.href}
+                                        className="rounded-lg border border-white/10 bg-slate-900/60 p-2 transition-colors hover:border-blue-300/30 hover:bg-slate-900 sm:p-3"
+                                        data-testid={step.testId}
+                                    >
+                                        <div className="space-y-2">
+                                            <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-white sm:gap-2 sm:text-sm">
+                                                <Icon className="hidden h-4 w-4 shrink-0 text-blue-200 sm:block" />
+                                                <span className="truncate">{step.label}</span>
+                                            </span>
+                                            <span className={`inline-flex w-fit items-center gap-1 rounded-lg border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] sm:px-2 sm:text-[10px] sm:tracking-[0.14em] ${step.ready ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-200" : "border-amber-300/25 bg-amber-400/10 text-amber-200"}`}>
+                                                {step.ready ? <CheckCircle2 className="h-3 w-3" /> : null}
+                                                {step.status}
+                                            </span>
+                                        </div>
+                                        <p className="mt-2 hidden text-xs leading-5 text-slate-400 sm:line-clamp-2">{step.description}</p>
+                                    </a>
+                                )
+                            })}
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start" data-testid="profile-workbench">
+                <div className="flex min-w-0 flex-col gap-6" data-testid="profile-primary-column">
+                    <Card className="field-card order-2" data-testid="pdf-branding-card">
+                        <CardHeader className="p-4 pb-3">
                             <div className="flex items-start justify-between gap-3">
                                 <div>
-                                    <CardTitle className="flex items-center gap-2 text-lg">
+                                    <CardTitle className="flex items-center gap-2 text-lg text-white">
                                         <Sparkles className="h-5 w-5" />
                                         PDF Branding Kit
                                     </CardTitle>
-                                    <CardDescription>
+                                    <CardDescription className="text-slate-400">
                                         Make estimate PDFs look like your company, not generic software.
                                     </CardDescription>
                                 </div>
-                                <span className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-primary">
+                                <span className="rounded-lg border border-blue-400/20 bg-blue-500/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-blue-200">
                                     {currentPlanTier}
                                 </span>
                             </div>
                         </CardHeader>
-                        <CardContent className="space-y-3">
-                            <div className={`rounded-2xl border p-4 ${canUsePdfBranding ? "border-emerald-300 bg-emerald-50/70" : "border-amber-300 bg-amber-50/70"}`}>
+                        <CardContent className="space-y-3 p-4 pt-0">
+                            <div className={`profile-box-strong ${canUsePdfBranding ? "border-emerald-400/25 bg-emerald-500/10" : "border-amber-400/25 bg-amber-500/10"}`}>
                                 <div className="flex items-center justify-between gap-3">
                                     <div>
-                                        <p className="text-sm font-semibold text-slate-900">Starter Branding</p>
-                                        <p className="text-xs text-slate-700">
+                                        <p className="text-sm font-semibold text-white">Starter Branding</p>
+                                        <p className="text-xs text-slate-400">
                                             Add your company logo so the PDF header looks like your business.
                                         </p>
                                     </div>
-                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-700">
+                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-300">
                                         {canUsePdfBranding ? "Unlocked" : "Starter+"}
                                     </span>
                                 </div>
                             </div>
 
-                            <div className={`rounded-2xl border p-4 ${canUsePdfTemplate ? "border-sky-300 bg-sky-50/70" : "border-slate-200 bg-slate-50"}`}>
+                            <div className={`profile-box-strong ${canUsePdfTemplate ? "border-sky-400/25 bg-sky-500/10" : "border-white/10 bg-slate-950/55"}`}>
                                 <div className="flex items-center justify-between gap-3">
                                     <div>
-                                        <p className="text-sm font-semibold text-slate-900">Pro Template Background</p>
-                                        <p className="text-xs text-slate-700">
+                                        <p className="text-sm font-semibold text-white">Pro Template Background</p>
+                                        <p className="text-xs text-slate-400">
                                             Upload a full-page estimate background for a custom branded PDF layout.
                                         </p>
                                     </div>
-                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-700">
+                                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-300">
                                         {canUsePdfTemplate ? "Unlocked" : "Pro+"}
                                     </span>
                                 </div>
                             </div>
 
                             {!canUsePdfBranding ? (
-                                <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm text-slate-700">
+                                <div className="profile-box text-sm">
                                     Upgrade to Starter to unlock logo branding on PDFs, or Pro to unlock a full custom background template.
                                     <div className="mt-3">
                                         <Button asChild size="sm">
@@ -537,23 +670,23 @@ export default function ProfilePage() {
                         </CardContent>
                     </Card>
 
-                    <Card>
-                        <CardHeader className="pb-3">
-                            <CardTitle className="flex items-center gap-2 text-lg">
+                    <Card className="field-card order-1 scroll-mt-24" id="business-details" data-testid="business-details-card">
+                        <CardHeader className="p-4 pb-3">
+                            <CardTitle className="flex items-center gap-2 text-lg text-white">
                                 <Building2 className="h-5 w-5" />
                                 Business Details
                             </CardTitle>
-                            <CardDescription>
+                            <CardDescription className="text-slate-400">
                                 This information appears on estimates, PDFs, and fallback payment details.
                             </CardDescription>
                         </CardHeader>
-                        <CardContent className="space-y-4">
+                        <CardContent className="space-y-4 p-4 pt-0">
                     {/* Logo Upload */}
                     <div className="space-y-2">
-                        <Label>Business Logo</Label>
+                        <Label htmlFor="business-logo-upload">Business Logo</Label>
                         <div className="flex items-center gap-4">
                             {logoPreview ? (
-                                <div className="relative w-24 h-24 border-2 border-muted rounded-lg overflow-hidden">
+                                <div className="relative h-24 w-24 overflow-hidden rounded-lg border border-white/10 bg-slate-950">
                                     <Image
                                         src={logoPreview}
                                         alt="Business Logo"
@@ -561,26 +694,29 @@ export default function ProfilePage() {
                                         className="object-contain p-2"
                                     />
                                     <button
+                                        type="button"
                                         onClick={handleRemoveLogo}
-                                        className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 hover:bg-destructive/90"
+                                        className="absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-lg border border-white/20 bg-red-600/90 text-white shadow-lg transition-colors hover:bg-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                                        aria-label="Remove business logo"
                                     >
-                                        <X className="h-3 w-3" />
+                                        <X className="h-4 w-4" />
                                     </button>
                                 </div>
                             ) : (
-                                <div className="w-24 h-24 border-2 border-dashed border-muted-foreground/25 rounded-lg flex items-center justify-center bg-muted/50">
-                                    <Upload className="h-6 w-6 text-muted-foreground" />
+                                <div className="flex h-24 w-24 items-center justify-center rounded-lg border border-dashed border-white/20 bg-slate-950/70">
+                                    <Upload className="h-6 w-6 text-slate-500" />
                                 </div>
                             )}
                             <div className="flex-1">
                                 <Input
+                                    id="business-logo-upload"
                                     type="file"
                                     accept="image/*"
                                     onChange={handleLogoUpload}
                                     disabled={uploading || !canUsePdfBranding}
                                     className="cursor-pointer"
                                 />
-                                <p className="text-xs text-muted-foreground mt-1">
+                                <p className="profile-note mt-1">
                                     {canUsePdfBranding
                                         ? "Upload your company logo (appears on PDF header)"
                                         : "Starter or above unlocks logo branding on estimate PDFs."}
@@ -591,10 +727,10 @@ export default function ProfilePage() {
 
                     {/* Estimate Template Upload */}
                     <div className="space-y-2">
-                        <Label>Estimate Template Background</Label>
+                        <Label htmlFor="estimate-template-upload">Estimate Template Background</Label>
                         <div className="flex items-center gap-4">
                             {profile.estimate_template_url ? (
-                                <div className="relative w-24 h-32 border-2 border-primary/50 rounded-lg overflow-hidden bg-muted">
+                                <div className="relative h-32 w-24 overflow-hidden rounded-lg border border-blue-400/30 bg-slate-950">
                                     <Image
                                         src={profile.estimate_template_url}
                                         alt="Estimate Template"
@@ -602,20 +738,23 @@ export default function ProfilePage() {
                                         className="object-contain p-1"
                                     />
                                     <button
+                                        type="button"
                                         onClick={() => setProfile({ ...profile, estimate_template_url: "" })}
-                                        className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 hover:bg-destructive/90"
+                                        className="absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-lg border border-white/20 bg-red-600/90 text-white shadow-lg transition-colors hover:bg-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                                        aria-label="Remove estimate template background"
                                     >
-                                        <X className="h-3 w-3" />
+                                        <X className="h-4 w-4" />
                                     </button>
                                 </div>
                             ) : (
-                                <div className="w-24 h-32 border-2 border-dashed border-primary/30 rounded-lg flex flex-col items-center justify-center bg-primary/5">
-                                    <Upload className="h-5 w-5 text-primary/50 mb-1" />
-                                    <span className="text-[10px] text-primary/50">A4</span>
+                                <div className="flex h-32 w-24 flex-col items-center justify-center rounded-lg border border-dashed border-blue-400/25 bg-slate-950/70">
+                                    <Upload className="mb-1 h-5 w-5 text-blue-300/60" />
+                                    <span className="text-[10px] text-blue-200/60">A4</span>
                                 </div>
                             )}
                             <div className="flex-1">
                                 <Input
+                                    id="estimate-template-upload"
                                     type="file"
                                     accept="image/*"
                                     disabled={!canUsePdfTemplate}
@@ -631,16 +770,16 @@ export default function ProfilePage() {
                                     }}
                                     className="cursor-pointer"
                                 />
-                                <p className="text-xs text-muted-foreground mt-1">
+                                <p className="profile-note mt-1">
                                     {canUsePdfTemplate
                                         ? "Upload a company estimate background image. It will render behind every PDF page."
                                         : "Upgrade to Pro or Team to upload a full-page branded PDF template."}
                                 </p>
-                                <p className="text-[10px] text-muted-foreground">
+                                <p className="text-[10px] text-slate-500">
                                     Recommended: A4-sized image. Starter unlocks logo branding. Pro unlocks the full-page background.
                                 </p>
                                 {!canUsePdfTemplate && (
-                                    <div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+                                    <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500">
                                         <Lock className="h-3 w-3" />
                                         Pro branding kit required
                                     </div>
@@ -657,6 +796,9 @@ export default function ProfilePage() {
                             onChange={(e) => setProfile({ ...profile, business_name: e.target.value })}
                             placeholder="Your Company Name"
                         />
+                        {!profile.business_name.trim() ? (
+                            <p className="profile-note text-amber-300">Enter a business name before saving.</p>
+                        ) : null}
                     </div>
 
                     <div className="space-y-2">
@@ -669,7 +811,7 @@ export default function ProfilePage() {
                                 placeholder="https://venmo.com/u/yourname or Stripe Link"
                             />
                         </div>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="profile-note">
                             Optional fallback for Venmo/PayPal/CashApp links.
                             Stripe card payment links are now managed through Stripe Connect below.
                         </p>
@@ -712,7 +854,7 @@ export default function ProfilePage() {
                             id="state_province"
                             value={profile.state_province || "ON"}
                             onChange={(e) => setProfile({ ...profile, state_province: e.target.value })}
-                            className="flex h-11 w-full rounded-xl border border-input/80 bg-background/80 px-3.5 py-2 text-sm shadow-[0_14px_28px_-22px_rgba(15,23,42,0.8)] transition-[border-color,box-shadow,background-color] duration-200 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+                            className="flex h-11 w-full rounded-lg border border-white/10 bg-slate-950/70 px-3.5 py-2 text-sm text-white shadow-none transition-[border-color,box-shadow,background-color] duration-200 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <option value="ON">Ontario (Canada)</option>
                             <option value="BC">British Columbia (Canada)</option>
@@ -723,7 +865,7 @@ export default function ProfilePage() {
                             <option value="FL">Florida (USA)</option>
                             <option value="OTHER">Other / General</option>
                         </select>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="profile-note">
                             Required legal disclaimers will be added to PDF based on this.
                         </p>
                     </div>
@@ -736,7 +878,7 @@ export default function ProfilePage() {
                             onChange={(e) => setProfile({ ...profile, license_number: e.target.value })}
                             placeholder="LIC-123456"
                         />
-                        <p className="text-xs text-muted-foreground">
+                        <p className="profile-note">
                             Your trade license number (will appear on PDF footer)
                         </p>
                     </div>
@@ -750,34 +892,37 @@ export default function ProfilePage() {
                             onChange={(e) => setProfile({ ...profile, tax_rate: Number(e.target.value) })}
                             placeholder="13"
                         />
-                        <p className="text-xs text-muted-foreground">
+                        <p className="profile-note">
                             HST/GST rate for your region (e.g., Ontario = 13%)
                         </p>
+                        {!Number.isFinite(Number(profile.tax_rate ?? 0)) || Number(profile.tax_rate ?? 0) < 0 || Number(profile.tax_rate ?? 0) > 100 ? (
+                            <p className="profile-note text-amber-300">Use a tax rate between 0 and 100.</p>
+                        ) : null}
                     </div>
                         </CardContent>
                     </Card>
                 </div>
 
-                <div className="space-y-6">
-                    <Card className="border-primary/30">
-                        <CardHeader className="pb-3">
-                            <CardTitle className="flex items-center gap-2 text-lg">
+                <div className="min-w-0 space-y-6" data-testid="profile-operations-panel">
+                    <Card className="field-card scroll-mt-24" id="stripe-connect" data-testid="stripe-connect-card">
+                        <CardHeader className="p-4 pb-3">
+                            <CardTitle className="flex items-center gap-2 text-lg text-white">
                                 <CreditCard className="h-5 w-5" />
                                 Stripe Connect
                             </CardTitle>
-                            <CardDescription>
+                            <CardDescription className="text-slate-400">
                                 Each business manages its own payments, payouts, refunds, and disputes in Stripe.
                             </CardDescription>
                         </CardHeader>
-                        <CardContent className="space-y-3">
+                        <CardContent className="space-y-3 p-4 pt-0">
                     {stripeStatusLoading ? (
-                        <p className="text-sm text-muted-foreground flex items-center gap-2">
+                        <p className="flex items-center gap-2 text-sm text-slate-400">
                             <Loader2 className="h-4 w-4 animate-spin" />
                             Loading Stripe status...
                         </p>
                     ) : (
                         <>
-                            <div className="rounded-2xl border border-border/70 p-4 bg-muted/40">
+                            <div className="profile-box-strong">
                                 {!stripeConnectStatus ? (
                                     <p className="text-sm text-muted-foreground">
                                         Log in to connect your company Stripe account.
@@ -786,18 +931,18 @@ export default function ProfilePage() {
                                     <div className="space-y-1">
                                         <p className="text-sm font-medium text-emerald-700">Connected and ready to accept card payments.</p>
                                         {stripeConnectStatus.accountId && (
-                                            <p className="text-xs text-muted-foreground font-mono">{stripeConnectStatus.accountId}</p>
+                                        <p className="font-mono text-xs text-slate-500">{stripeConnectStatus.accountId}</p>
                                         )}
                                     </div>
                                 ) : stripeConnectStatus.connected ? (
                                     <div className="space-y-1">
                                         <p className="text-sm font-medium text-amber-700">Connected, but onboarding is incomplete.</p>
                                         {stripeConnectStatus.accountId && (
-                                            <p className="text-xs text-muted-foreground font-mono">{stripeConnectStatus.accountId}</p>
+                                        <p className="font-mono text-xs text-slate-500">{stripeConnectStatus.accountId}</p>
                                         )}
                                     </div>
                                 ) : (
-                                    <p className="text-sm text-muted-foreground">
+                                    <p className="text-sm text-slate-400">
                                         Stripe is not connected yet.
                                     </p>
                                 )}
@@ -805,7 +950,7 @@ export default function ProfilePage() {
 
                             <div className="flex flex-wrap gap-2">
                                 <Button
-                                    className="flex-1"
+                                    className="flex-1 rounded-lg"
                                     onClick={handleConnectStripe}
                                     disabled={stripeConnecting}
                                 >
@@ -824,8 +969,11 @@ export default function ProfilePage() {
 
                                 <Button
                                     variant="outline"
+                                    className="rounded-lg border-white/10 bg-slate-900/70 text-white"
                                     onClick={handleOpenStripeDashboard}
                                     disabled={stripeDashboardLoading || !stripeConnectStatus?.connected}
+                                    aria-label="Open Stripe dashboard"
+                                    title="Open Stripe dashboard"
                                 >
                                     {stripeDashboardLoading ? (
                                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -836,17 +984,20 @@ export default function ProfilePage() {
 
                                 <Button
                                     variant="ghost"
+                                    className="rounded-lg text-slate-300 hover:bg-white/10"
                                     onClick={loadStripeConnectStatus}
                                     disabled={stripeStatusLoading}
+                                    aria-label="Refresh Stripe status"
+                                    title="Refresh Stripe status"
                                 >
                                     <RefreshCw className={`h-4 w-4 ${stripeStatusLoading ? "animate-spin" : ""}`} />
                                 </Button>
                             </div>
 
                             {!stripeConnectStatus?.connected && (
-                                <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-                                    <p className="text-xs text-blue-200 leading-relaxed text-center">
-                                        💡 Connect your bank account with Stripe, our secure payment partner, to start receiving Credit Card and Apple Pay payments directly through SnapQuote. (Takes ~3 minutes)
+                                <div className="mt-4 rounded-lg border border-blue-500/20 bg-blue-500/10 p-3">
+                                    <p className="text-center text-xs leading-relaxed text-blue-200">
+                                        Connect your bank account with Stripe, our secure payment partner, to start receiving Credit Card and Apple Pay payments directly through SnapQuote. Takes about 3 minutes.
                                     </p>
                                 </div>
                             )}
@@ -855,21 +1006,21 @@ export default function ProfilePage() {
                         </CardContent>
                     </Card>
 
-                    <Card className="border-border/70">
-                        <CardHeader className="pb-3">
-                            <CardTitle className="flex items-center gap-2 text-lg">
+                    <Card className="field-card">
+                        <CardHeader className="p-4 pb-3">
+                            <CardTitle className="flex items-center gap-2 text-lg text-white">
                                 <Link2 className="h-5 w-5" />
                                 QuickBooks Entry Point
                             </CardTitle>
-                            <CardDescription>
+                            <CardDescription className="text-slate-400">
                                 Invoice sync is managed from History so you can push won estimates into QuickBooks with live record context.
                             </CardDescription>
                         </CardHeader>
-                        <CardContent className="space-y-3">
-                            <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                        <CardContent className="space-y-3 p-4 pt-0">
+                            <div className="profile-box text-sm">
                                 Open History to connect QuickBooks, review sync status, and push sent or paid estimates into your company ledger.
                             </div>
-                            <Button asChild variant="outline" className="w-full">
+                            <Button asChild variant="outline" className="w-full rounded-lg border-white/10 bg-slate-900/70 text-white">
                                 <Link href="/history">Open History & QuickBooks</Link>
                             </Button>
                         </CardContent>
@@ -877,59 +1028,59 @@ export default function ProfilePage() {
 
                     <ReferralStatusCard />
 
-                    <Card>
-                        <CardHeader className="pb-3">
-                            <CardTitle className="flex items-center gap-2 text-lg">
+                    <Card className="field-card">
+                        <CardHeader className="p-4 pb-3">
+                            <CardTitle className="flex items-center gap-2 text-lg text-white">
                                 App Language
                             </CardTitle>
                         </CardHeader>
-                        <CardContent>
+                        <CardContent className="p-4 pt-0">
                             <LanguageSelector />
                         </CardContent>
                     </Card>
 
-                    <Card className="border-primary/20">
-                        <CardHeader className="pb-3">
-                            <CardTitle className="flex items-center gap-2 text-lg">
+                    <Card className="field-card">
+                        <CardHeader className="p-4 pb-3">
+                            <CardTitle className="flex items-center gap-2 text-lg text-white">
                                 <Users className="h-5 w-5" />
                                 Team Workspace
                             </CardTitle>
-                            <CardDescription>
+                            <CardDescription className="text-slate-400">
                                 Team plan members can invite crew, share synced estimates, and standardize quoting across the workspace.
                             </CardDescription>
                         </CardHeader>
-                        <CardContent className="space-y-3">
-                            <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                        <CardContent className="space-y-3 p-4 pt-0">
+                            <div className="profile-box text-sm">
                                 Team workspace access is live. Invite members, manage crew roles, and review synced estimate activity from one shared feed.
                             </div>
-                            <Button asChild variant="outline" className="w-full">
+                            <Button asChild variant="outline" className="w-full rounded-lg border-white/10 bg-slate-900/70 text-white">
                                 <Link href="/team">Open Team Workspace</Link>
                             </Button>
                         </CardContent>
                     </Card>
 
-                    <Card>
-                        <CardHeader className="pb-3">
+                    <Card className="field-card scroll-mt-24" id="price-list" data-testid="price-list-card">
+                        <CardHeader className="p-4 pb-3">
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <DollarSign className="h-5 w-5" />
-                                    <CardTitle className="text-lg">My Price List</CardTitle>
+                                    <CardTitle className="text-lg text-white">My Price List</CardTitle>
                                 </div>
-                                <Button size="sm" onClick={handleAddPriceItem}>
+                                <Button size="sm" className="rounded-lg" onClick={handleAddPriceItem}>
                                     <Plus className="h-4 w-4 mr-1" />
                                     Add
                                 </Button>
                             </div>
-                            <CardDescription>
+                            <CardDescription className="text-slate-400">
                                 AI will use these fixed prices for consistent estimates.
                             </CardDescription>
                         </CardHeader>
-                        <CardContent className="space-y-2">
+                        <CardContent className="space-y-2 p-4 pt-0">
                     {priceList.length === 0 ? (
-                        <div className="text-center py-6 text-muted-foreground">
-                            <DollarSign className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                            <p className="text-sm">No price items yet.</p>
-                            <p className="text-xs">Add items to ensure consistent pricing.</p>
+                        <div className="profile-box py-6 text-center">
+                            <DollarSign className="mx-auto mb-2 h-8 w-8 text-slate-500" />
+                            <p className="text-sm font-medium text-white">No price items yet.</p>
+                            <p className="text-xs text-slate-500">Add items to ensure consistent pricing.</p>
                         </div>
                     ) : (
                         <div className="space-y-2">
@@ -938,22 +1089,22 @@ export default function ProfilePage() {
                                 if (items.length === 0) return null
                                 return (
                                     <div key={category}>
-                                        <p className="text-xs font-semibold text-muted-foreground mb-1">{category}</p>
+                                        <p className="mb-1 text-xs font-semibold text-slate-500">{category}</p>
                                         {items.map(item => (
-                                            <div key={item.id} className="flex items-center justify-between p-2 bg-muted rounded-lg">
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="font-medium text-sm truncate">{item.name}</p>
-                                                    <p className="text-xs text-muted-foreground">
+                                            <div key={item.id} className="flex items-start justify-between gap-2 rounded-lg border border-white/10 bg-slate-950/55 p-2">
+                                                <div className="min-w-0 flex-1">
+                                                    <p className="line-clamp-3 break-words text-sm font-medium leading-5 text-white [overflow-wrap:anywhere]">{item.name}</p>
+                                                    <p className="mt-0.5 line-clamp-3 break-words text-xs leading-4 text-slate-500 [overflow-wrap:anywhere]">
                                                         ${item.price}/{item.unit}
                                                         {item.keywords.length > 0 && ` • ${item.keywords.join(", ")}`}
                                                     </p>
                                                 </div>
-                                                <div className="flex gap-1 ml-2">
-                                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEditPriceItem(item)}>
-                                                        <Pencil className="h-3 w-3" />
+                                                <div className="ml-1 flex shrink-0 gap-1">
+                                                    <Button variant="ghost" size="icon" className="rounded-lg text-slate-300 hover:bg-white/10" onClick={() => handleEditPriceItem(item)} aria-label={`Edit ${item.name}`}>
+                                                        <Pencil className="h-4 w-4" />
                                                     </Button>
-                                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeletePriceItem(item.id)}>
-                                                        <Trash2 className="h-3 w-3" />
+                                                    <Button variant="ghost" size="icon" className="rounded-lg text-red-300 hover:bg-red-500/10" onClick={() => handleDeletePriceItem(item)} aria-label={`Delete ${item.name}`}>
+                                                        <Trash2 className="h-4 w-4" />
                                                     </Button>
                                                 </div>
                                             </div>
@@ -966,48 +1117,48 @@ export default function ProfilePage() {
                         </CardContent>
                     </Card>
 
-                    <Card className="border-dashed">
-                        <CardHeader className="pb-3">
-                            <CardTitle className="flex items-center gap-2 text-lg">
+                    <Card className="field-card border-dashed">
+                        <CardHeader className="p-4 pb-3">
+                            <CardTitle className="flex items-center gap-2 text-lg text-white">
                                 <Database className="h-5 w-5" />
                                 Local Data
                             </CardTitle>
-                            <CardDescription>
+                            <CardDescription className="text-slate-400">
                                 Export a browser backup before clearing local data or moving devices.
                             </CardDescription>
                         </CardHeader>
-                        <CardContent className="space-y-4">
+                        <CardContent className="space-y-4 p-4 pt-0">
                             <div className="grid grid-cols-2 gap-4 text-sm">
-                                <div className="rounded-2xl border border-border/70 p-4">
-                                    <p className="text-muted-foreground">Estimates Saved</p>
-                                    <p className="font-bold text-lg">{storageStats.estimateCount}</p>
+                                <div className="profile-box">
+                                    <p className="text-slate-500">Estimates Saved</p>
+                                    <p className="text-lg font-bold text-white">{storageStats.estimateCount}</p>
                                 </div>
-                                <div className="rounded-2xl border border-border/70 p-4">
-                                    <p className="text-muted-foreground">Storage Used</p>
-                                    <p className="font-bold text-lg">{storageStats.storageUsed}</p>
+                                <div className="profile-box">
+                                    <p className="text-slate-500">Storage Used</p>
+                                    <p className="text-lg font-bold text-white">{storageStats.storageUsed}</p>
                                 </div>
                             </div>
-                            <p className="text-xs text-muted-foreground">
+                            <p className="profile-note">
                                 All data is stored locally in your browser for offline-first quoting.
                             </p>
-                            <Button variant="outline" className="w-full" onClick={() => void handleExportBackup()}>
+                            <Button variant="outline" className="w-full rounded-lg border-white/10 bg-slate-900/70 text-white" onClick={() => void handleExportBackup()}>
                                 <ShieldCheck className="mr-2 h-4 w-4" />
                                 Export Backup JSON
                             </Button>
                         </CardContent>
                     </Card>
 
-                    <Card className="border-destructive/50">
-                        <CardHeader className="pb-3">
-                            <CardTitle className="text-lg text-destructive">Danger Zone</CardTitle>
-                            <CardDescription>
+                    <Card className="field-card border-red-500/30">
+                        <CardHeader className="p-4 pb-3">
+                            <CardTitle className="text-lg text-red-300">Danger Zone</CardTitle>
+                            <CardDescription className="text-slate-400">
                                 Clear all estimates and profile data from this browser.
                             </CardDescription>
                         </CardHeader>
-                        <CardContent>
+                        <CardContent className="p-4 pt-0">
                             <Button
                                 variant="destructive"
-                                className="w-full"
+                                className="w-full rounded-lg"
                                 onClick={handleClearData}
                             >
                                 Clear All Data
@@ -1015,6 +1166,7 @@ export default function ProfilePage() {
                         </CardContent>
                     </Card>
                 </div>
+            </div>
             </div>
 
             {/* Price List Modal */}
@@ -1026,6 +1178,21 @@ export default function ProfilePage() {
                 }}
                 onSave={handleSavePriceItem}
                 editItem={editingPriceItem}
+            />
+            <ConfirmDialog
+                open={Boolean(priceItemToDelete)}
+                onClose={() => setPriceItemToDelete(null)}
+                onConfirm={confirmDeletePriceItem}
+                title={priceItemToDelete ? `Delete ${priceItemToDelete.name}?` : "Delete price item?"}
+                description="This removes the saved price item from your local price list. Existing estimates are not changed."
+            />
+            <ConfirmDialog
+                open={clearDataConfirmOpen}
+                onClose={() => setClearDataConfirmOpen(false)}
+                onConfirm={confirmClearData}
+                title="Clear all local data?"
+                description="This deletes estimates, profile details, and locally stored quote data from this browser. This action cannot be undone."
+                confirmLabel="Clear data"
             />
         </div>
     )

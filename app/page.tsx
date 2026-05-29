@@ -1,17 +1,26 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Mic, FileText, ArrowRight, Clock, Send, DollarSign, Sparkles, Languages, Signal, ShieldCheck, Mail } from "lucide-react"
+import {
+  AlertCircle,
+  ArrowRight,
+  Camera,
+  CheckCircle2,
+  ClipboardList,
+  Clock,
+  Keyboard,
+  Mail,
+  Mic,
+  Send,
+} from "lucide-react"
 import dynamic from "next/dynamic"
+import type { Session } from "@supabase/supabase-js"
 
-const OnboardingModal = dynamic(() => import("@/components/onboarding-modal").then(mod => mod.OnboardingModal), { ssr: false })
 const QuickQuoteModal = dynamic(() => import("@/components/quick-quote-modal").then(mod => mod.QuickQuoteModal), { ssr: false })
 const SetupWizard = dynamic(() => import("@/components/setup-wizard").then(mod => mod.SetupWizard), { ssr: false })
-import { isFirstVisit, markOnboardingCompleted } from "@/lib/estimates-storage"
 import { getPriceList } from "@/lib/db"
 import type { PriceListItem } from "@/types"
 import { getEstimatesNeedingFollowUp, type FollowUpItem, generateFollowUpMessage } from "@/lib/follow-up-service"
@@ -22,32 +31,59 @@ import { trackReferralEvent } from "@/lib/referrals"
 const UsagePlanCard = dynamic(() => import("@/components/usage-plan-card").then(mod => mod.UsagePlanCard), { ssr: false })
 import { supabase } from "@/lib/supabase"
 import { FREE_PLAN_MARKETING_QUOTE_LIMIT } from "@/lib/free-tier"
+import { getDraftEstimates, type LocalEstimate } from "@/lib/estimates-storage"
+import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
+import { subscribeOfflineQueueChanged } from "@/lib/offline-events"
 
 const REFERRAL_TOKEN_PATTERN = /^[a-z0-9]{8,32}$/
 const CONNECT_PROMPT_KEY_PREFIX = "snapquote_connect_prompt_seen"
 
-function TypewriterText({ text }: { text: string }) {
-  const [displayText, setDisplayText] = useState("")
+function formatHomeCurrency(amount: number): string {
+  return `$${amount.toLocaleString(undefined, {
+    maximumFractionDigits: 0,
+    minimumFractionDigits: 0,
+  })}`
+}
 
-  useEffect(() => {
-    let index = 0
-    const timer = setInterval(() => {
-      setDisplayText(text.slice(0, index))
-      index++
-      if (index > text.length) clearInterval(timer)
-    }, 30) // Fast typing speed
+function getDraftDisplayName(estimate: LocalEstimate): string {
+  return estimate.clientName || estimate.estimateNumber || "Untitled draft"
+}
 
-    return () => clearInterval(timer)
-  }, [text])
+function getDraftValue(estimate: LocalEstimate): number {
+  if (Number.isFinite(estimate.totalAmount) && estimate.totalAmount > 0) return estimate.totalAmount
+  return getAllItemsFromEstimate(estimate).reduce((sum, item) => sum + lineTotal(item), 0)
+}
 
-  return (
-    <span className="font-mono text-blue-300">{displayText}<span className="animate-pulse">|</span></span>
-  )
+function getDraftPriceTBDCount(estimate: LocalEstimate): number {
+  return getAllItemsFromEstimate(estimate).filter((item) => item.unit_price === 0).length
+}
+
+function getDraftAgeLabel(estimate: LocalEstimate): string {
+  const updatedAt = new Date(estimate.updatedAt || estimate.createdAt)
+  if (Number.isNaN(updatedAt.getTime())) return "Saved locally"
+
+  const minutes = Math.max(0, Math.round((Date.now() - updatedAt.getTime()) / 60000))
+  if (minutes < 1) return "Now"
+  if (minutes < 60) return `${minutes}m`
+
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h`
+
+  const days = Math.round(hours / 24)
+  return `${days}d`
+}
+
+function formatOpenDraftCount(count: number): string {
+  return count === 1 ? "1 open" : `${count} open`
+}
+
+function formatPriceTodoCount(count: number): string {
+  if (count === 0) return "Ready"
+  return count === 1 ? "1 price" : `${count} prices`
 }
 
 export default function Home() {
   const router = useRouter()
-  const [showOnboarding, setShowOnboarding] = useState(false)
   const [priceListItems, setPriceListItems] = useState<PriceListItem[]>([])
   const [selectedQuickItem, setSelectedQuickItem] = useState<PriceListItem | null>(null)
   const [showQuickQuote, setShowQuickQuote] = useState(false)
@@ -56,9 +92,37 @@ export default function Home() {
   const [showSetupWizard, setShowSetupWizard] = useState(false)
   const [authResolved, setAuthResolved] = useState(false)
   const [isSignedIn, setIsSignedIn] = useState(false)
+  const [localDrafts, setLocalDrafts] = useState<LocalEstimate[]>([])
 
   useEffect(() => {
-    if (isFirstVisit()) setShowOnboarding(true)
+    let active = true
+
+    const loadLocalDrafts = async () => {
+      try {
+        const drafts = await getDraftEstimates()
+        if (!active) return
+        setLocalDrafts(drafts)
+      } catch (error) {
+        console.error("Failed to load home draft queue:", error)
+        if (!active) return
+        setLocalDrafts([])
+      }
+    }
+
+    void loadLocalDrafts()
+    const unsubscribe = subscribeOfflineQueueChanged(() => {
+      void loadLocalDrafts()
+    })
+    window.addEventListener("focus", loadLocalDrafts)
+
+    return () => {
+      active = false
+      unsubscribe()
+      window.removeEventListener("focus", loadLocalDrafts)
+    }
+  }, [])
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const referralToken = params.get("ref")?.trim().toLowerCase() || ""
     const sourceParam = params.get("src")?.trim().toLowerCase() || ""
@@ -107,7 +171,7 @@ export default function Home() {
       }
     }
 
-    const checkConnectPrompt = async (session: any) => {
+    const checkConnectPrompt = async (session: Session | null) => {
       if (!active || !session?.user) {
         clearSignedInState()
         return
@@ -156,7 +220,7 @@ export default function Home() {
       }
     }
 
-    const syncSession = async (session: any) => {
+    const syncSession = async (session: Session | null) => {
       if (!active) return
 
       const hasUser = Boolean(session?.user)
@@ -187,12 +251,6 @@ export default function Home() {
     }
   }, [])
 
-  const handleOnboardingComplete = () => {
-    markOnboardingCompleted()
-    setShowOnboarding(false)
-    router.push("/new-estimate")
-  }
-
   const handleQuickQuote = (item: PriceListItem) => {
     setSelectedQuickItem(item)
     setShowQuickQuote(true)
@@ -201,7 +259,7 @@ export default function Home() {
   const handleCopyFollowUp = (item: FollowUpItem) => {
     const text = generateFollowUpMessage(item.estimate.clientName, item.estimate.estimateNumber)
     navigator.clipboard.writeText(text)
-    toast("📋 Message copied!", "success")
+    toast("Message copied.", "success")
   }
 
   const handleOpenEmailFollowUp: (item: FollowUpItem) => void = (item) => {
@@ -219,242 +277,309 @@ export default function Home() {
     : "Quote the job before you drive off."
   const heroSubtitle = isSignedIn
     ? "Capture the scope, clean the draft, and send a professional quote before the next service call starts."
-    : "Built for owner-operators, small crews, and tradespeople who need to turn rough field notes or broken English into a customer-ready quote while the job is still fresh."
+    : "Start with voice, photos, or quick notes. SnapQuote keeps the quote moving while the job is still fresh."
+  const draftQueueSummary = useMemo(() => {
+    return localDrafts.reduce((summary, draft) => {
+      const missingPriceCount = getDraftPriceTBDCount(draft)
+      return {
+        value: summary.value + getDraftValue(draft),
+        needsPricing: summary.needsPricing + missingPriceCount,
+        nextDraft: summary.nextDraft || (missingPriceCount > 0 ? draft : null),
+      }
+    }, { value: 0, needsPricing: 0, nextDraft: null as LocalEstimate | null })
+  }, [localDrafts])
+  const nextHomeDraft = draftQueueSummary.nextDraft || localDrafts[0] || null
+  const hasHomeSidePanel = Boolean(nextHomeDraft || (!isSignedIn && !nextHomeDraft) || (isSignedIn && followUps.length > 0))
 
   return (
     <>
-      <OnboardingModal
-        open={showOnboarding}
-        onClose={() => setShowOnboarding(false)}
-        onComplete={handleOnboardingComplete}
-      />
       <QuickQuoteModal
         open={showQuickQuote}
         onClose={() => setShowQuickQuote(false)}
         item={selectedQuickItem}
       />
 
-      {/* Main Container */}
-      <div className="app-shell flex flex-col min-h-screen pb-32 px-4 pt-6 space-y-6">
-        <div className="ambient-orb left-[-80px] top-10 h-44 w-44 bg-sky-500/20" />
-        <div className="ambient-orb right-[-40px] top-28 h-36 w-36 bg-amber-500/[0.15]" />
-        <div className="ambient-orb bottom-28 left-1/2 h-48 w-48 -translate-x-1/2 bg-cyan-400/10" />
-
-        {/* If Setup Wizard is active, hide the rest of the dashboard */}
+      <div className="field-app flex min-h-screen flex-col space-y-4 px-4 pb-32 pt-4">
         {showSetupWizard && (
           <SetupWizard onComplete={() => setShowSetupWizard(false)} />
         )}
 
-        {/* If not setting up, show the dashboard */}
         {!showSetupWizard && (
           <>
-            {authResolved && (
-              <div className="w-full max-w-sm mx-auto flex justify-end">
-                {isSignedIn ? (
-                  <Link href="/profile" className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
-                    My Account
-                  </Link>
-                ) : (
-                  <Link href="/login?next=%2F" className="text-xs text-gray-400 hover:text-white transition-colors">
-                    Sign In / Sign Up
-                  </Link>
+            <header className="mx-auto flex w-full max-w-sm items-center justify-between gap-3 lg:max-w-4xl">
+              <Link href="/" className="flex min-h-11 min-w-0 items-center gap-2 rounded-lg pr-2" aria-label="SnapQuote home">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white text-sm font-black text-slate-950">
+                  SQ
+                </span>
+                <span className="min-w-0 leading-tight">
+                  <span className="block truncate text-sm font-semibold text-white">SnapQuote</span>
+                  <span className="hidden truncate text-[11px] text-slate-400 min-[430px]:block">Field estimate console</span>
+                </span>
+              </Link>
+              <div className="flex shrink-0 items-center gap-2">
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-2 py-1.5 text-[11px] font-semibold text-emerald-200 min-[430px]:px-2.5"
+                  data-testid="home-offline-status"
+                  title="Offline ready"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span className="sr-only min-[430px]:not-sr-only">Offline ready</span>
+                </span>
+                {authResolved && (
+                  isSignedIn ? (
+                    <Link href="/profile" className="inline-flex min-h-11 items-center rounded-lg px-3 text-xs font-medium text-slate-300 hover:bg-white/5 hover:text-white" data-testid="home-auth-link">
+                      Account
+                    </Link>
+                  ) : (
+                    <Link href="/login?next=%2F" className="inline-flex min-h-11 items-center rounded-lg px-3 text-xs font-medium text-slate-300 hover:bg-white/5 hover:text-white" data-testid="home-auth-link">
+                      Sign in
+                    </Link>
+                  )
                 )}
               </div>
-            )}
+            </header>
 
             {showConnectPrompt && (
-              <Card className="border-blue-500/30 bg-blue-500/5 max-w-sm mx-auto w-full">
-                <CardContent className="pt-5 space-y-3">
+              <div className="field-card mx-auto w-full max-w-sm space-y-3 border-blue-400/25 bg-blue-500/10 p-4 lg:max-w-4xl">
                   <p className="text-sm font-semibold text-blue-300">One-time setup: Connect Stripe</p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs leading-5 text-slate-400">
                     First login is complete. Connect your company Stripe account once to generate card payment links.
                   </p>
                   <div className="flex gap-2">
-                    <Button className="flex-1" onClick={() => router.push("/profile")}>
+                    <Button className="flex-1 bg-blue-600 text-white hover:bg-blue-500" onClick={() => router.push("/profile")}>
                       Connect Now
                     </Button>
                     <Button
                       variant="outline"
+                      className="border-white/10 bg-slate-950/70 text-white hover:bg-slate-900"
                       onClick={() => setShowConnectPrompt(false)}
                     >
                       Later
                     </Button>
                   </div>
-                </CardContent>
-              </Card>
+              </div>
             )}
 
-            {/* Hero Section */}
-            <header className="premium-panel mesh-border mx-auto flex w-full max-w-sm flex-col items-center overflow-hidden px-5 pb-6 pt-5 text-center">
-              <div className="mb-6 flex items-center justify-center p-1 rounded-full border border-white/10 bg-black/40 backdrop-blur-md shadow-inner text-[10px] font-semibold uppercase tracking-[0.15em] w-fit mx-auto cursor-default transition-all hover:bg-black/50">
-                <span className="flex items-center gap-2 rounded-full bg-slate-800/80 px-4 py-1.5 text-slate-100 shadow-sm border border-white/5 pointer-events-none">
-                  <Sparkles className="w-3 h-3 text-blue-400" />
-                  Field Quote Workflow
-                </span>
-                <span className="px-5 py-1.5 text-slate-500 hover:text-slate-300 transition-colors pointer-events-auto">
-                  AI Estimator
-                </span>
-              </div>
-
-              <div className="space-y-4">
-                <h1 className="text-balance text-[2rem] font-semibold leading-[1.05] tracking-[-0.04em] text-white sm:text-[2.4rem]">
+            <div
+              className={`mx-auto grid w-full max-w-sm gap-4 lg:max-w-4xl ${
+                hasHomeSidePanel
+                  ? "lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] lg:items-start"
+                  : "lg:max-w-xl"
+              }`}
+              data-testid="home-workspace"
+            >
+            <section className="field-panel w-full p-3 sm:p-4" data-testid="home-command-center">
+              <div className="space-y-3">
+                <h1 className="text-balance text-[2rem] font-semibold leading-[1.32] text-white" data-testid="home-hero-title">
                   {heroTitle}
                 </h1>
-                <p className="mx-auto max-w-[30rem] text-sm leading-6 text-slate-300">
+                <p className="max-w-[28rem] text-sm leading-6 text-slate-300">
                   {heroSubtitle}
                 </p>
               </div>
 
-              <div className="mt-5 grid w-full grid-cols-3 gap-2 text-left">
-                <div className="premium-card px-3 py-3">
-                  <Signal className="mb-2 h-4 w-4 text-sky-300" />
-                  <p className="text-[11px] font-medium text-white">Weak signal</p>
-                  <p className="mt-1 text-[11px] leading-4 text-slate-400">Draft from the truck, basement, or crawlspace.</p>
-                </div>
-                <div className="premium-card px-3 py-3">
-                  <Languages className="mb-2 h-4 w-4 text-cyan-300" />
-                  <p className="text-[11px] font-medium text-white">Clean English</p>
-                  <p className="mt-1 text-[11px] leading-4 text-slate-400">Normalize rough field talk into a customer-ready draft.</p>
-                </div>
-                <div className="premium-card px-3 py-3">
-                  <ShieldCheck className="mb-2 h-4 w-4 text-amber-300" />
-                  <p className="text-[11px] font-medium text-white">Send on site</p>
-                  <p className="mt-1 text-[11px] leading-4 text-slate-400">Review, send, and collect before heading out.</p>
-                </div>
-              </div>
-
-              <div className="premium-card mt-5 w-full overflow-hidden p-4 text-left relative group">
-                <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-sky-300/70 to-transparent" />
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-400/[0.15] text-sky-200">
-                      <Mic className="w-4 h-4 animate-pulse" />
-                    </div>
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-200">Live field capture</p>
-                      <p className="text-[11px] text-slate-400">Voice note to polished scope draft</p>
-                    </div>
-                  </div>
-                  <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 text-[10px] font-medium text-emerald-200">
-                    Listening
+              <div className="mt-5 grid gap-2">
+                <Link
+                  href="/new-estimate?capture=voice"
+                  className="group flex min-h-[88px] items-center gap-3 rounded-lg border border-blue-300/35 bg-blue-600 px-3 py-3 text-left text-white shadow-[0_20px_36px_-24px_rgba(37,99,235,0.95)] transition-colors hover:bg-blue-500"
+                  data-testid="home-try-free-cta"
+                  aria-label="Start a quote with voice capture"
+                >
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-white text-blue-700">
+                    <Mic className="h-5 w-5" />
                   </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-base font-semibold leading-5">Start voice quote</span>
+                    <span className="mt-1 block text-xs leading-5 text-blue-50">
+                      Talk through scope while you walk the site.
+                    </span>
+                  </span>
+                  <ArrowRight className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+                </Link>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Link
+                    href="/new-estimate?capture=photos"
+                    className="field-action min-h-[74px]"
+                    data-testid="home-photo-cta"
+                    aria-label="Start a quote with photo capture"
+                  >
+                    <Camera className="h-5 w-5" />
+                    <span>Photo scope</span>
+                  </Link>
+                  <Link
+                    href="/new-estimate?capture=type"
+                    className="field-action min-h-[74px]"
+                    data-testid="home-type-cta"
+                    aria-label="Start a quote with typed notes"
+                  >
+                    <Keyboard className="h-5 w-5" />
+                    <span>Type notes</span>
+                  </Link>
                 </div>
-
-                <p className="rounded-2xl border border-white/[0.08] bg-slate-950/60 px-3 py-3 text-sm leading-6 text-slate-200">
-                  <TypewriterText text="Replace damaged trim, reset fixture, patch access, haul away debris..." />
-                </p>
               </div>
-            </header>
 
-            {isSignedIn ? (
-              <Link href="/new-estimate" className="w-full max-w-sm mx-auto block">
-                <Button size="lg" className="w-full h-16 rounded-[24px] bg-blue-600/90 text-lg font-medium text-white shadow-[0_0_30px_rgba(59,130,246,0.3)] transition-all hover:bg-blue-500 hover:scale-[1.02] hover:shadow-[0_0_40px_rgba(59,130,246,0.5)] active:scale-[0.98] backdrop-blur-md border border-blue-500/30">
-                  <Mic className="mr-2 h-6 w-6" />
-                  Create Field Quote
-                </Button>
-                <p className="text-center text-xs text-muted-foreground mt-3">
-                  Tap to speak • Built for weak-signal sites • Review before sending
-                </p>
-              </Link>
-            ) : (
-              <div className="w-full max-w-sm mx-auto space-y-3">
-                <Link href="/landing" className="block" data-testid="home-primary-marketing-cta">
-                  <Button size="lg" className="w-full h-16 rounded-[24px] bg-blue-600/90 text-lg font-medium text-white shadow-[0_0_30px_rgba(59,130,246,0.3)] transition-all hover:bg-blue-500 hover:scale-[1.02] hover:shadow-[0_0_40px_rgba(59,130,246,0.5)] active:scale-[0.98] backdrop-blur-md border border-blue-500/30">
-                    See the Field Workflow
-                    <ArrowRight className="ml-2 h-5 w-5" />
-                  </Button>
-                </Link>
-                <Link href="/new-estimate" className="block" data-testid="home-try-free-cta">
-                  <Button size="lg" variant="outline" className="w-full h-14 rounded-[22px] border-white/[0.15] bg-white/5 text-white hover:bg-white/10">
-                    Try {FREE_PLAN_MARKETING_QUOTE_LIMIT} Free Field Quotes
-                  </Button>
-                </Link>
-                <p className="text-center text-xs text-muted-foreground">
-                  No login required to try a local draft. Sign in when you&apos;re ready to sync, send, and collect payment.
-                </p>
+              <div className="mt-4 grid grid-cols-3 gap-2 text-left" aria-label="Quote workflow status">
+                <div className="field-mini min-h-[60px]">
+                  <p className="text-[11px] font-semibold text-white">Capture</p>
+                  <p className="mt-1 text-[10px] leading-4 text-slate-400">Notes, photos</p>
+                </div>
+                <div className="field-mini min-h-[60px]">
+                  <p className="text-[11px] font-semibold text-white">Review</p>
+                  <p className="mt-1 text-[10px] leading-4 text-slate-400">Prices, terms</p>
+                </div>
+                <div className="field-mini min-h-[60px]">
+                  <p className="text-[11px] font-semibold text-white">Send</p>
+                  <p className="mt-1 text-[10px] leading-4 text-slate-400">PDF, deposit</p>
+                </div>
               </div>
+
+              {!isSignedIn && !nextHomeDraft && (
+                <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-slate-950/70 p-3">
+                  <div>
+                    <p className="text-xs font-semibold text-white">
+                      {FREE_PLAN_MARKETING_QUOTE_LIMIT} free field quotes/month
+                    </p>
+                    <p className="mt-1 text-[11px] leading-4 text-slate-400">
+                      Try a local draft first. Sign in when you need sync, sending, and payments.
+                    </p>
+                  </div>
+                  <Link
+                    href="/landing"
+                    className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/5 px-3 text-sm font-medium text-white transition-colors hover:bg-white/10"
+                    data-testid="home-primary-marketing-cta"
+                  >
+                    Tour
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              )}
+            </section>
+
+            {nextHomeDraft ? (
+              <section
+                className="field-card w-full border-amber-300/20 bg-amber-500/10 p-4"
+                data-testid="home-draft-queue"
+              >
+                <div className="flex gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-amber-300/25 bg-amber-300/10 text-amber-100">
+                    {draftQueueSummary.needsPricing > 0 ? (
+                      <AlertCircle className="h-5 w-5" />
+                    ) : (
+                      <ClipboardList className="h-5 w-5" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-amber-50">
+                          {draftQueueSummary.needsPricing > 0 ? "Next quote to finish" : "Resume latest draft"}
+                        </p>
+                        <p className="mt-1 truncate text-sm font-semibold text-white" data-testid="home-draft-next-title">
+                          {getDraftDisplayName(nextHomeDraft)}
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded-md border border-amber-300/20 bg-amber-300/10 px-2 py-1 text-[10px] font-semibold text-amber-100">
+                        {formatOpenDraftCount(localDrafts.length)}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      <div className="rounded-md border border-white/10 bg-slate-950/35 px-2 py-2">
+                        <p className="text-[10px] uppercase tracking-[0.12em] text-amber-100/60">Value</p>
+                        <p className="mt-1 text-sm font-semibold text-white" data-testid="home-draft-value">
+                          {formatHomeCurrency(draftQueueSummary.value)}
+                        </p>
+                      </div>
+                      <div className="rounded-md border border-white/10 bg-slate-950/35 px-2 py-2">
+                        <p className="text-[10px] uppercase tracking-[0.12em] text-amber-100/60">Needs</p>
+                        <p className="mt-1 text-sm font-semibold text-white" data-testid="home-draft-needs-pricing">
+                          {formatPriceTodoCount(draftQueueSummary.needsPricing)}
+                        </p>
+                      </div>
+                      <div className="rounded-md border border-white/10 bg-slate-950/35 px-2 py-2">
+                        <p className="text-[10px] uppercase tracking-[0.12em] text-amber-100/60">Fresh</p>
+                        <p className="mt-1 truncate text-sm font-semibold text-white">
+                          {getDraftAgeLabel(nextHomeDraft)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <Button asChild className="h-10 rounded-lg" data-testid="home-draft-edit-action">
+                        <Link href={`/new-estimate?draftId=${encodeURIComponent(nextHomeDraft.id)}`}>
+                          {draftQueueSummary.needsPricing > 0 ? "Finish pricing" : "Resume draft"}
+                        </Link>
+                      </Button>
+                      <Button
+                        asChild
+                        variant="outline"
+                        className="h-10 rounded-lg border-white/10 bg-slate-950/60 text-slate-100 hover:bg-slate-900 hover:text-white"
+                        data-testid="home-draft-workbench-action"
+                      >
+                        <Link href="/drafts">
+                          All drafts
+                        </Link>
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
+            {!isSignedIn && !nextHomeDraft && (
+              <section className="grid w-full gap-3" data-testid="home-signed-out-workflow">
+                <div className="field-section-title">
+                  <span>Draft queue</span>
+                  <Link href="/pricing" className="inline-flex min-h-11 items-center rounded-lg px-3 text-xs font-medium text-blue-300 hover:bg-blue-500/10 hover:text-blue-200" data-testid="home-pricing-link">
+                    Plans
+                  </Link>
+                </div>
+                <div className="field-row" data-testid="home-empty-drafts">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-slate-950">
+                    <ClipboardList className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-white">No local drafts yet</p>
+                    <p className="mt-1 line-clamp-1 text-xs leading-5 text-slate-400">
+                      Start with voice, photos, or typed notes. Saved drafts will appear here.
+                    </p>
+                  </div>
+                  <Link
+                    href="/new-estimate?capture=type"
+                    className="inline-flex min-h-11 shrink-0 items-center rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+                    data-testid="home-empty-drafts-action"
+                    aria-label="Start first quote"
+                  >
+                    Start
+                  </Link>
+                </div>
+              </section>
             )}
 
-            {!isSignedIn && (
-              <div className="w-full max-w-sm mx-auto text-center">
-                <Link href="/pricing" className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
-                  See plans for one truck, higher volume, or a small crew
-                </Link>
-              </div>
-            )}
-
-            {!isSignedIn && (
-              <div className="grid gap-3 max-w-sm mx-auto" data-testid="home-signed-out-workflow">
-                <div className="premium-card premium-card-hover p-4 flex gap-3 items-start">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-300/20 bg-sky-400/[0.15]">
-                    <Mic className="h-4 w-4 text-sky-200" />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-white">Speak the scope once</p>
-                    <p className="text-xs leading-5 text-slate-400">Capture rough field notes while the job is still fresh and before you lose the job details.</p>
-                  </div>
-                </div>
-                <div className="premium-card premium-card-hover p-4 flex gap-3 items-start">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/[0.15]">
-                    <FileText className="h-4 w-4 text-cyan-200" />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-white">Review a clean draft</p>
-                    <p className="text-xs leading-5 text-slate-400">Turn rough or broken English into customer-ready wording with less cleanup after hours.</p>
-                  </div>
-                </div>
-                <div className="premium-card premium-card-hover p-4 flex gap-3 items-start">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-300/20 bg-amber-400/[0.15]">
-                    <DollarSign className="h-4 w-4 text-amber-200" />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-white">Send before you leave</p>
-                    <p className="text-xs leading-5 text-slate-400">Save, send, and collect payment without doing quote work after dinner.</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {!isSignedIn && (
-              <div className="premium-card max-w-sm mx-auto p-4 space-y-3">
-                <p className="text-[11px] font-medium uppercase tracking-wider text-blue-300">
-                  Best fit
-                </p>
-                <div className="space-y-2 text-sm text-slate-300">
-                  <p>Owner-operators quoting from the truck</p>
-                  <p>Weak-signal basements, crawlspaces, and remodel jobs</p>
-                  <p>Teams that need cleaner customer-facing wording fast</p>
-                </div>
-                <Link href="/landing" className="inline-flex text-xs text-blue-400 hover:text-blue-300 transition-colors">
-                  See the full field workflow
-                </Link>
-              </div>
-            )}
-
-            {/* Action Required / Follow Ups */}
             {isSignedIn && followUps.length > 0 && (
-              <div className="glass-card border-amber-500/20 bg-amber-500/5">
-                <div className="p-4 flex gap-4">
-                  <div className="p-2 bg-amber-500/10 rounded-full h-fit">
-                    <Clock className="w-5 h-5 text-amber-500" />
+              <div className="field-panel w-full border-amber-500/25 bg-amber-500/10">
+                <div className="flex gap-4 p-4">
+                  <div className="h-fit rounded-lg bg-amber-500/10 p-2">
+                    <Clock className="h-5 w-5 text-amber-200" />
                   </div>
                   <div className="flex-1 space-y-2">
-                    <div className="flex justify-between items-start">
-                      <h3 className="font-semibold text-amber-400 text-sm">Follow Up Needed</h3>
-                      <span className="text-[10px] bg-amber-500/10 text-amber-500 px-2 py-0.5 rounded-full">
+                    <div className="flex items-start justify-between">
+                      <h2 className="text-sm font-semibold text-amber-200">Follow Up Needed</h2>
+                      <span className="rounded-lg bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-200">
                         {followUps[0].daysSinceSent} days ago
                       </span>
                     </div>
-                    <p className="text-xs text-gray-400 leading-relaxed">
+                    <p className="text-xs leading-relaxed text-slate-400">
                       Estimate <b>#{followUps[0].estimate.estimateNumber}</b> for {followUps[0].estimate.clientName}
                     </p>
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => handleCopyFollowUp(followUps[0])}
-                      className="w-full h-9 text-xs border-amber-500/20 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300 bg-transparent"
+                      className="w-full border-amber-400/20 bg-transparent text-xs text-amber-200 hover:bg-amber-500/10 hover:text-amber-100"
                     >
-                      <Send className="w-3 h-3 mr-2" />
+                      <Send className="mr-2 h-3 w-3" />
                       Copy Message
                     </Button>
                     <Button
@@ -470,47 +595,42 @@ export default function Home() {
                 </div>
               </div>
             )}
+            </div>
 
-            {/* Dashboard Grid */}
             {isSignedIn && (
-              <div className="grid gap-4">
-                <h2 className="text-sm font-medium text-gray-400 px-1 uppercase tracking-wider">Overview</h2>
-
-                {/* Charts & Metrics inside Glass Cards */}
-                <div className="glass-card p-2">
+              <div
+                className="mx-auto grid w-full max-w-sm gap-4 lg:max-w-4xl lg:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)] lg:items-start"
+                data-testid="home-signed-in-dashboard"
+              >
+                <section className="grid gap-4" data-testid="home-overview-section">
+                  <h2 className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Overview</h2>
+                  {priceListItems.length > 0 && (
+                    <div className="space-y-3" data-testid="home-quick-items-section">
+                      <div className="flex items-center justify-between px-1">
+                        <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Quick Items</h3>
+                        <Link href="/profile" className="text-xs text-blue-400 hover:text-blue-300">Edit</Link>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        {priceListItems.map((item) => (
+                          <button
+                            key={item.id}
+                            onClick={() => handleQuickQuote(item)}
+                            className="field-card p-3 text-left transition-colors hover:border-blue-400/30 group"
+                          >
+                            <p className="text-sm font-medium text-gray-200 truncate group-hover:text-white">{item.name}</p>
+                            <p className="text-lg font-bold text-blue-400 mt-1">${item.price}</p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <RevenueChart />
-                </div>
+                </section>
 
-                <div className="flex flex-col gap-4">
-                  <div className="glass-card p-1">
-                    <FunnelMetricsCard />
-                  </div>
-                  <div className="glass-card p-1">
-                    <UsagePlanCard />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Quick Quote Scroll */}
-            {isSignedIn && priceListItems.length > 0 && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between px-1">
-                  <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider">Quick Items</h2>
-                  <Link href="/profile" className="text-xs text-blue-400 hover:text-blue-300">Edit</Link>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  {priceListItems.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => handleQuickQuote(item)}
-                      className="glass-card p-3 text-left hover:bg-white/10 transition-colors group"
-                    >
-                      <p className="text-sm font-medium text-gray-200 truncate group-hover:text-white">{item.name}</p>
-                      <p className="text-lg font-bold text-blue-400 mt-1">${item.price}</p>
-                    </button>
-                  ))}
-                </div>
+                <section className="grid gap-4" data-testid="home-health-section">
+                  <FunnelMetricsCard />
+                  <UsagePlanCard />
+                </section>
               </div>
             )}
 

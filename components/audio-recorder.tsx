@@ -1,9 +1,14 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
-import { Mic, Square, Trash2, Play, Pause, RefreshCw } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Mic, Pause, Play, Square, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+
+type WebKitAudioWindow = Window &
+    typeof globalThis & {
+        webkitAudioContext?: typeof AudioContext
+    }
 
 interface AudioRecorderProps {
     onAudioCaptured: (audioBlob: Blob) => void
@@ -22,10 +27,17 @@ export function AudioRecorder({ onAudioCaptured, onAudioRemoved, className }: Au
     const audioPlayerRef = useRef<HTMLAudioElement | null>(null)
     const timerRef = useRef<NodeJS.Timeout | null>(null)
     const canvasRef = useRef<HTMLCanvasElement>(null)
-    const animationFrameRef = useRef<number>()
+    const animationFrameRef = useRef<number | null>(null)
 
-    // Visualizer logic
-    const drawVisualizer = (analyser: AnalyserNode, dataArray: Uint8Array) => {
+    useEffect(() => {
+        return () => {
+            if (audioUrl) {
+                URL.revokeObjectURL(audioUrl)
+            }
+        }
+    }, [audioUrl])
+
+    const drawVisualizer = (analyser: AnalyserNode, dataArray: Uint8Array<ArrayBuffer>) => {
         if (!canvasRef.current) return
         const canvas = canvasRef.current
         const ctx = canvas.getContext("2d")
@@ -34,18 +46,18 @@ export function AudioRecorder({ onAudioCaptured, onAudioRemoved, className }: Au
         const width = canvas.width
         const height = canvas.height
 
-        analyser.getByteFrequencyData(dataArray as any)
+        analyser.getByteFrequencyData(dataArray)
 
         ctx.clearRect(0, 0, width, height)
 
         const barWidth = (width / dataArray.length) * 2.5
-        let barHeight
+        let barHeight = 0
         let x = 0
 
         for (let i = 0; i < dataArray.length; i++) {
             barHeight = dataArray[i] / 2
 
-            ctx.fillStyle = `rgb(239, 68, 68)` // Red-500
+            ctx.fillStyle = "rgb(248, 113, 113)"
             ctx.fillRect(x, height - barHeight, barWidth, barHeight)
 
             x += barWidth + 1
@@ -61,8 +73,13 @@ export function AudioRecorder({ onAudioCaptured, onAudioRemoved, className }: Au
             mediaRecorderRef.current = mediaRecorder
             audioChunksRef.current = []
 
-            // Audio Context for visualizer
-            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+            const AudioContextConstructor = window.AudioContext || (window as WebKitAudioWindow).webkitAudioContext
+            if (!AudioContextConstructor) {
+                stream.getTracks().forEach((track) => track.stop())
+                throw new Error("AudioContext is not supported in this browser.")
+            }
+
+            const audioContext = new AudioContextConstructor()
             const source = audioContext.createMediaStreamSource(stream)
             const analyser = audioContext.createAnalyser()
             analyser.fftSize = 64
@@ -82,9 +99,9 @@ export function AudioRecorder({ onAudioCaptured, onAudioRemoved, className }: Au
                 const url = URL.createObjectURL(audioBlob)
                 setAudioUrl(url)
                 onAudioCaptured(audioBlob)
-                stream.getTracks().forEach(track => track.stop())
+                stream.getTracks().forEach((track) => track.stop())
                 if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
-                audioContext.close()
+                void audioContext.close()
             }
 
             mediaRecorder.start()
@@ -92,14 +109,13 @@ export function AudioRecorder({ onAudioCaptured, onAudioRemoved, className }: Au
             setRecordingTime(0)
 
             timerRef.current = setInterval(() => {
-                setRecordingTime(prev => prev + 1)
+                setRecordingTime((prev) => prev + 1)
             }, 1000)
 
         } catch (error) {
             console.error("Error accessing microphone:", error)
-            // Use dynamic import for toast
-            import('@/components/toast').then(({ toast }) => {
-                toast("🎤 Microphone access denied. Please check your settings.", "error")
+            import("@/components/toast").then(({ toast }) => {
+                toast("Microphone access denied. Please check your settings.", "error")
             })
         }
     }
@@ -127,6 +143,9 @@ export function AudioRecorder({ onAudioCaptured, onAudioRemoved, className }: Au
     }
 
     const handleDelete = () => {
+        if (audioUrl) {
+            URL.revokeObjectURL(audioUrl)
+        }
         setAudioUrl(null)
         setIsPlaying(false)
         onAudioRemoved()
@@ -139,27 +158,28 @@ export function AudioRecorder({ onAudioCaptured, onAudioRemoved, className }: Au
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60)
         const secs = seconds % 60
-        return `${mins}:${secs.toString().padStart(2, '0')}`
+        return `${mins}:${secs.toString().padStart(2, "0")}`
     }
 
     return (
-        <div className={cn("w-full flex flex-col items-center gap-4", className)}>
+        <div className={cn("flex w-full flex-col items-center gap-4", className)}>
             {audioUrl ? (
-                <div className="w-full flex items-center gap-2 p-4 bg-muted/50 rounded-xl border border-border/50 shadow-sm">
+                <div className="field-card flex w-full items-center gap-3 p-4">
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="h-10 w-10 rounded-full bg-background shadow-sm"
+                        className="h-11 w-11 rounded-lg bg-slate-950/70 text-white hover:bg-slate-900"
                         onClick={togglePlayback}
+                        aria-label={isPlaying ? "Pause recorded voice note" : "Play recorded voice note"}
                     >
-                        {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 ml-0.5" />}
+                        {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="ml-0.5 h-5 w-5" />}
                     </Button>
 
-                    <div className="flex-1 flex flex-col justify-center gap-1">
-                        <div className="h-1.5 bg-primary/20 rounded-full overflow-hidden w-full">
-                            <div className="h-full bg-primary/50 w-full" />
+                    <div className="flex flex-1 flex-col justify-center gap-1">
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+                            <div className="h-full w-full bg-blue-400/70" />
                         </div>
-                        <p className="text-xs text-muted-foreground font-mono">
+                        <p className="font-mono text-xs text-slate-400">
                             Voice Note Recorded
                         </p>
                     </div>
@@ -174,47 +194,64 @@ export function AudioRecorder({ onAudioCaptured, onAudioRemoved, className }: Au
                     <Button
                         variant="ghost"
                         size="icon"
-                        className="h-10 w-10 text-destructive hover:text-destructive hover:bg-destructive/10 rounded-full"
+                        className="h-11 w-11 rounded-lg text-red-300 hover:bg-red-500/10 hover:text-red-200"
                         onClick={handleDelete}
+                        aria-label="Delete recorded voice note"
                     >
                         <Trash2 className="h-5 w-5" />
                     </Button>
                 </div>
             ) : (
-                <div className="relative group">
-                    {/* Pulsing Effect */}
-                    {isRecording && (
-                        <div className="absolute inset-0 rounded-full bg-red-500/20 animate-ping" />
-                    )}
+                <div className="field-card grid w-full grid-cols-[1fr_auto] items-center gap-3 p-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                        <span className={cn(
+                            "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border",
+                            isRecording ? "border-red-300/30 bg-red-500/15 text-red-200" : "border-blue-300/25 bg-blue-500/10 text-blue-200"
+                        )}>
+                            <Mic className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0">
+                            <p className="text-sm font-semibold text-white">Voice note</p>
+                            <p className="truncate text-xs text-slate-400">
+                                {isRecording ? `Recording ${formatTime(recordingTime)}` : "Capture spoken scope"}
+                            </p>
+                        </div>
+                    </div>
 
-                    <Button
-                        variant={isRecording ? "destructive" : "default"}
-                        className={cn(
-                            "h-32 w-32 rounded-full flex flex-col items-center justify-center gap-2 shadow-xl transition-all duration-300",
-                            isRecording ? "scale-110 bg-red-500 hover:bg-red-600" : "bg-primary hover:bg-primary/90 hover:scale-105"
+                    <div className="relative">
+                        {isRecording && (
+                            <div className="absolute inset-0 animate-ping rounded-lg bg-red-500/20" />
                         )}
-                        onClick={isRecording ? stopRecording : startRecording}
-                    >
-                        {isRecording ? (
-                            <>
-                                <Square className="h-8 w-8 fill-current animate-pulse" />
-                                <span className="text-sm font-mono font-bold">{formatTime(recordingTime)}</span>
-                            </>
-                        ) : (
-                            <>
-                                <Mic className="h-10 w-10" />
-                                <span className="text-sm font-semibold">Tap to Record</span>
-                            </>
-                        )}
-                    </Button>
 
-                    {/* Visualizer Canvas */}
+                        <Button
+                            variant={isRecording ? "destructive" : "default"}
+                            className={cn(
+                                "relative flex h-11 min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold shadow-xl transition-all duration-300",
+                                isRecording ? "scale-105 bg-red-500 hover:bg-red-600" : "bg-blue-600 hover:bg-blue-500"
+                            )}
+                            onClick={isRecording ? stopRecording : startRecording}
+                            aria-label={isRecording ? "Stop recording voice note" : "Record voice note"}
+                        >
+                            {isRecording ? (
+                                <>
+                                    <Square className="h-4 w-4 fill-current" />
+                                    <span>Stop</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Mic className="h-4 w-4" />
+                                    <span>Record</span>
+                                </>
+                            )}
+                        </Button>
+                    </div>
+
                     {isRecording && (
                         <canvas
                             ref={canvasRef}
-                            width={100}
+                            width={160}
                             height={30}
-                            className="absolute -bottom-12 left-1/2 -translate-x-1/2 opacity-50"
+                            className="col-span-2 h-8 w-full opacity-80"
                         />
                     )}
                 </div>
@@ -222,4 +259,3 @@ export function AudioRecorder({ onAudioCaptured, onAudioRemoved, className }: Au
         </div>
     )
 }
-

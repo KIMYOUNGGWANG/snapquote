@@ -11,177 +11,170 @@ interface FreeTierQuotaBannerProps {
   onUpgrade?: () => void
 }
 
-function getUsagePercent(used: number, limit: number) {
+function getUsagePercent(used: number, limit: number): number {
   if (limit <= 0) {
-    return 0
+    return 100
   }
 
   return Math.min(Math.max((used / limit) * 100, 0), 100)
 }
 
-function getResetDays(periodStart: string) {
-  const currentPeriodStart = new Date(`${periodStart}T00:00:00`)
-  const nextPeriodStart = new Date(
-    currentPeriodStart.getFullYear(),
-    currentPeriodStart.getMonth() + 1,
-    1
-  )
-  const today = new Date()
-  const todayStart = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate()
-  )
-  const daysUntilReset = Math.ceil(
-    (nextPeriodStart.getTime() - todayStart.getTime()) / 86400000
-  )
+function getResetDays(periodStart: string): number {
+  const [year, month] = periodStart.split("-").map(Number)
 
-  if (Number.isNaN(daysUntilReset)) {
+  if (!year || !month) {
     return 0
   }
 
-  return Math.max(0, daysUntilReset)
+  const today = new Date()
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const nextReset = new Date(year, month, 1)
+
+  return Math.max(
+    0,
+    Math.ceil((nextReset.getTime() - todayStart.getTime()) / 86400000)
+  )
 }
 
-function getTone(percent: number) {
+function getProgressTone(percent: number) {
   if (percent >= 100) {
     return {
-      border: "border-red-200/80",
-      chip: "bg-red-100 text-red-700",
+      badge: "border-red-400/30 bg-red-500/10 text-red-200",
+      border: "border-red-400/35",
       fill: "bg-red-500",
-      percent: "text-red-600",
+      link: "text-red-200 hover:text-red-100",
+      track: "bg-red-950/50",
     }
   }
 
   if (percent >= 80) {
     return {
-      border: "border-amber-200/80",
-      chip: "bg-amber-100 text-amber-700",
-      fill: "bg-amber-500",
-      percent: "text-amber-600",
+      badge: "border-amber-400/30 bg-amber-500/10 text-amber-200",
+      border: "border-amber-400/35",
+      fill: "bg-orange-500",
+      link: "text-amber-200 hover:text-amber-100",
+      track: "bg-amber-950/50",
     }
   }
 
   return {
-    border: "border-blue-200/80",
-    chip: "bg-blue-100 text-blue-700",
+    badge: "border-blue-400/30 bg-blue-500/10 text-blue-200",
+    border: "border-white/10",
     fill: "bg-blue-500",
-    percent: "text-blue-600",
+    link: "text-blue-200 hover:text-blue-100",
+    track: "bg-slate-950/70",
   }
 }
 
-function UpgradeAction({
-  hasReachedLimit,
+function UpgradeControl({
+  exhausted,
   onUpgrade,
-}: Pick<FreeTierQuotaBannerProps, "onUpgrade"> & {
-  hasReachedLimit: boolean
-}) {
+  linkClassName,
+}: {
+  exhausted: boolean
+  onUpgrade?: () => void
+  linkClassName: string
+}): JSX.Element {
   if (onUpgrade) {
     return (
       <Button
         type="button"
-        size={hasReachedLimit ? "sm" : undefined}
-        variant={hasReachedLimit ? "default" : "link"}
-        className={cn(
-          hasReachedLimit
-            ? "w-full sm:w-auto"
-            : "h-auto p-0 text-xs font-semibold"
-        )}
+        variant={exhausted ? "default" : "link"}
+        size="sm"
+        className={exhausted ? "w-full rounded-lg sm:w-auto" : cn("h-auto p-0 text-xs", linkClassName)}
         onClick={onUpgrade}
       >
-        {hasReachedLimit ? "Upgrade now" : "Upgrade for more"}
+        {exhausted ? "Upgrade now" : "Upgrade for more"}
       </Button>
     )
   }
 
-  return (
+  return exhausted ? (
+    <Button asChild size="sm" className="w-full rounded-lg sm:w-auto">
+      <Link href="/pricing">Upgrade now</Link>
+    </Button>
+  ) : (
     <Button
       asChild
-      size={hasReachedLimit ? "sm" : undefined}
-      variant={hasReachedLimit ? "default" : "link"}
-      className={cn(
-        hasReachedLimit ? "w-full sm:w-auto" : "h-auto p-0 text-xs font-semibold"
-      )}
+      variant="link"
+      size="sm"
+      className={cn("h-auto p-0 text-xs", linkClassName)}
     >
-      <Link href="/pricing">
-        {hasReachedLimit ? "Upgrade now" : "Upgrade for more"}
-      </Link>
+      <Link href="/pricing">Upgrade for more</Link>
     </Button>
   )
 }
 
-export function FreeTierQuotaBanner({
-  used,
-  limit,
-  periodStart,
-  onUpgrade,
-}: FreeTierQuotaBannerProps): JSX.Element {
-  const safeUsed = Math.max(0, used)
-  const safeLimit = Math.max(0, limit)
+export function FreeTierQuotaBanner(
+  props: FreeTierQuotaBannerProps
+): JSX.Element {
+  const safeUsed = Math.max(0, props.used)
+  const safeLimit = Math.max(0, props.limit)
   const usagePercent = getUsagePercent(safeUsed, safeLimit)
-  const hasReachedLimit = safeLimit > 0 && safeUsed >= safeLimit
-  const tone = getTone(usagePercent)
-  const resetDays = getResetDays(periodStart)
-  const filledSegments = Math.round((usagePercent / 100) * 20)
+  const tone = getProgressTone(usagePercent)
+  const exhausted = safeLimit <= 0 || safeUsed >= safeLimit
+  const resetDays = getResetDays(props.periodStart)
+  const filledSegments = Math.min(Math.max(Math.ceil(usagePercent / 10), 0), 10)
   const resetLabel = resetDays === 1 ? "Resets in 1 day" : `Resets in ${resetDays} days`
 
   return (
     <section
+      aria-label="Free tier quota banner"
       className={cn(
-        "rounded-2xl border bg-white/85 p-4 shadow-sm backdrop-blur-sm",
+        "rounded-lg border bg-slate-900/70 p-4 text-white shadow-[0_16px_36px_-30px_rgba(0,0,0,0.88)] backdrop-blur-sm",
         tone.border
       )}
-      aria-label="Free tier quota banner"
     >
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 flex-1 space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={cn(
-                "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
-                tone.chip
-              )}
-            >
-              Free tier
-            </span>
-            <span className="text-xs font-medium text-slate-500">{resetLabel}</span>
-          </div>
-
-          <div className="space-y-2">
-            <div className="flex items-baseline justify-between gap-3">
-              <p className="text-sm font-semibold text-slate-900">
-                {safeUsed} of {safeLimit} quotes used this month
-              </p>
-              <span className={cn("text-sm font-semibold tabular-nums", tone.percent)}>
-                {Math.round(usagePercent)}%
-              </span>
-            </div>
-
-            <div
-              className="grid grid-cols-[repeat(20,minmax(0,1fr))] gap-1"
-              aria-hidden="true"
-            >
-              {Array.from({ length: 20 }, (_, index) => (
-                <span
-                  key={index}
-                  className={cn(
-                    "h-2 rounded-full bg-slate-200",
-                    index < filledSegments && tone.fill
-                  )}
-                />
-              ))}
-            </div>
-          </div>
-
-          {hasReachedLimit ? (
-            <p className="text-sm font-medium text-slate-900">
-              Monthly limit reached — upgrade to keep quoting
-            </p>
-          ) : null}
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span
+            className={cn(
+              "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold",
+              tone.badge
+            )}
+          >
+            Free plan
+          </span>
+          <span className="text-xs font-medium text-slate-400">{resetLabel}</span>
         </div>
 
-        <div className="shrink-0">
-          <UpgradeAction hasReachedLimit={hasReachedLimit} onUpgrade={onUpgrade} />
+        <div className="space-y-2">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-sm font-semibold text-slate-100">
+              {safeUsed} of {safeLimit} quotes used this month
+            </p>
+            <span className="text-sm font-semibold text-slate-300">
+              {Math.round(usagePercent)}%
+            </span>
+          </div>
+
+          <div
+            aria-hidden="true"
+            className={cn("grid grid-cols-10 gap-1 rounded-full p-1", tone.track)}
+          >
+            {Array.from({ length: 10 }, (_, index) => (
+              <span
+                key={index}
+                className={cn(
+                  "h-2 rounded-full bg-slate-800 transition-colors",
+                  index < filledSegments && tone.fill
+                )}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm font-medium text-slate-200">
+            {exhausted
+              ? "Monthly limit reached - upgrade to keep quoting"
+              : "Upgrade any time for a higher monthly quota."}
+          </p>
+          <UpgradeControl
+            exhausted={exhausted}
+            onUpgrade={props.onUpgrade}
+            linkClassName={tone.link}
+          />
         </div>
       </div>
     </section>

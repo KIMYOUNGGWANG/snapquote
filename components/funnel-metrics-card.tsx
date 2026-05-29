@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { supabase } from "@/lib/supabase"
 import { Loader2, TrendingUp } from "lucide-react"
 
@@ -61,50 +60,46 @@ export function FunnelMetricsCard() {
 
     if (loading) {
         return (
-            <Card>
-                <CardContent className="p-6 flex items-center justify-center text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Loading conversion metrics...
-                </CardContent>
-            </Card>
+            <div className="field-card flex items-center justify-center p-6 text-sm text-slate-400">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-300" />
+                Loading conversion metrics...
+            </div>
         )
     }
 
     if (!metrics) {
         return (
-            <Card>
-                <CardContent className="p-6 text-sm text-muted-foreground">
-                    Sign in to view conversion funnel metrics.
-                </CardContent>
-            </Card>
+            <div className="field-card p-6 text-sm text-slate-400">
+                Sign in to view conversion funnel metrics.
+            </div>
         )
     }
 
     return (
-        <Card>
-            <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium flex items-center gap-2">
-                    <TrendingUp className="h-4 w-4 text-primary" />
+        <div className="field-card">
+            <div className="border-b border-white/10 p-4 pb-3">
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
+                    <TrendingUp className="h-4 w-4 text-blue-200" />
                     Conversion Funnel (30d)
-                </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
+                </h2>
+            </div>
+            <div className="space-y-3 p-4">
                 <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-lg bg-muted/40 p-3">
-                        <p className="text-xs text-muted-foreground">Send Rate</p>
-                        <p className="text-xl font-bold">{metrics.send_rate}%</p>
-                        <p className="text-xs text-muted-foreground">{metrics.quote_sent}/{metrics.draft_saved}</p>
+                    <div className="field-mini p-3">
+                        <p className="text-xs text-slate-400">Send Rate</p>
+                        <p className="text-xl font-bold text-white">{metrics.send_rate}%</p>
+                        <p className="text-xs text-slate-400">{metrics.quote_sent}/{metrics.draft_saved}</p>
                     </div>
-                    <div className="rounded-lg bg-muted/40 p-3">
-                        <p className="text-xs text-muted-foreground">Payment Rate</p>
-                        <p className="text-xl font-bold">{metrics.payment_rate}%</p>
-                        <p className="text-xs text-muted-foreground">{metrics.payment_completed}/{metrics.quote_sent}</p>
+                    <div className="field-mini p-3">
+                        <p className="text-xs text-slate-400">Payment Rate</p>
+                        <p className="text-xl font-bold text-white">{metrics.payment_rate}%</p>
+                        <p className="text-xs text-slate-400">{metrics.payment_completed}/{metrics.quote_sent}</p>
                     </div>
                 </div>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-slate-400">
                     Payment links created: {metrics.payment_link_created}
                 </p>
-            </CardContent>
-        </Card>
+            </div>
+        </div>
     )
 }

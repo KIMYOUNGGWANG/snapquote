@@ -17,6 +17,7 @@ interface ConfirmDialogProps {
     onConfirm: () => void
     title: string
     description: string
+    confirmLabel?: string
 }
 
 export function ConfirmDialog({
@@ -25,6 +26,7 @@ export function ConfirmDialog({
     onConfirm,
     title,
     description,
+    confirmLabel = "Delete",
 }: ConfirmDialogProps) {
     return (
         <Dialog open={open} onOpenChange={onClose}>
@@ -34,17 +36,18 @@ export function ConfirmDialog({
                     <DialogDescription>{description}</DialogDescription>
                 </DialogHeader>
                 <DialogFooter className="gap-2 sm:gap-0">
-                    <Button variant="outline" onClick={onClose}>
+                    <Button variant="outline" className="rounded-lg border-white/10 bg-slate-950 text-slate-100 hover:bg-slate-900" onClick={onClose}>
                         Cancel
                     </Button>
                     <Button
                         variant="destructive"
+                        className="rounded-lg"
                         onClick={() => {
                             onConfirm()
                             onClose()
                         }}
                     >
-                        Delete
+                        {confirmLabel}
                     </Button>
                 </DialogFooter>
             </DialogContent>

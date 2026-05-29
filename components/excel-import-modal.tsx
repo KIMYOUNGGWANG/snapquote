@@ -3,7 +3,7 @@
 import { useState, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
-import { FileSpreadsheet, Upload, Check, X } from "lucide-react"
+import { Check, Download, FileSpreadsheet, Upload, X } from "lucide-react"
 import type { EstimateUnit, EstimateCategory } from "@/lib/estimates-storage"
 
 interface EstimateItem {
@@ -233,7 +233,7 @@ export function ExcelImportModal({ isOpen, onClose, onImport }: ExcelImportModal
             <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
-                        <FileSpreadsheet className="h-5 w-5" />
+                        <FileSpreadsheet className="h-5 w-5 text-blue-300" />
                         Import from CSV
                     </DialogTitle>
                     <DialogDescription>
@@ -245,44 +245,47 @@ export function ExcelImportModal({ isOpen, onClose, onImport }: ExcelImportModal
                     <Button
                         variant="outline"
                         size="sm"
-                        className="w-full"
+                        className="w-full rounded-lg border-white/10 bg-slate-950 text-slate-100 hover:bg-slate-900"
                         onClick={downloadCsvTemplate}
                     >
-                        📥 Download CSV Template
+                        <Download className="h-4 w-4" />
+                        Download CSV Template
                     </Button>
 
-                    <div
-                        className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary transition-colors"
+                    <button
+                        type="button"
+                        className="min-h-40 w-full cursor-pointer rounded-lg border border-dashed border-white/15 bg-slate-950/60 p-8 text-center transition-colors hover:border-blue-300/40 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                         onClick={() => fileInputRef.current?.click()}
+                        aria-describedby="csv-import-upload-help"
                     >
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept=".csv,text/csv"
-                            onChange={handleFileSelect}
-                            className="hidden"
-                        />
-                        <Upload className="h-10 w-10 mx-auto mb-2 text-muted-foreground" />
-                        <p className="text-sm text-muted-foreground">
+                        <Upload className="mx-auto mb-2 h-10 w-10 text-slate-400" />
+                        <p className="text-sm text-slate-300">
                             {fileName || "Click to upload a CSV file"}
                         </p>
-                        <p className="text-xs text-muted-foreground mt-1">
+                        <p id="csv-import-upload-help" className="mt-1 text-xs text-slate-500">
                             .csv
                         </p>
-                    </div>
+                    </button>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".csv,text/csv"
+                        onChange={handleFileSelect}
+                        className="hidden"
+                    />
 
                     {error && (
-                        <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg">
+                        <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-3 text-sm text-red-200">
                             {error}
                         </div>
                     )}
 
                     {parsedData.length > 0 && (
                         <div>
-                            <h4 className="font-medium mb-2">Preview ({parsedData.length} rows)</h4>
-                            <div className="border rounded-lg overflow-x-auto max-h-60">
+                            <h4 className="mb-2 font-medium">Preview ({parsedData.length} rows)</h4>
+                            <div className="max-h-60 overflow-x-auto rounded-lg border border-white/10">
                                 <table className="w-full text-sm">
-                                    <thead className="bg-muted">
+                                    <thead className="bg-slate-950 text-slate-300">
                                         <tr>
                                             {headers.map((h, i) => (
                                                 <th key={i} className="px-3 py-2 text-left font-medium capitalize">
@@ -293,9 +296,9 @@ export function ExcelImportModal({ isOpen, onClose, onImport }: ExcelImportModal
                                     </thead>
                                     <tbody>
                                         {parsedData.slice(0, 5).map((row, rowIdx) => (
-                                            <tr key={rowIdx} className="border-t">
+                                            <tr key={rowIdx} className="border-t border-white/10">
                                                 {headers.map((_, colIdx) => (
-                                                    <td key={colIdx} className="px-3 py-2 truncate max-w-[150px]">
+                                                    <td key={colIdx} className="max-w-[150px] truncate px-3 py-2">
                                                         {row[colIdx] ?? ""}
                                                     </td>
                                                 ))}
@@ -305,7 +308,7 @@ export function ExcelImportModal({ isOpen, onClose, onImport }: ExcelImportModal
                                 </table>
                             </div>
                             {parsedData.length > 5 && (
-                                <p className="text-xs text-muted-foreground mt-1">
+                                <p className="mt-1 text-xs text-slate-500">
                                     ... and {parsedData.length - 5} more rows
                                 </p>
                             )}
@@ -313,15 +316,16 @@ export function ExcelImportModal({ isOpen, onClose, onImport }: ExcelImportModal
                     )}
 
                     <div className="flex justify-end gap-2 pt-4">
-                        <Button variant="outline" onClick={handleClose}>
-                            <X className="h-4 w-4 mr-2" />
+                        <Button variant="outline" className="rounded-lg border-white/10 bg-slate-950 text-slate-100 hover:bg-slate-900" onClick={handleClose}>
+                            <X className="mr-2 h-4 w-4" />
                             Cancel
                         </Button>
                         <Button
+                            className="rounded-lg"
                             onClick={handleImport}
                             disabled={parsedData.length === 0}
                         >
-                            <Check className="h-4 w-4 mr-2" />
+                            <Check className="mr-2 h-4 w-4" />
                             Import {parsedData.length} Items
                         </Button>
                     </div>

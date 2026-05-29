@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Loader2, Gauge, Sparkles } from "lucide-react"
 import { getBillingUsageSnapshot, type BillingUsageSnapshot } from "@/lib/billing-usage"
@@ -13,7 +12,7 @@ function ProgressBar({ value }: { value: number }) {
     const color = clamped >= 100 ? "bg-red-500" : clamped >= 80 ? "bg-amber-500" : "bg-emerald-500"
 
     return (
-        <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
             <div className={`h-full transition-all ${color}`} style={{ width: `${clamped}%` }} />
         </div>
     )
@@ -46,40 +45,41 @@ export function UsagePlanCard() {
     if (!isAuthed) return null
 
     return (
-        <Card>
-            <CardHeader className="pb-3">
+        <div className="field-card">
+            <div className="border-b border-white/10 p-4 pb-3">
                 <div className="flex items-center justify-between gap-2">
-                    <CardTitle className="text-base flex items-center gap-2">
-                        <Gauge className="h-4 w-4" />
+                    <h2 className="flex items-center gap-2 text-base font-semibold text-white">
+                        <Gauge className="h-4 w-4 text-blue-200" />
                         Plan & Usage
-                    </CardTitle>
+                    </h2>
                     <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 px-2 text-xs"
+                        className="min-w-11 rounded-lg px-3 text-xs text-slate-300 hover:bg-white/10 hover:text-white"
                         onClick={loadSnapshot}
                         disabled={loading}
+                        aria-label="Refresh usage"
                     >
                         {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Refresh"}
                     </Button>
                 </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
+            </div>
+            <div className="space-y-4 p-4">
                 {loading && !snapshot ? (
-                    <div className="text-sm text-muted-foreground flex items-center gap-2">
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                    <div className="flex items-center gap-2 text-sm text-slate-400">
+                        <Loader2 className="h-4 w-4 animate-spin text-blue-300" />
                         Loading usage...
                     </div>
                 ) : snapshot ? (
                     <>
                         <div className="flex items-center justify-between text-sm">
-                            <span className="text-muted-foreground">Current Plan</span>
+                            <span className="text-slate-400">Current Plan</span>
                             <div className="flex items-center gap-2">
-                                <span className="font-semibold uppercase">{snapshot.planTier}</span>
+                                <span className="font-semibold uppercase text-white">{snapshot.planTier}</span>
                                 <Button
                                     size="sm"
                                     variant="outline"
-                                    className="h-6 px-2 text-xs"
+                                    className="rounded-lg border-white/10 bg-slate-950/70 px-3 text-xs text-white hover:bg-slate-900"
                                     onClick={() => router.push("/pricing")}
                                 >
                                     Upgrade
@@ -89,21 +89,21 @@ export function UsagePlanCard() {
 
                         <div className="space-y-3">
                             <div className="space-y-1.5">
-                                <div className="flex items-center justify-between text-xs">
+                                <div className="flex items-center justify-between text-xs text-slate-300">
                                     <span>AI Generate</span>
                                     <span>{snapshot.usage.generate}/{snapshot.limits.generate}</span>
                                 </div>
                                 <ProgressBar value={snapshot.usageRatePct.generate} />
                             </div>
                             <div className="space-y-1.5">
-                                <div className="flex items-center justify-between text-xs">
+                                <div className="flex items-center justify-between text-xs text-slate-300">
                                     <span>Voice Transcribe</span>
                                     <span>{snapshot.usage.transcribe}/{snapshot.limits.transcribe}</span>
                                 </div>
                                 <ProgressBar value={snapshot.usageRatePct.transcribe} />
                             </div>
                             <div className="space-y-1.5">
-                                <div className="flex items-center justify-between text-xs">
+                                <div className="flex items-center justify-between text-xs text-slate-300">
                                     <span>Email Sends</span>
                                     <span>{snapshot.usage.send_email}/{snapshot.limits.send_email}</span>
                                 </div>
@@ -111,25 +111,25 @@ export function UsagePlanCard() {
                             </div>
                         </div>
 
-                        <div className="pt-2 border-t space-y-1">
-                            <p className="text-xs text-muted-foreground">Estimated usage cost (month-to-date)</p>
-                            <p className="text-sm">OpenAI: ${snapshot.estimatedCosts.openai.toFixed(4)}</p>
-                            <p className="text-sm">Resend: ${snapshot.estimatedCosts.resend.toFixed(4)}</p>
-                            <p className="font-semibold">Total: ${snapshot.estimatedCosts.total.toFixed(4)}</p>
+                        <div className="space-y-1 border-t border-white/10 pt-3">
+                            <p className="text-xs text-slate-400">Estimated usage cost (month-to-date)</p>
+                            <p className="text-sm text-slate-300">OpenAI: ${snapshot.estimatedCosts.openai.toFixed(4)}</p>
+                            <p className="text-sm text-slate-300">Resend: ${snapshot.estimatedCosts.resend.toFixed(4)}</p>
+                            <p className="font-semibold text-white">Total: ${snapshot.estimatedCosts.total.toFixed(4)}</p>
                         </div>
 
                         {snapshot.planTier === "free" &&
                             (snapshot.usageRatePct.generate >= 80 ||
                                 snapshot.usageRatePct.transcribe >= 80 ||
                                 snapshot.usageRatePct.send_email >= 80) && (
-                                <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 flex items-start gap-2">
-                                    <Sparkles className="h-3.5 w-3.5 mt-0.5" />
+                                <div className="flex items-start gap-2 rounded-lg border border-amber-400/20 bg-amber-500/10 p-3 text-xs text-amber-100">
+                                    <Sparkles className="mt-0.5 h-3.5 w-3.5" />
                                     <div className="flex-1">
                                         <p>Free quota is almost used. Upgrade before you hit the {FREE_PLAN_MARKETING_QUOTE_LIMIT}-quote monthly cap.</p>
                                         <Button
                                             type="button"
                                             size="sm"
-                                            className="mt-2 h-8 text-xs"
+                                            className="mt-2 rounded-lg bg-amber-500 text-xs text-slate-950 hover:bg-amber-400"
                                             onClick={() => router.push("/pricing")}
                                         >
                                             See Pro options
@@ -139,9 +139,9 @@ export function UsagePlanCard() {
                             )}
                     </>
                 ) : (
-                    <p className="text-sm text-muted-foreground">Usage data is not available yet.</p>
+                    <p className="text-sm text-slate-400">Usage data is not available yet.</p>
                 )}
-            </CardContent>
-        </Card>
+            </div>
+        </div>
     )
 }
