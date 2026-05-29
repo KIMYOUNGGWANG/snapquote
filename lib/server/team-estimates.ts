@@ -30,6 +30,9 @@ export type TeamEstimateDetail = {
     ownerBusinessName?: string
     clientName: string
     clientAddress: string
+    clientEmail?: string
+    clientPhone?: string
+    clientNotes?: string
     summary_note: string
     status: "draft" | "sent" | "paid"
     taxRate: number
@@ -87,6 +90,35 @@ function toSafeString(value: unknown): string {
 
 function normalizeStatus(value: unknown): "draft" | "sent" | "paid" {
     return value === "sent" || value === "paid" ? value : "draft"
+}
+
+function getClientContactPatch(input: {
+    clientAddress?: string
+    clientEmail?: string
+    clientPhone?: string
+    clientNotes?: string
+}) {
+    const address = input.clientAddress?.trim()
+    const email = input.clientEmail?.trim()
+    const phone = input.clientPhone?.trim()
+    const notes = input.clientNotes?.trim()
+
+    return {
+        ...(address && address !== "N/A" ? { address } : {}),
+        ...(email ? { email } : {}),
+        ...(phone ? { phone } : {}),
+        ...(notes ? { notes } : {}),
+    }
+}
+
+function hasClientContactPatchChanged(
+    current: Record<string, unknown> | null | undefined,
+    patch: Record<string, string>
+) {
+    return Object.entries(patch).some(([key, value]) => {
+        const currentValue = typeof current?.[key] === "string" ? current[key].trim() : ""
+        return currentValue !== value
+    })
 }
 
 function mapEstimateItem(input: Record<string, unknown>, index: number): TeamEstimateItem {
@@ -163,6 +195,9 @@ function mapCloudEstimateToDetail(estimate: Record<string, any>): TeamEstimateDe
             : {}),
         clientName: toSafeString(estimate?.clients?.name).trim() || "Walk-in Client",
         clientAddress: toSafeString(estimate?.clients?.address).trim(),
+        ...(toSafeString(estimate?.clients?.email).trim() ? { clientEmail: toSafeString(estimate.clients.email).trim() } : {}),
+        ...(toSafeString(estimate?.clients?.phone).trim() ? { clientPhone: toSafeString(estimate.clients.phone).trim() } : {}),
+        ...(toSafeString(estimate?.clients?.notes).trim() ? { clientNotes: toSafeString(estimate.clients.notes).trim() } : {}),
         summary_note: toSafeString(estimate.ai_summary),
         status: normalizeStatus(estimate.status),
         taxRate: toMoney(estimate.tax_rate),
@@ -180,16 +215,22 @@ async function resolveClientIdForEstimateOwner(
     supabase: ServiceSupabaseClient,
     ownerUserId: string,
     clientName: string,
-    clientAddress: string
+    input: {
+        clientAddress?: string
+        clientEmail?: string
+        clientPhone?: string
+        clientNotes?: string
+    }
 ): Promise<{ clientId: string | null; error: string | null }> {
     const trimmedName = clientName.trim()
     if (!trimmedName || trimmedName === "Walk-in Client") {
         return { clientId: null, error: null }
     }
+    const contactPatch = getClientContactPatch(input)
 
     const existing = await supabase
         .from("clients")
-        .select("id")
+        .select("id, address, email, phone, notes")
         .eq("user_id", ownerUserId)
         .eq("name", trimmedName)
         .limit(1)
@@ -200,6 +241,21 @@ async function resolveClientIdForEstimateOwner(
     }
 
     if (existing.data?.id) {
+        if (
+            Object.keys(contactPatch).length > 0 &&
+            hasClientContactPatchChanged(existing.data as Record<string, unknown>, contactPatch)
+        ) {
+            const updated = await supabase
+                .from("clients")
+                .update(contactPatch)
+                .eq("id", existing.data.id)
+                .eq("user_id", ownerUserId)
+
+            if (updated.error) {
+                return { clientId: null, error: updated.error.message || "Failed to update Team estimate client contact" }
+            }
+        }
+
         return { clientId: existing.data.id, error: null }
     }
 
@@ -208,7 +264,7 @@ async function resolveClientIdForEstimateOwner(
         .insert({
             user_id: ownerUserId,
             name: trimmedName,
-            address: clientAddress.trim() || null,
+            ...contactPatch,
         })
         .select("id")
         .single()
@@ -299,7 +355,7 @@ export async function resolveTeamEstimateAccess(
                     total
                 )
             ),
-            clients (name, address),
+            clients (name, address, email, phone, notes),
             profiles (business_name)
         `)
         .eq("id", estimateId)
@@ -546,6 +602,9 @@ export async function saveTeamEstimateFromPayload(
         payload: {
             clientName: string
             clientAddress?: string
+            clientEmail?: string
+            clientPhone?: string
+            clientNotes?: string
             summary_note: string
             status: "draft" | "sent" | "paid"
             taxRate: number
@@ -574,7 +633,12 @@ export async function saveTeamEstimateFromPayload(
         supabase,
         ownerUserId,
         input.payload.clientName,
-        input.payload.clientAddress || ""
+        {
+            clientAddress: input.payload.clientAddress,
+            clientEmail: input.payload.clientEmail,
+            clientPhone: input.payload.clientPhone,
+            clientNotes: input.payload.clientNotes,
+        }
     )
 
     if (clientResolution.error) {

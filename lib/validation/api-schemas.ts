@@ -125,6 +125,9 @@ const teamEstimateSectionSchema = z.object({
 export const teamEstimateUpdateSchema = z.object({
     clientName: z.string({ error: "Invalid Team estimate payload" }).trim().min(1, "Invalid Team estimate payload").max(160, "Invalid Team estimate payload"),
     clientAddress: z.string({ error: "Invalid Team estimate payload" }).trim().max(240, "Invalid Team estimate payload").optional(),
+    clientEmail: z.string({ error: "Invalid Team estimate payload" }).trim().max(320, "Invalid Team estimate payload").optional(),
+    clientPhone: z.string({ error: "Invalid Team estimate payload" }).trim().max(80, "Invalid Team estimate payload").optional(),
+    clientNotes: z.string({ error: "Invalid Team estimate payload" }).trim().max(1000, "Invalid Team estimate payload").optional(),
     summary_note: z.string({ error: "Invalid Team estimate payload" }).trim().max(4000, "Invalid Team estimate payload"),
     status: z.enum(["draft", "sent", "paid"], { error: "Invalid Team estimate payload" }),
     taxRate: z.number({ error: "Invalid Team estimate payload" }).finite("Invalid Team estimate payload").min(0, "Invalid Team estimate payload").max(100, "Invalid Team estimate payload"),

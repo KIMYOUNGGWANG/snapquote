@@ -84,15 +84,24 @@ export function normalizeEstimateItem(input: unknown, index: number): EstimateIt
 export function normalizeEstimateSection(input: unknown, sectionIndex: number): EstimateSection {
     const section = isRecord(input) ? input : {}
     const rawItems = Array.isArray(section.items) ? section.items : []
+    const id = toSafeString(section.id).trim() || `section-${sectionIndex + 1}`
     const items = rawItems
-        .map((item, itemIndex) => normalizeEstimateItem(item, itemIndex))
+        .map((item, itemIndex) => {
+            const normalizedItem = normalizeEstimateItem(item, itemIndex)
+            const itemRecord = isRecord(item) ? item : {}
+            const hasExplicitId = toSafeString(itemRecord.id).trim() !== ""
+
+            return {
+                ...normalizedItem,
+                id: hasExplicitId ? normalizedItem.id : `${id}-item-${itemIndex + 1}`,
+            }
+        })
         .filter((item) => item.description !== "")
-    const id = toSafeString(section.id).trim()
     const name = toSafeString(section.name).trim()
     const divisionCode = toSafeString(section.divisionCode).trim()
 
     return {
-        id: id || `section-${sectionIndex + 1}`,
+        id,
         name: name || `Section ${sectionIndex + 1}`,
         divisionCode: divisionCode || undefined,
         items,

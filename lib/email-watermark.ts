@@ -19,55 +19,57 @@ function escapeHtml(value: string): string {
         .replace(/'/g, "&#39;")
 }
 
-function normalizeHttpUrl(value: string | undefined, fallback: string): string {
-    const candidate = value?.trim() || fallback
+function resolveAppUrl(appUrl?: string): string {
+    const candidate = appUrl?.trim() || DEFAULT_APP_URL
 
     try {
-        const parsed = new URL(candidate)
-        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-            return parsed.toString()
-        }
+        const url = new URL(candidate)
+        if (url.protocol === "http:" || url.protocol === "https:") return url.toString()
     } catch {}
 
-    return fallback
+    return DEFAULT_APP_URL
 }
 
-function normalizeOptionalHttpUrl(value: string | undefined): string {
-    const candidate = value?.trim() || ""
+function resolveReferralUrl(referralUrl?: string): string {
+    const candidate = referralUrl?.trim() || ""
     if (!candidate) return ""
 
     try {
-        const parsed = new URL(candidate)
-        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-            return parsed.toString()
-        }
+        const url = new URL(candidate)
+        if (url.protocol === "http:" || url.protocol === "https:") return url.toString()
     } catch {}
 
     return ""
 }
 
-function buildFreeWatermarkHtml(appUrl: string, referralUrl: string): string {
-    const safeAppUrl = escapeHtml(appUrl)
-    const safeReferralUrl = escapeHtml(referralUrl)
+function resolveBusinessName(businessName?: string): string {
+    const candidate = businessName?.trim() || ""
+    return candidate ? escapeHtml(candidate) : "your business"
+}
+
+function buildFreePlanWatermarkHtml(appUrl: string, referralUrl: string): string {
+    const callToActionHtml = referralUrl
+        ? `
+    <p style="margin:10px 0 0;">
+        <a href="${escapeHtml(referralUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;font-size:13px;font-weight:600;text-decoration:none;">Try it free →</a>
+    </p>`
+        : ""
 
     return `
-<div style="margin-top:24px;padding:16px 18px;background:#f0f4ff;border-top:2px solid #2563eb;border-radius:0 0 10px 10px;font-family:Arial,sans-serif;">
-    <p style="margin:0;font-size:14px;font-weight:600;color:#111827;">
-        Made with <a href="${safeAppUrl}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;">SnapQuote</a>
+<div style="margin-top:24px;padding:16px 18px;background:#f0f4ff;border-top:2px solid #2563eb;font-family:Arial,sans-serif;">
+    <p style="margin:0;color:#111827;font-size:14px;font-weight:600;line-height:1.5;">
+        Made with <a href="${escapeHtml(appUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;">SnapQuote</a>
     </p>
-    <p style="margin:8px 0 0;font-size:13px;line-height:1.5;color:#475569;">
+    <p style="margin:8px 0 0;color:#475569;font-size:13px;line-height:1.5;">
         Speak your job — get a professional estimate in 30 seconds
-    </p>
-    ${safeReferralUrl ? `<p style="margin:10px 0 0;"><a href="${safeReferralUrl}" target="_blank" rel="noopener noreferrer" style="font-size:13px;font-weight:600;color:#1d4ed8;text-decoration:none;">Try it free →</a></p>` : ""}
+    </p>${callToActionHtml}
 </div>`.trim()
 }
 
-function buildPaidWatermarkHtml(appUrl: string): string {
-    const safeAppUrl = escapeHtml(appUrl)
-
+function buildPaidPlanWatermarkHtml(appUrl: string): string {
     return `
-<div style="margin-top:20px;font-family:Arial,sans-serif;font-size:11px;line-height:1.5;color:#9ca3af;">
-    Powered by <a href="${safeAppUrl}" target="_blank" rel="noopener noreferrer" style="color:#9ca3af;text-decoration:none;">SnapQuote</a>
+<div style="margin-top:20px;color:#9ca3af;font-family:Arial,sans-serif;font-size:11px;line-height:1.5;">
+    Powered by <a href="${escapeHtml(appUrl)}" target="_blank" rel="noopener noreferrer" style="color:#9ca3af;text-decoration:none;">SnapQuote</a>
 </div>`.trim()
 }
 
@@ -76,23 +78,25 @@ export function hasFreeWatermarkExemption(quotesUsed: number): boolean {
 }
 
 export function buildEmailWatermarkHtml(options: EmailWatermarkOptions): string {
-    const appUrl = normalizeHttpUrl(options.appUrl, DEFAULT_APP_URL)
-    if (options.planTier !== "free") return buildPaidWatermarkHtml(appUrl)
-    if (hasFreeWatermarkExemption(options.quotesUsed ?? 999)) {
-        return buildPaidWatermarkHtml(appUrl)
+    const appUrl = resolveAppUrl(options.appUrl)
+
+    if (options.planTier !== "free") {
+        return buildPaidPlanWatermarkHtml(appUrl)
     }
 
-    const referralUrl = normalizeOptionalHttpUrl(options.referralUrl)
-    return buildFreeWatermarkHtml(appUrl, referralUrl)
+    if (hasFreeWatermarkExemption(options.quotesUsed ?? 999)) {
+        return buildPaidPlanWatermarkHtml(appUrl)
+    }
+
+    return buildFreePlanWatermarkHtml(appUrl, resolveReferralUrl(options.referralUrl))
 }
 
 export function buildEmailFooterHtml(options: EmailWatermarkOptions): string {
-    const appUrl = normalizeHttpUrl(options.appUrl, DEFAULT_APP_URL)
-    const safeAppUrl = escapeHtml(appUrl)
-    const safeName = escapeHtml(options.businessName?.trim() || "your contractor")
+    const appUrl = resolveAppUrl(options.appUrl)
+    const businessName = resolveBusinessName(options.businessName)
 
     return `
-<div style="margin-top:16px;font-family:Arial,sans-serif;font-size:11px;line-height:1.5;color:#6b7280;">
-    This estimate was generated by ${safeName} using <a href="${safeAppUrl}" target="_blank" rel="noopener noreferrer" style="color:#6b7280;text-decoration:none;">SnapQuote AI Estimator</a>.
+<div style="margin-top:16px;color:#6b7280;font-family:Arial,sans-serif;font-size:11px;line-height:1.5;">
+    This estimate was generated by ${businessName} using <a href="${escapeHtml(appUrl)}" target="_blank" rel="noopener noreferrer" style="color:#6b7280;text-decoration:none;">SnapQuote AI Estimator</a>.
 </div>`.trim()
 }

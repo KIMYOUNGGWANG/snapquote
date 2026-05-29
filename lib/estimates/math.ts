@@ -13,6 +13,17 @@ export function getAllItemsFromEstimate(estimate: EstimateDraft): EstimateItem[]
     const sectionItems = Array.isArray(estimate.sections)
         ? estimate.sections.flatMap((section) => (Array.isArray(section?.items) ? section.items : []))
         : []
+    const sectionItemIds = new Set(
+        sectionItems
+            .map((item) => (typeof item?.id === "string" ? item.id.trim() : ""))
+            .filter(Boolean)
+    )
+    const dedupedFlatItems = sectionItemIds.size > 0
+        ? flatItems.filter((item) => {
+            const itemId = typeof item?.id === "string" ? item.id.trim() : ""
+            return !itemId || !sectionItemIds.has(itemId)
+        })
+        : flatItems
 
-    return [...flatItems, ...sectionItems].map((item, index) => normalizeEstimateItem(item, index))
+    return [...dedupedFlatItems, ...sectionItems].map((item, index) => normalizeEstimateItem(item, index))
 }

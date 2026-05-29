@@ -57,6 +57,9 @@ export interface TeamEstimateDetailResponse {
         ownerBusinessName?: string
         clientName: string
         clientAddress: string
+        clientEmail?: string
+        clientPhone?: string
+        clientNotes?: string
         summary_note: string
         status: "draft" | "sent" | "paid"
         taxRate: number
@@ -268,6 +271,9 @@ export async function updateTeamEstimate(
     input: {
         clientName: string
         clientAddress?: string
+        clientEmail?: string
+        clientPhone?: string
+        clientNotes?: string
         summary_note: string
         status: "draft" | "sent" | "paid"
         taxRate: number

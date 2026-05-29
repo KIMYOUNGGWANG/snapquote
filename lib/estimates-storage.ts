@@ -72,6 +72,9 @@ export interface LocalEstimate {
     clientName: string
     clientEmail?: string
     clientAddress: string
+    clientEmail?: string
+    clientPhone?: string
+    clientNotes?: string
     taxRate: number
     taxAmount: number
     totalAmount: number

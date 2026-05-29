@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
 import type { Session } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
 
@@ -12,13 +11,7 @@ type AuthGuardState = {
     email: string | null
 }
 
-function buildLoginUrl(nextPath: string): string {
-    const params = new URLSearchParams({ next: nextPath || "/" })
-    return `/login?${params.toString()}`
-}
-
 export function useAuthGuard(nextPath: string): AuthGuardState {
-    const router = useRouter()
     const [state, setState] = useState<AuthGuardState>({
         authResolved: false,
         isAuthenticated: false,
@@ -29,8 +22,19 @@ export function useAuthGuard(nextPath: string): AuthGuardState {
     useEffect(() => {
         let active = true
 
+        const fallbackTimer = window.setTimeout(() => {
+            if (!active) return
+            setState({
+                authResolved: true,
+                isAuthenticated: false,
+                userId: null,
+                email: null,
+            })
+        }, 2500)
+
         const syncState = (session: Session | null) => {
             if (!active) return
+            window.clearTimeout(fallbackTimer)
 
             if (!session?.user) {
                 setState({
@@ -39,7 +43,6 @@ export function useAuthGuard(nextPath: string): AuthGuardState {
                     userId: null,
                     email: null,
                 })
-                window.location.href = buildLoginUrl(nextPath)
                 return
             }
 
@@ -56,20 +59,20 @@ export function useAuthGuard(nextPath: string): AuthGuardState {
             .then(({ data }) => syncState(data.session))
             .catch(() => {
                 if (!active) return
+                window.clearTimeout(fallbackTimer)
                 setState({
                     authResolved: true,
-                    isAuthenticated: false,
-                    userId: null,
-                    email: null,
-                })
-                window.location.href = buildLoginUrl(nextPath)
+                isAuthenticated: false,
+                userId: null,
+                email: null,
             })
+        })
 
         return () => {
             active = false
+            window.clearTimeout(fallbackTimer)
         }
-    }, [nextPath, router])
+    }, [nextPath])
 
     return state
 }
-
