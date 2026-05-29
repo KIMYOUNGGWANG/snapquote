@@ -52,7 +52,8 @@ function buildPaymentSuccessRedirectUrl(input: { estimateId: string; estimateNum
         if (input.estimateNumber) {
             successUrl.searchParams.set("estimateNumber", input.estimateNumber)
         }
-        return successUrl.toString()
+        successUrl.searchParams.set("session_id", "{CHECKOUT_SESSION_ID}")
+        return successUrl.toString().replace("session_id=%7BCHECKOUT_SESSION_ID%7D", "session_id={CHECKOUT_SESSION_ID}")
     } catch {
         return "https://snapquote.app/payment-success"
     }

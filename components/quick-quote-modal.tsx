@@ -1,20 +1,31 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useRef, useState } from "react"
+import NextLink from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { X, Loader2, Copy, CreditCard, FileText, Check, Minus, Plus } from "lucide-react"
+import { AlertTriangle, Check, Copy, CreditCard, Loader2, Minus, Plus, X, Zap } from "lucide-react"
 import { toast } from "@/components/toast"
 import { useRouter } from "next/navigation"
 import { getProfile } from "@/lib/estimates-storage"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
+import {
+    buildPaymentLinkIssue,
+    PaymentLinkCreationError,
+    readPaymentLinkErrorPayload,
+    type PaymentLinkIssue,
+} from "@/lib/payment-link-errors"
 import type { PriceListItem } from "@/types"
 
 interface QuickQuoteModalProps {
     open: boolean
     onClose: () => void
     item: PriceListItem | null
+}
+
+function getErrorMessage(error: unknown) {
+    return error instanceof Error ? error.message : "Failed to create payment link"
 }
 
 export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
@@ -24,18 +35,20 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
     const [taxRate, setTaxRate] = useState(13)
     const [isGeneratingLink, setIsGeneratingLink] = useState(false)
     const [paymentLink, setPaymentLink] = useState<string | null>(null)
+    const [paymentLinkIssue, setPaymentLinkIssue] = useState<PaymentLinkIssue | null>(null)
     const [copied, setCopied] = useState(false)
     const [businessName, setBusinessName] = useState("SnapQuote")
     const [businessPhone, setBusinessPhone] = useState("")
+    const paymentLinkIssueRef = useRef<HTMLDivElement | null>(null)
 
     useEffect(() => {
         if (open && item) {
             setQuantity(1)
             setPrice(item.price)
             setPaymentLink(null)
+            setPaymentLinkIssue(null)
             setCopied(false)
 
-            // Load business profile
             const profile = getProfile()
             if (profile) {
                 setBusinessName(profile.business_name || "SnapQuote")
@@ -45,6 +58,16 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
         }
     }, [open, item])
 
+    useEffect(() => {
+        if (!paymentLinkIssue) return
+
+        const frame = window.requestAnimationFrame(() => {
+            paymentLinkIssueRef.current?.scrollIntoView({ block: "center" })
+        })
+
+        return () => window.cancelAnimationFrame(frame)
+    }, [paymentLinkIssue])
+
     if (!open || !item) return null
 
     const subtotal = quantity * price
@@ -52,7 +75,7 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
     const total = subtotal + taxAmount
 
     const generateQuoteText = (includeLink = false) => {
-        let text = `📋 Estimate from ${businessName}\n`
+        let text = `Estimate from ${businessName}\n`
         text += `──────────────────\n`
         text += `${item.name}\n`
         if (quantity > 1) {
@@ -65,11 +88,11 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
         text += `Total: $${total.toFixed(2)}\n`
 
         if (includeLink && paymentLink) {
-            text += `\n💳 Pay online: ${paymentLink}\n`
+            text += `\nPay online: ${paymentLink}\n`
         }
 
         if (businessPhone) {
-            text += `\n📞 ${businessPhone}`
+            text += `\n${businessPhone}`
         }
 
         return text
@@ -80,24 +103,25 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
             const text = generateQuoteText(!!paymentLink)
             await navigator.clipboard.writeText(text)
             setCopied(true)
-            toast("📋 Copied! Paste in SMS or chat.", "success")
+            toast("Copied. Paste in SMS or chat.", "success")
             setTimeout(() => setCopied(false), 2000)
-        } catch (err) {
-            toast("❌ Failed to copy.", "error")
+        } catch {
+            toast("Failed to copy.", "error")
         }
     }
 
     const handleGeneratePaymentLink = async () => {
         if (!navigator.onLine) {
-            toast("📴 Payment links require internet.", "warning")
+            toast("Payment links require internet.", "warning")
             return
         }
 
         setIsGeneratingLink(true)
+        setPaymentLinkIssue(null)
         try {
             const headers = await withAuthHeaders({ 'Content-Type': 'application/json' })
             if (!headers.authorization) {
-                toast("🔐 Sign in first to generate a card payment link.", "warning")
+                toast("Sign in first to generate a card payment link.", "warning")
                 const params = new URLSearchParams({
                     next: "/",
                     intent: "payment-link",
@@ -114,18 +138,13 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
                     customerName: 'Customer',
                 })
             })
+            const data: unknown = await response.json().catch(() => ({}))
 
             if (!response.ok) {
-                const error = await response.json().catch(() => ({}))
-                const errorMessage =
-                    typeof error?.error === "string"
-                        ? error.error
-                        : typeof error?.error?.message === "string"
-                            ? error.error.message
-                            : 'Failed to create payment link'
+                const errorDetails = readPaymentLinkErrorPayload(data)
 
                 if (response.status === 401) {
-                    toast("🔐 Session expired. Please sign in again.", "warning")
+                    toast("Session expired. Please sign in again.", "warning")
                     const params = new URLSearchParams({
                         next: "/",
                         intent: "payment-link",
@@ -134,15 +153,25 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
                     return
                 }
 
-                if (response.status === 403) {
-                    throw new Error(errorMessage)
-                }
-
-                throw new Error(errorMessage)
+                throw new PaymentLinkCreationError(
+                    errorDetails.message,
+                    buildPaymentLinkIssue({
+                        message: errorDetails.message,
+                        code: errorDetails.code,
+                        status: response.status,
+                    })
+                )
             }
 
-            const data = await response.json()
-            setPaymentLink(data.url)
+            const paymentLinkData = data as { url?: unknown }
+            if (typeof paymentLinkData.url !== "string" || !paymentLinkData.url.trim()) {
+                throw new PaymentLinkCreationError(
+                    "Payment link response was missing a URL.",
+                    buildPaymentLinkIssue({ message: "Payment link response was missing a URL." })
+                )
+            }
+
+            setPaymentLink(paymentLinkData.url)
             void trackAnalyticsEvent({
                 event: "payment_link_created",
                 channel: "quick_quote",
@@ -152,137 +181,182 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
                     quantity,
                 },
             })
-            toast("💳 Payment link ready!", "success")
-        } catch (error: any) {
-            console.error('Payment link error:', error)
-            toast(`❌ ${error.message}`, "error")
+            toast("Payment link ready.", "success")
+        } catch (error) {
+            if (!(error instanceof PaymentLinkCreationError)) {
+                console.error('Payment link error:', error)
+            }
+            const message = getErrorMessage(error)
+            const issue = error instanceof PaymentLinkCreationError
+                ? error.issue
+                : buildPaymentLinkIssue({ message })
+            setPaymentLink(null)
+            setPaymentLinkIssue(issue)
         } finally {
             setIsGeneratingLink(false)
         }
     }
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="bg-background rounded-xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
-                {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b bg-primary/5">
-                    <div className="flex items-center gap-2">
-                        <div className="text-2xl">⚡</div>
-                        <h2 className="text-lg font-semibold">Quick Quote</h2>
+        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/70 p-2 backdrop-blur-sm sm:p-4">
+            <div
+                aria-labelledby="quick-quote-title"
+                aria-modal="true"
+                className="field-panel flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-sm flex-col overflow-hidden"
+                role="dialog"
+            >
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-slate-950/70 p-4">
+                    <div className="flex min-w-0 items-center gap-2">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-blue-500/10 text-blue-200">
+                            <Zap className="h-4 w-4" />
+                        </span>
+                        <h2 id="quick-quote-title" className="min-w-0 break-words text-lg font-semibold [overflow-wrap:anywhere]">Quick Quote</h2>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={onClose}>
+                    <Button variant="ghost" size="icon" className="h-11 w-11 shrink-0 rounded-lg text-slate-300 hover:bg-white/10 hover:text-white" onClick={onClose} aria-label="Close quick quote">
                         <X className="h-4 w-4" />
                     </Button>
                 </div>
 
-                {/* Content */}
-                <div className="p-4 space-y-4">
-                    {/* Item Name */}
-                    <div className="text-center">
-                        <p className="font-semibold text-lg">{item.name}</p>
-                        <p className="text-xs text-muted-foreground">{item.category}</p>
+                <div className="flex-1 space-y-4 overflow-y-auto p-4">
+                    <div className="min-w-0 text-center">
+                        <p className="break-words text-lg font-semibold [overflow-wrap:anywhere]" data-testid="quick-quote-item-name">{item.name}</p>
+                        <p className="break-words text-xs text-slate-400 [overflow-wrap:anywhere]" data-testid="quick-quote-item-category">{item.category}</p>
                     </div>
 
-                    {/* Quantity Control */}
                     <div className="flex items-center justify-center gap-4">
                         <Button
                             variant="outline"
                             size="icon"
+                            className="h-11 w-11 rounded-lg border-white/10 bg-slate-950 text-slate-100 hover:bg-slate-900"
                             onClick={() => setQuantity(Math.max(1, quantity - 1))}
                             disabled={quantity <= 1}
+                            aria-label="Decrease quantity"
                         >
                             <Minus className="h-4 w-4" />
                         </Button>
-                        <span className="text-2xl font-bold w-12 text-center">{quantity}</span>
+                        <span className="w-12 text-center text-2xl font-bold">{quantity}</span>
                         <Button
                             variant="outline"
                             size="icon"
+                            className="h-11 w-11 rounded-lg border-white/10 bg-slate-950 text-slate-100 hover:bg-slate-900"
                             onClick={() => setQuantity(quantity + 1)}
+                            aria-label="Increase quantity"
                         >
                             <Plus className="h-4 w-4" />
                         </Button>
                     </div>
 
-                    {/* Price Input */}
-                    <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground">Price:</span>
-                        <div className="flex items-center gap-1 flex-1">
-                            <span className="text-lg font-medium">$</span>
+                    <div className="flex min-w-0 items-center gap-2">
+                        <span className="shrink-0 text-slate-400">Price:</span>
+                        <div className="flex min-w-0 flex-1 items-center gap-1">
+                            <span className="shrink-0 text-lg font-medium">$</span>
                             <Input
                                 type="number"
                                 value={price}
                                 onChange={(e) => setPrice(Number(e.target.value))}
-                                className="text-lg font-medium"
+                                className="min-w-0 rounded-lg border-white/10 bg-slate-950 text-lg font-medium text-white"
                             />
                         </div>
                     </div>
 
-                    {/* Totals */}
-                    <div className="bg-muted/50 rounded-lg p-3 space-y-1">
-                        <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">Subtotal</span>
-                            <span>${subtotal.toFixed(2)}</span>
+                    <div className="space-y-1 rounded-lg border border-white/10 bg-slate-950/70 p-3">
+                        <div className="flex min-w-0 justify-between gap-3 text-sm">
+                            <span className="text-slate-400">Subtotal</span>
+                            <span className="break-words text-right [overflow-wrap:anywhere]">${subtotal.toFixed(2)}</span>
                         </div>
-                        <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">Tax ({taxRate}%)</span>
-                            <span>${taxAmount.toFixed(2)}</span>
+                        <div className="flex min-w-0 justify-between gap-3 text-sm">
+                            <span className="text-slate-400">Tax ({taxRate}%)</span>
+                            <span className="break-words text-right [overflow-wrap:anywhere]">${taxAmount.toFixed(2)}</span>
                         </div>
-                        <div className="flex justify-between pt-2 border-t">
-                            <span className="font-bold">Total</span>
-                            <span className="font-bold text-primary text-xl">${total.toFixed(2)}</span>
+                        <div className="flex min-w-0 justify-between gap-3 border-t border-white/10 pt-2">
+                            <span className="shrink-0 font-bold">Total</span>
+                            <span className="break-words text-right text-xl font-bold text-blue-300 [overflow-wrap:anywhere]">${total.toFixed(2)}</span>
                         </div>
                     </div>
 
-                    {/* Payment Link Status */}
                     {paymentLink && (
-                        <div className="text-center text-sm text-green-600 flex items-center justify-center gap-1">
-                            <Check className="h-4 w-4" />
-                            Payment link included
+                        <div className="flex min-w-0 items-center justify-center gap-1 text-center text-sm text-emerald-200">
+                            <Check className="h-4 w-4 shrink-0" />
+                            <span className="min-w-0 break-words [overflow-wrap:anywhere]">Payment link included</span>
                         </div>
                     )}
+
+                    {paymentLinkIssue && !paymentLink ? (
+                        <div
+                            ref={paymentLinkIssueRef}
+                            role="alert"
+                            className="rounded-lg border border-amber-300/20 bg-amber-400/10 p-3"
+                            data-testid="quick-quote-payment-issue"
+                        >
+                            <div className="flex gap-2">
+                                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" />
+                                <div className="min-w-0">
+                                    <p className="break-words text-sm font-semibold text-amber-100 [overflow-wrap:anywhere]" data-testid="quick-quote-payment-issue-title">{paymentLinkIssue.title}</p>
+                                    <p className="mt-1 break-words text-xs leading-5 text-amber-100/75 [overflow-wrap:anywhere]" data-testid="quick-quote-payment-issue-message">{paymentLinkIssue.message}</p>
+                                </div>
+                            </div>
+                            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                {paymentLinkIssue.actionHref && paymentLinkIssue.actionLabel ? (
+                                    <Button asChild size="sm" className="h-11 w-full rounded-lg" data-testid="quick-quote-profile-action">
+                                        <NextLink href={paymentLinkIssue.actionHref}>
+                                            {paymentLinkIssue.actionLabel}
+                                        </NextLink>
+                                    </Button>
+                                ) : null}
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-11 w-full rounded-lg border-amber-300/20 bg-slate-950/70 text-amber-100 hover:bg-amber-400/10"
+                                    onClick={() => void handleGeneratePaymentLink()}
+                                    disabled={isGeneratingLink}
+                                    data-testid="quick-quote-retry-action"
+                                >
+                                    Retry
+                                </Button>
+                            </div>
+                        </div>
+                    ) : null}
                 </div>
 
-                {/* Actions */}
-                <div className="p-4 border-t bg-muted/30 space-y-2">
-                    {/* Copy Button */}
+                <div className="shrink-0 space-y-2 border-t border-white/10 bg-slate-950/50 p-4" data-testid="quick-quote-modal-footer">
                     <Button
-                        className="w-full h-12"
+                        className="h-12 w-full rounded-lg"
                         onClick={handleCopyToClipboard}
                     >
                         {copied ? (
                             <>
-                                <Check className="h-4 w-4 mr-2" />
+                                <Check className="mr-2 h-4 w-4 shrink-0" />
                                 Copied!
                             </>
                         ) : (
                             <>
-                                <Copy className="h-4 w-4 mr-2" />
-                                📱 Copy for SMS / Chat
+                                <Copy className="mr-2 h-4 w-4 shrink-0" />
+                                Copy for SMS / Chat
                             </>
                         )}
                     </Button>
 
-                    {/* Payment Link Button */}
                     <Button
                         variant="outline"
-                        className="w-full"
+                        className="h-12 w-full rounded-lg border-white/10 bg-slate-950 text-slate-100 hover:bg-slate-900"
                         onClick={handleGeneratePaymentLink}
                         disabled={isGeneratingLink || !!paymentLink}
                     >
                         {isGeneratingLink ? (
                             <>
-                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                <Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin" />
                                 Generating...
                             </>
                         ) : paymentLink ? (
                             <>
-                                <Check className="h-4 w-4 mr-2" />
+                                <Check className="mr-2 h-4 w-4 shrink-0" />
                                 Link Ready - Copy Above
                             </>
                         ) : (
                             <>
-                                <CreditCard className="h-4 w-4 mr-2" />
-                                💳 Add Payment Link
+                                <CreditCard className="mr-2 h-4 w-4 shrink-0" />
+                                Add Payment Link
                             </>
                         )}
                     </Button>

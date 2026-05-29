@@ -1,16 +1,18 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { supabase } from '@/lib/supabase'
 import { toast } from '@/components/toast'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { triggerQuoteRecovery, type QuoteRecoveryResult } from '@/lib/quote-recovery'
-import { AlertCircle, Loader2, Terminal } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Eye, Loader2, Play, Send, Star, Terminal } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 interface Automation {
     id: string
@@ -22,6 +24,36 @@ interface Automation {
         delay_days?: number // Legacy support
         review_link?: string
     }
+}
+
+export type AutomationStatusSummary = {
+    loading: boolean
+    missingTable: boolean
+    totalBots: number
+    enabledCount: number
+    quoteChaserEnabled: boolean
+    reviewRequestEnabled: boolean
+    readyLabel: string
+    nextActionLabel: string
+    nextActionHref: string
+    nextActionCtaLabel: string
+}
+
+export const defaultAutomationStatusSummary: AutomationStatusSummary = {
+    loading: true,
+    missingTable: false,
+    totalBots: 2,
+    enabledCount: 0,
+    quoteChaserEnabled: false,
+    reviewRequestEnabled: false,
+    readyLabel: 'Loading',
+    nextActionLabel: 'Loading bot status...',
+    nextActionHref: '#automation-settings',
+    nextActionCtaLabel: 'Open',
+}
+
+type AutomationSettingsProps = {
+    onStatusSummaryChange?: (summary: AutomationStatusSummary) => void
 }
 
 function getQuoteChaserDelayDays(settings?: Automation["settings"]) {
@@ -40,7 +72,88 @@ function getQuoteChaserDelayDays(settings?: Automation["settings"]) {
     }
 }
 
-export function AutomationSettings() {
+function getAutomationBadgeClass(enabled: boolean) {
+    return enabled
+        ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/10'
+        : 'border-white/10 bg-slate-950/60 text-slate-400 hover:bg-slate-950/60'
+}
+
+function formatRecoveryAction(action: QuoteRecoveryResult["action"]) {
+    return action.replace(/_/g, ' ')
+}
+
+function buildAutomationStatusSummary(input: {
+    loading: boolean
+    missingTable: boolean
+    quoteChaserEnabled: boolean
+    reviewRequestEnabled: boolean
+}): AutomationStatusSummary {
+    const enabledCount = Number(input.quoteChaserEnabled) + Number(input.reviewRequestEnabled)
+
+    if (input.loading) {
+        return defaultAutomationStatusSummary
+    }
+
+    if (input.missingTable) {
+        return {
+            loading: false,
+            missingTable: true,
+            totalBots: 2,
+            enabledCount,
+            quoteChaserEnabled: input.quoteChaserEnabled,
+            reviewRequestEnabled: input.reviewRequestEnabled,
+            readyLabel: 'Setup needed',
+            nextActionLabel: 'Run the automations migration, then recheck settings',
+            nextActionHref: '#automation-settings',
+            nextActionCtaLabel: 'Open setup',
+        }
+    }
+
+    if (!input.quoteChaserEnabled) {
+        return {
+            loading: false,
+            missingTable: false,
+            totalBots: 2,
+            enabledCount,
+            quoteChaserEnabled: false,
+            reviewRequestEnabled: input.reviewRequestEnabled,
+            readyLabel: `${enabledCount}/2 live`,
+            nextActionLabel: 'Turn on Quote Chaser to start quote recovery',
+            nextActionHref: '#quote-chaser-card',
+            nextActionCtaLabel: 'Open setup',
+        }
+    }
+
+    if (!input.reviewRequestEnabled) {
+        return {
+            loading: false,
+            missingTable: false,
+            totalBots: 2,
+            enabledCount,
+            quoteChaserEnabled: true,
+            reviewRequestEnabled: false,
+            readyLabel: `${enabledCount}/2 live`,
+            nextActionLabel: 'Add Reputation Manager for paid-job review requests',
+            nextActionHref: '#review-manager-card',
+            nextActionCtaLabel: 'Open reviews',
+        }
+    }
+
+    return {
+        loading: false,
+        missingTable: false,
+        totalBots: 2,
+        enabledCount,
+        quoteChaserEnabled: true,
+        reviewRequestEnabled: true,
+        readyLabel: '2/2 live',
+        nextActionLabel: 'Preview the next recovery batch before sending',
+        nextActionHref: '#quote-recovery-copilot',
+        nextActionCtaLabel: 'Preview batch',
+    }
+}
+
+export function AutomationSettings({ onStatusSummaryChange }: AutomationSettingsProps = {}) {
     const [automations, setAutomations] = useState<Automation[]>([])
     const [loading, setLoading] = useState(true)
     const [missingTable, setMissingTable] = useState(false)
@@ -48,11 +161,12 @@ export function AutomationSettings() {
     const [recoveryPreviewed, setRecoveryPreviewed] = useState(false)
     const [recoveryResults, setRecoveryResults] = useState<QuoteRecoveryResult[]>([])
     const [recoveryMode, setRecoveryMode] = useState<'preview' | 'live' | null>(null)
+    const [recoveryFeedback, setRecoveryFeedback] = useState<string | null>(null)
     const firstFollowupInputRef = useRef<HTMLInputElement | null>(null)
     const secondFollowupInputRef = useRef<HTMLInputElement | null>(null)
 
     useEffect(() => {
-        fetchAutomations()
+        void fetchAutomations()
     }, [])
 
     const fetchAutomations = async () => {
@@ -152,6 +266,19 @@ export function AutomationSettings() {
     const quoteChaser = automations.find(a => a.type === 'quote_chaser')
     const reviewRequest = automations.find(a => a.type === 'review_request')
     const quoteChaserDelayDays = getQuoteChaserDelayDays(quoteChaser?.settings)
+    const statusSummary = useMemo(
+        () => buildAutomationStatusSummary({
+            loading,
+            missingTable,
+            quoteChaserEnabled: Boolean(quoteChaser?.is_enabled),
+            reviewRequestEnabled: Boolean(reviewRequest?.is_enabled),
+        }),
+        [loading, missingTable, quoteChaser?.is_enabled, reviewRequest?.is_enabled]
+    )
+
+    useEffect(() => {
+        onStatusSummaryChange?.(statusSummary)
+    }, [onStatusSummaryChange, statusSummary])
 
     const commitQuoteChaserDelays = () => {
         if (!quoteChaser) return
@@ -166,41 +293,47 @@ export function AutomationSettings() {
     const runQuoteRecovery = async (dryRun: boolean) => {
         setRecoveryRunning(true)
         setRecoveryMode(dryRun ? 'preview' : 'live')
+        setRecoveryFeedback(null)
         try {
             const data = await triggerQuoteRecovery({ dryRun })
             setRecoveryResults(data.results)
 
             if (dryRun) {
                 setRecoveryPreviewed(true)
-                toast(
+                setRecoveryFeedback(
                     data.processedCount > 0
                         ? `Preview ready: ${data.processedCount} quote${data.processedCount > 1 ? 's' : ''} eligible for follow-up.`
-                        : 'Preview ready: no quotes currently eligible for follow-up.',
-                    'success'
+                        : 'Preview ready: no quotes currently eligible for follow-up.'
                 )
                 return
             }
 
-            toast(
+            setRecoveryFeedback(
                 data.processedCount > 0
                     ? `Quote Recovery sent ${data.processedCount} follow-up${data.processedCount > 1 ? 's' : ''}.`
-                    : 'Quote Recovery run finished with no eligible quotes.',
-                'success'
+                    : 'Quote Recovery run finished with no eligible quotes.'
             )
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Quote recovery trigger failed:', error)
-            toast(error?.message || 'Failed to run Quote Recovery.', 'error')
+            toast(error instanceof Error ? error.message : 'Failed to run Quote Recovery.', 'error')
         } finally {
             setRecoveryRunning(false)
         }
     }
 
-    if (loading) return <div>Loading settings...</div>
+    if (loading) {
+        return (
+            <div className="field-panel flex items-center gap-2 p-4 text-sm text-slate-400">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading automation settings...
+            </div>
+        )
+    }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-3" id="automation-settings">
             {missingTable && (
-                <Alert variant="destructive">
+                <Alert variant="destructive" className="border-red-400/30 bg-red-950/30 text-red-100">
                     <AlertCircle className="h-4 w-4" />
                     <AlertTitle>설정 필요: 데이터베이스 마이그레이션이 필요합니다</AlertTitle>
                     <AlertDescription className="mt-2 space-y-2">
@@ -232,7 +365,7 @@ create policy "Users can update own automations" on automations for update using
                         <Button
                             variant="outline"
                             size="sm"
-                            className="w-full mt-2"
+                            className="mt-2 w-full rounded-lg border-white/10 bg-slate-950/60 text-white"
                             onClick={fetchAutomations}
                         >
                             마이그레이션을 실행했습니다, 다시 확인하기
@@ -241,14 +374,61 @@ create policy "Users can update own automations" on automations for update using
                 </Alert>
             )}
 
-            <Card className={missingTable ? 'opacity-50 pointer-events-none' : ''}>
-                <CardHeader>
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <CardTitle>Quote Chaser</CardTitle>
-                            <CardDescription>Automatically follow up on sent quotes at 48h and 7 days.</CardDescription>
+            <div className="field-panel p-2" data-testid="automation-status-overview">
+                <div className="grid grid-cols-3 gap-2">
+                    <div className="field-mini flex min-w-0 items-center gap-2 px-2 py-2">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-400/20 bg-emerald-500/10">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-200" />
+                        </div>
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Enabled</p>
+                            <p className="truncate text-sm font-semibold text-white">{statusSummary.enabledCount}/{statusSummary.totalBots}</p>
+                        </div>
+                    </div>
+                    <div className="field-mini px-2 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Quote</p>
+                            <Badge variant="outline" className={cn('h-6 rounded-md px-2 text-[10px] uppercase', getAutomationBadgeClass(statusSummary.quoteChaserEnabled))}>
+                                {statusSummary.quoteChaserEnabled ? 'On' : 'Off'}
+                            </Badge>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-slate-400">Recovery</p>
+                    </div>
+                    <div className="field-mini px-2 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Reviews</p>
+                            <Badge variant="outline" className={cn('h-6 rounded-md px-2 text-[10px] uppercase', getAutomationBadgeClass(statusSummary.reviewRequestEnabled))}>
+                                {statusSummary.reviewRequestEnabled ? 'On' : 'Off'}
+                            </Badge>
+                        </div>
+                        <p className="mt-1 truncate text-xs text-slate-400">After pay</p>
+                    </div>
+                </div>
+            </div>
+
+            <Card
+                id="quote-chaser-card"
+                data-testid="quote-chaser-card"
+                className={`field-card scroll-mt-24 ${missingTable ? 'opacity-50 pointer-events-none' : ''}`}
+            >
+                <CardHeader className="p-4 pb-3">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-blue-400/20 bg-blue-500/10 text-blue-200">
+                                <Send className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <CardTitle className="text-base text-white">Quote Chaser</CardTitle>
+                                    <Badge variant="outline" className={cn('h-6 rounded-md px-2 text-[10px] uppercase', getAutomationBadgeClass(Boolean(quoteChaser?.is_enabled)))}>
+                                        {quoteChaser?.is_enabled ? 'On' : 'Off'}
+                                    </Badge>
+                                </div>
+                                <CardDescription className="mt-1 text-slate-400">Automatically follow up on sent quotes at 48h and 7 days.</CardDescription>
+                            </div>
                         </div>
                         <Switch
+                            aria-label="Toggle Quote Chaser"
                             checked={quoteChaser?.is_enabled || false}
                             onCheckedChange={(checked) => toggleAutomation('quote_chaser', checked)}
                             disabled={missingTable}
@@ -256,13 +436,13 @@ create policy "Users can update own automations" on automations for update using
                     </div>
                 </CardHeader>
                 {quoteChaser?.is_enabled && quoteChaser?.settings && (
-                    <CardContent className="space-y-4">
-                        <div className="flex items-center gap-4">
-                            <Label htmlFor="chaser-delay-first">1st Follow-up (Days)</Label>
+                    <CardContent className="space-y-4 p-4 pt-0">
+                        <div className="grid gap-2 sm:grid-cols-[1fr_5rem] sm:items-center">
+                            <Label htmlFor="chaser-delay-first" className="text-slate-300">1st Follow-up (Days)</Label>
                             <Input
                                 id="chaser-delay-first"
                                 type="number"
-                                className="w-20"
+                                className="rounded-lg border-white/10 bg-slate-950/70 text-white"
                                 key={`${quoteChaser.id}-first-${quoteChaserDelayDays.firstDelayDays}`}
                                 defaultValue={quoteChaserDelayDays.firstDelayDays}
                                 min={1}
@@ -271,12 +451,12 @@ create policy "Users can update own automations" on automations for update using
                                 onBlur={commitQuoteChaserDelays}
                             />
                         </div>
-                        <div className="flex items-center gap-4">
-                            <Label htmlFor="chaser-delay-second">2nd Follow-up (Days)</Label>
+                        <div className="grid gap-2 sm:grid-cols-[1fr_5rem] sm:items-center">
+                            <Label htmlFor="chaser-delay-second" className="text-slate-300">2nd Follow-up (Days)</Label>
                             <Input
                                 id="chaser-delay-second"
                                 type="number"
-                                className="w-20"
+                                className="rounded-lg border-white/10 bg-slate-950/70 text-white"
                                 key={`${quoteChaser.id}-second-${quoteChaserDelayDays.secondDelayDays}`}
                                 defaultValue={quoteChaserDelayDays.secondDelayDays}
                                 min={2}
@@ -289,10 +469,13 @@ create policy "Users can update own automations" on automations for update using
                             Recommended: 2 days and 7 days. Second follow-up is sent only if still not paid.
                         </p>
 
-                        <div className="rounded-lg border bg-muted/40 p-4 space-y-3">
+                        <div id="quote-recovery-copilot" className="scroll-mt-24 space-y-3 rounded-lg border border-white/10 bg-slate-950/55 p-4" data-testid="quote-recovery-copilot">
                             <div className="space-y-1">
-                                <p className="text-sm font-medium">Quote Recovery Copilot</p>
-                                <p className="text-xs text-muted-foreground">
+                                <p className="flex items-center gap-2 text-sm font-medium text-white">
+                                    <Eye className="h-4 w-4 text-blue-200" />
+                                    Quote Recovery Copilot
+                                </p>
+                                <p className="text-xs text-slate-400">
                                     Preview the next recovery batch before sending. Live runs are limited to Pro and Team accounts.
                                 </p>
                             </div>
@@ -302,23 +485,27 @@ create policy "Users can update own automations" on automations for update using
                                     type="button"
                                     variant="outline"
                                     size="sm"
+                                    className="min-h-11 w-full rounded-lg border-white/10 bg-slate-900/70 text-white sm:w-auto"
                                     onClick={() => void runQuoteRecovery(true)}
                                     disabled={recoveryRunning}
+                                    data-testid="quote-recovery-preview-button"
                                 >
                                     {recoveryRunning && recoveryMode === 'preview' ? (
                                         <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                                    ) : null}
+                                    ) : <Eye className="mr-2 h-3 w-3" />}
                                     Preview Next Batch
                                 </Button>
                                 <Button
                                     type="button"
                                     size="sm"
+                                    className="min-h-11 w-full rounded-lg sm:w-auto"
                                     onClick={() => void runQuoteRecovery(false)}
                                     disabled={recoveryRunning || !recoveryPreviewed}
+                                    data-testid="quote-recovery-run-button"
                                 >
                                     {recoveryRunning && recoveryMode === 'live' ? (
                                         <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                                    ) : null}
+                                    ) : <Play className="mr-2 h-3 w-3" />}
                                     Run Now
                                 </Button>
                             </div>
@@ -329,21 +516,33 @@ create policy "Users can update own automations" on automations for update using
                                 </p>
                             )}
 
+                            {recoveryFeedback && (
+                                <div
+                                    className="rounded-lg border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-xs leading-5 text-emerald-100"
+                                    data-testid="quote-recovery-feedback"
+                                    role="status"
+                                >
+                                    {recoveryFeedback}
+                                </div>
+                            )}
+
                             {recoveryResults.length > 0 && (
-                                <div className="space-y-2 rounded-md border bg-background p-3">
-                                    <p className="text-xs font-medium text-muted-foreground">
+                                <div className="space-y-2 rounded-lg border border-white/10 bg-slate-900/70 p-3" data-testid="quote-recovery-results">
+                                    <p className="text-xs font-medium text-slate-400">
                                         {recoveryMode === 'live' ? 'Latest live run' : 'Latest preview'}
                                     </p>
                                     <div className="space-y-2">
                                         {recoveryResults.map((result) => (
-                                            <div key={`${recoveryMode}-${result.estimateId}`} className="rounded border p-2 text-sm">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <span className="font-medium">{result.estimateNumber}</span>
-                                                    <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                                                        {result.action.replace('_', ' ')}
+                                            <div key={`${recoveryMode}-${result.estimateId}`} className="min-w-0 rounded-lg border border-white/10 bg-slate-950/50 p-2 text-sm" data-testid="quote-recovery-result-card">
+                                                <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                                                    <span className="min-w-0 break-words font-medium leading-5 text-white [overflow-wrap:anywhere]" data-testid="quote-recovery-result-estimate">
+                                                        {result.estimateNumber}
+                                                    </span>
+                                                    <span className="shrink-0 text-xs uppercase tracking-wide text-slate-500" data-testid="quote-recovery-result-action">
+                                                        {formatRecoveryAction(result.action)}
                                                     </span>
                                                 </div>
-                                                <p className="mt-1 text-xs text-muted-foreground">
+                                                <p className="mt-2 break-words text-xs leading-5 text-slate-400 [overflow-wrap:anywhere]" data-testid="quote-recovery-result-message">
                                                     {result.messagePreview}
                                                 </p>
                                             </div>
@@ -356,14 +555,29 @@ create policy "Users can update own automations" on automations for update using
                 )}
             </Card>
 
-            <Card className={missingTable ? 'opacity-50 pointer-events-none' : ''}>
-                <CardHeader>
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <CardTitle>Reputation Manager</CardTitle>
-                            <CardDescription>Send review requests to customers after payment is received.</CardDescription>
+            <Card
+                id="review-manager-card"
+                data-testid="review-manager-card"
+                className={`field-card scroll-mt-24 ${missingTable ? 'opacity-50 pointer-events-none' : ''}`}
+            >
+                <CardHeader className="p-4 pb-3">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-amber-400/20 bg-amber-500/10 text-amber-200">
+                                <Star className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <CardTitle className="text-base text-white">Reputation Manager</CardTitle>
+                                    <Badge variant="outline" className={cn('h-6 rounded-md px-2 text-[10px] uppercase', getAutomationBadgeClass(Boolean(reviewRequest?.is_enabled)))}>
+                                        {reviewRequest?.is_enabled ? 'On' : 'Off'}
+                                    </Badge>
+                                </div>
+                                <CardDescription className="mt-1 text-slate-400">Send review requests to customers after payment is received.</CardDescription>
+                            </div>
                         </div>
                         <Switch
+                            aria-label="Toggle Reputation Manager"
                             checked={reviewRequest?.is_enabled || false}
                             onCheckedChange={(checked) => toggleAutomation('review_request', checked)}
                             disabled={missingTable}
@@ -371,15 +585,15 @@ create policy "Users can update own automations" on automations for update using
                     </div>
                 </CardHeader>
                 {reviewRequest?.is_enabled && reviewRequest?.settings && (
-                    <CardContent className="space-y-4">
-                        <p className="text-sm text-muted-foreground">Requests will be sent 24 hours after an estimate is marked as &apos;paid&apos;.</p>
-                        <div className="flex items-center gap-4">
-                            <Label htmlFor="review-link">Google/Yelp Link</Label>
+                    <CardContent className="space-y-4 p-4 pt-0">
+                        <p className="text-sm text-slate-400">Requests will be sent 24 hours after an estimate is marked as &apos;paid&apos;.</p>
+                        <div className="grid gap-2">
+                            <Label htmlFor="review-link" className="text-slate-300">Google/Yelp Link</Label>
                             <Input
                                 id="review-link"
                                 type="url"
                                 placeholder="https://g.page/..."
-                                className="flex-1"
+                                className="rounded-lg border-white/10 bg-slate-950/70 text-white"
                                 defaultValue={reviewRequest.settings.review_link || ''}
                                 onBlur={(e) => updateReviewLink(reviewRequest.id, e.target.value)}
                             />

@@ -1,12 +1,13 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Zap, Send, X, ChevronLeft, ChevronRight, Check, Hammer, Droplets, HardHat, Thermometer, Sparkles } from "lucide-react"
+import { Mic, Zap, Send, X, ArrowRight, ChevronLeft, ChevronRight, Check, Hammer, Droplets, HardHat, Thermometer, Sparkles } from "lucide-react"
 import { TRADE_PRESETS, TradeType } from "@/lib/trade-presets"
 import { savePriceListItem } from "@/lib/db"
-import { getProfile, saveProfile } from "@/lib/estimates-storage"
+import { getProfile, saveProfile, BusinessInfo } from "@/lib/estimates-storage"
+import { cn } from "@/lib/utils"
 
 interface OnboardingModalProps {
     open: boolean
@@ -25,12 +26,20 @@ const STEPS = [
         isTradeSelection: true
     },
     {
-        id: "how-it-works",
-        icon: Zap,
+        id: "speak",
+        icon: Mic,
         iconBg: "bg-blue-500",
-        title: "Speak & Get Estimate",
-        description: "Describe the job in your words. AI creates a professional estimate with Parts, Labor, and pricing in 30 seconds.",
-        example: "",
+        title: "Speak Your Job",
+        description: "Just describe the work into your microphone. AI will understand and organize it.",
+        example: '"Bathroom renovation, 50 sqft tile, toilet replacement, 4 hours labor"',
+    },
+    {
+        id: "ai",
+        icon: Zap,
+        iconBg: "bg-amber-500",
+        title: "AI Creates Your Estimate",
+        description: "In 30 seconds, get a professional estimate with Parts, Labor, and Service itemized.",
+        example: "Parts: $450 | Labor: $320 | Tax: $100 | Total: $870",
     },
     {
         id: "send",
@@ -43,7 +52,7 @@ const STEPS = [
     },
 ]
 
-export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalProps): JSX.Element | null {
+export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalProps) {
     const [currentStep, setCurrentStep] = useState(0)
     const [isAnimating, setIsAnimating] = useState(false)
     const [termsAccepted, setTermsAccepted] = useState(false)
@@ -129,42 +138,42 @@ export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalPr
     if (isLastStep && !termsAccepted) canProceed = false
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <Card className="w-full max-w-sm overflow-hidden shadow-2xl max-h-[90vh] flex flex-col">
+        <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+            <div className="field-panel flex max-h-[90vh] w-full max-w-sm flex-col overflow-hidden">
                 {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b shrink-0">
-                    <span className="text-sm text-muted-foreground">
+                <div className="flex shrink-0 items-center justify-between border-b border-white/10 p-4">
+                    <span className="text-sm text-slate-400">
                         {currentStep + 1} / {STEPS.length}
                     </span>
-                    <Button variant="ghost" size="sm" onClick={handleSkip} className="text-muted-foreground">
+                    <Button variant="ghost" size="sm" onClick={handleSkip} className="rounded-lg text-slate-400 hover:bg-white/10 hover:text-white">
                         Skip <X className="h-4 w-4 ml-1" />
                     </Button>
                 </div>
 
                 {/* Content - Scrollable */}
-                <CardContent className="p-6 overflow-y-auto">
+                <div className="overflow-y-auto p-6">
                     <div
                         className={`flex flex-col items-center text-center transition-opacity duration-300 ${isAnimating ? "opacity-0" : "opacity-100"
                             }`}
                     >
                         {/* Icon */}
-                        <div className={`p-4 rounded-full ${step.iconBg} mb-6 shrink-0`}>
+                        <div className={cn("mb-6 shrink-0 rounded-lg p-4 shadow-[0_18px_32px_-24px_rgba(37,99,235,0.9)]", step.iconBg)}>
                             <StepIcon className="h-8 w-8 text-white" />
                         </div>
 
                         {/* Title */}
-                        <h2 className="text-xl font-bold text-foreground mb-3">
+                        <h2 className="mb-3 text-xl font-semibold text-white">
                             {step.title}
                         </h2>
 
                         {/* Description */}
-                        <p className="text-sm text-muted-foreground mb-4">
+                        <p className="mb-4 text-sm leading-6 text-slate-400">
                             {step.description}
                         </p>
 
                         {/* Trade Selection Grid */}
                         {step.isTradeSelection && (
-                            <div className="grid grid-cols-2 gap-3 w-full mb-4">
+                            <div className="mb-4 grid w-full grid-cols-2 gap-3">
                                 {TRADE_PRESETS.map((trade) => {
                                     // Dynamic icon based on trade preset (mapping strings to components if needed, or using lucide)
                                     // Simple mapping for this demo since we imported specific icons
@@ -179,10 +188,12 @@ export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalPr
                                         <button
                                             key={trade.id}
                                             onClick={() => setSelectedTrade(trade.id)}
-                                            className={`flex flex-col items-center p-3 rounded-lg border-2 transition-all ${isSelected
-                                                ? "border-primary bg-primary/10"
-                                                : "border-muted hover:border-primary/50"
-                                                }`}
+                                            className={cn(
+                                                "flex flex-col items-center rounded-lg border p-3 text-slate-200 transition-colors",
+                                                isSelected
+                                                    ? "border-blue-400/40 bg-blue-500/10 ring-1 ring-blue-400/20"
+                                                    : "border-white/10 bg-slate-950/55 hover:border-white/20 hover:bg-slate-900"
+                                            )}
                                         >
                                             <div className={`p-2 rounded-full mb-2 ${trade.color} text-white`}>
                                                 <IconInfo className="h-5 w-5" />
@@ -196,8 +207,8 @@ export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalPr
 
                         {/* Example Box (Non-Trade Steps) */}
                         {!step.isTradeSelection && step.example && (
-                            <div className="w-full bg-muted/50 rounded-lg p-3 border border-border mb-4">
-                                <p className="text-xs text-muted-foreground italic">
+                            <div className="mb-4 w-full rounded-lg border border-white/10 bg-slate-950/55 p-3">
+                                <p className="text-xs italic text-slate-400">
                                     {step.example}
                                 </p>
                             </div>
@@ -205,52 +216,53 @@ export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalPr
 
                         {/* Terms Checkbox - Only on last step */}
                         {step.showTerms && (
-                            <button
-                                onClick={() => setTermsAccepted(!termsAccepted)}
-                                className="flex items-center gap-3 w-full p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors text-left"
-                            >
-                                <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${termsAccepted
-                                    ? "bg-primary border-primary"
-                                    : "border-muted-foreground/50"
-                                    }`}>
-                                    {termsAccepted && <Check className="h-3 w-3 text-primary-foreground" />}
-                                </div>
-                                <span className="text-sm text-foreground">
-                                    I agree to the{" "}
-                                    <a
-                                        href="#"
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="text-primary underline"
-                                    >
-                                        Terms of Service
-                                    </a>
-                                </span>
-                            </button>
+                            <div className="flex w-full items-center gap-3 rounded-lg border border-white/10 bg-slate-950/55 p-3 text-left">
+                                <button
+                                    type="button"
+                                    role="checkbox"
+                                    aria-checked={termsAccepted}
+                                    onClick={() => setTermsAccepted(!termsAccepted)}
+                                    className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left text-sm text-slate-200 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-500"
+                                >
+                                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors ${termsAccepted
+                                        ? "border-blue-500 bg-blue-600"
+                                        : "border-slate-500"
+                                        }`}>
+                                        {termsAccepted && <Check className="h-3 w-3 text-white" />}
+                                    </span>
+                                    <span>I agree to the Terms of Service</span>
+                                </button>
+                                <Link href="/terms" target="_blank" rel="noreferrer" className="shrink-0 rounded text-sm font-medium text-blue-200 underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                                    View
+                                </Link>
+                            </div>
                         )}
                     </div>
-                </CardContent>
+                </div>
 
                 {/* Progress Dots */}
-                <div className="flex justify-center gap-2 pb-4 shrink-0">
+                <div className="flex shrink-0 justify-center gap-2 pb-4">
                     {STEPS.map((_, index) => (
                         <button
+                            type="button"
                             key={index}
                             onClick={() => !isAnimating && index < currentStep && setCurrentStep(index)}
-                            className={`w-2 h-2 rounded-full transition-all ${index === currentStep
-                                ? "bg-primary w-6"
-                                : "bg-muted-foreground/30 hover:bg-muted-foreground/50"
+                            aria-label={`Go to onboarding step ${index + 1}`}
+                            className={`h-2 rounded-full transition-all ${index === currentStep
+                                ? "w-6 bg-blue-500"
+                                : "w-2 bg-slate-700 hover:bg-slate-500"
                                 }`}
                         />
                     ))}
                 </div>
 
                 {/* Navigation */}
-                <div className="flex gap-2 p-4 border-t bg-muted/30 shrink-0">
+                <div className="flex shrink-0 gap-2 border-t border-white/10 bg-slate-950/55 p-4">
                     <Button
                         variant="outline"
                         onClick={handlePrev}
                         disabled={currentStep === 0}
-                        className="flex-1"
+                        className="flex-1 rounded-lg border-white/10 bg-slate-950/60 text-slate-200 hover:bg-slate-900 hover:text-white"
                     >
                         <ChevronLeft className="h-4 w-4 mr-1" />
                         Back
@@ -258,12 +270,12 @@ export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalPr
                     <Button
                         onClick={handleNext}
                         disabled={!canProceed || isSaving}
-                        className="flex-1"
+                        className="flex-1 rounded-lg"
                     >
                         {isSaving ? "Setting up..." : isLastStep ? (
                             <>
                                 Try Practice Estimate
-                                <Sparkles className="h-4 w-4 ml-2 fill-primary-foreground" />
+                                <Sparkles className="h-4 w-4 ml-2 fill-white" />
                             </>
                         ) : (
                             <>
@@ -273,7 +285,7 @@ export function OnboardingModal({ open, onClose, onComplete }: OnboardingModalPr
                         )}
                     </Button>
                 </div>
-            </Card>
+            </div>
         </div>
     )
 }

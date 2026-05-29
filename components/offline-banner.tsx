@@ -4,10 +4,12 @@ import { useState, useEffect } from "react"
 import { WifiOff, Wifi } from "lucide-react"
 import { formatPendingSyncSummary, getPendingSyncSummary, type PendingSyncSummary } from "@/lib/offline-sync"
 import { subscribeOfflineQueueChanged } from "@/lib/offline-events"
+import { useBottomChromeOffset } from "@/hooks/use-bottom-chrome-offset"
 
 export function OfflineBanner() {
     const [isOffline, setIsOffline] = useState(false)
     const [showBanner, setShowBanner] = useState(false)
+    const bottomOffset = useBottomChromeOffset()
     const [summary, setSummary] = useState<PendingSyncSummary>({
         draftCount: 0,
         sentCount: 0,
@@ -26,9 +28,14 @@ export function OfflineBanner() {
             }
         }
 
+        const syncConnectionState = () => {
+            const nextIsOffline = !navigator.onLine
+            setIsOffline(nextIsOffline)
+            if (nextIsOffline) setShowBanner(true)
+        }
+
         // Initial check
-        setIsOffline(!navigator.onLine)
-        setShowBanner(!navigator.onLine)
+        syncConnectionState()
         void loadSummary()
 
         const handleOnline = () => {
@@ -50,43 +57,65 @@ export function OfflineBanner() {
         const unsubscribe = subscribeOfflineQueueChanged(() => {
             void loadSummary()
         })
+        const connectionCheckId = window.setInterval(syncConnectionState, 1000)
+        document.documentElement.dataset.snapquoteOfflineMonitor = "ready"
 
         return () => {
             window.removeEventListener('online', handleOnline)
             window.removeEventListener('offline', handleOffline)
             unsubscribe()
+            window.clearInterval(connectionCheckId)
+            delete document.documentElement.dataset.snapquoteOfflineMonitor
         }
     }, [])
+
+    useEffect(() => {
+        if (showBanner) {
+            document.documentElement.dataset.snapquoteOfflineBanner = "visible"
+        } else {
+            delete document.documentElement.dataset.snapquoteOfflineBanner
+        }
+
+        return () => {
+            delete document.documentElement.dataset.snapquoteOfflineBanner
+        }
+    }, [showBanner])
 
     if (!showBanner) return null
 
     return (
         <div
+            className="pointer-events-none fixed left-0 right-0 z-[95] flex justify-center px-4"
             data-testid="offline-banner"
-            className={`fixed top-0 left-0 right-0 z-50 px-4 py-2 text-center text-sm font-medium transition-all duration-300 ${isOffline
-                    ? "bg-amber-500 text-amber-950"
-                    : "bg-green-500 text-green-950"
-                }`}
+            style={{ bottom: bottomOffset }}
         >
-            {isOffline ? (
-                <div className="flex items-center justify-center gap-2">
-                    <WifiOff className="h-4 w-4" />
-                    <span>
-                        📴 You&apos;re offline. {summary.totalPendingCount > 0
-                            ? `${formatPendingSyncSummary(summary)} saved on this device.`
-                            : "Any new changes will stay on this device until you reconnect."}
-                    </span>
-                </div>
-            ) : (
-                <div className="flex items-center justify-center gap-2">
-                    <Wifi className="h-4 w-4" />
-                    <span>
-                        ✅ Back online! {summary.totalPendingCount > 0
-                            ? `Syncing ${formatPendingSyncSummary(summary)}.`
-                            : "Local changes are ready to sync."}
-                    </span>
-                </div>
-            )}
+            <div
+                data-testid="offline-status-banner"
+                className={`pointer-events-auto w-full max-w-md rounded-lg border px-3 py-2 text-center text-xs font-medium shadow-[0_18px_48px_-28px_rgba(0,0,0,0.95)] transition-all duration-300 md:max-w-2xl ${isOffline
+                        ? "border-amber-400/25 bg-amber-950 text-amber-100"
+                        : "border-emerald-400/25 bg-emerald-950 text-emerald-100"
+                    }`}
+            >
+                {isOffline ? (
+                    <div className="flex items-center justify-center gap-2">
+                        <WifiOff className="h-4 w-4 shrink-0" />
+                        <span>
+                            You&apos;re offline. {summary.totalPendingCount > 0
+                                ? `${formatPendingSyncSummary(summary)} saved on this device.`
+                                : "New changes stay on this device until reconnect."}
+                        </span>
+                    </div>
+                ) : (
+                    <div className="flex items-center justify-center gap-2">
+                        <Wifi className="h-4 w-4 shrink-0" />
+                        <span>
+                            Back online. {summary.totalPendingCount > 0
+                                ? `Syncing ${formatPendingSyncSummary(summary)}.`
+                                : "No local changes are waiting."}
+                        </span>
+                    </div>
+                )}
+            </div>
         </div>
     )
 }

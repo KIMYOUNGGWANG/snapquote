@@ -1,6 +1,7 @@
 import { openDB, DBSchema } from 'idb';
 import type { PriceListItem, PriceCategory, PriceUnit } from '@/types';
 import { emitOfflineQueueChanged } from "@/lib/offline-events";
+import { normalizeEstimateForLocalSave, type LocalEstimateSaveInput } from "@/lib/estimate-local-save";
 
 interface SnapQuoteDB extends DBSchema {
     estimates: {
@@ -164,17 +165,10 @@ export async function initDB() {
 }
 
 // ============ ESTIMATES ============
-export async function saveEstimateToDB(estimate: any) {
+export async function saveEstimateToDB(estimate: LocalEstimateSaveInput) {
     const db = await initDB();
-    // Default status to 'draft' if not set
-    const now = new Date().toISOString();
-    const estimateWithStatus = {
-        ...estimate,
-        synced: false,
-        status: estimate.status || 'draft',
-        updatedAt: estimate.updatedAt || estimate.createdAt || now,
-    };
-    const result = await db.put('estimates', estimateWithStatus);
+    const estimateWithStatus = normalizeEstimateForLocalSave(estimate);
+    const result = await db.put('estimates', estimateWithStatus as SnapQuoteDB["estimates"]["value"]);
     emitOfflineQueueChanged();
     return result;
 }

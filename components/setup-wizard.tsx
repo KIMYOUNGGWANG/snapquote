@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { toast } from "@/components/toast"
-import { Loader2, CreditCard, ArrowRight, CheckCircle2, Upload, X, BadgeDollarSign, Package, ImagePlus } from "lucide-react"
+import { ArrowRight, BadgeDollarSign, CheckCircle2, ClipboardList, CreditCard, ImagePlus, Loader2, Package, PlayCircle, X } from "lucide-react"
 import { getProfile, saveProfile } from "@/lib/estimates-storage"
 import { getPriceList, savePriceListItem } from "@/lib/db"
 import { TRADE_PRESETS, type TradeType } from "@/lib/trade-presets"
@@ -30,6 +30,59 @@ const STARTER_CATEGORIES: Array<{ value: PriceCategory; label: string }> = [
     { value: "LABOR", label: "Labor" },
     { value: "SERVICE", label: "Service" },
 ]
+
+function SetupReadinessCard({ businessName }: { businessName: string }) {
+    const hasBusinessName = businessName.trim().length > 0
+
+    return (
+        <div
+            className="rounded-lg border border-white/10 bg-slate-950/55 p-4"
+            data-testid="setup-first-quote-readiness"
+        >
+            <div className="mb-3 flex items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-blue-300/20 bg-blue-500/10 text-blue-200">
+                    <ClipboardList className="h-4 w-4" />
+                </div>
+                <div>
+                    <p className="text-sm font-semibold text-white">First quote readiness</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">Get the PDF identity right now; pricing and payments can follow.</p>
+                </div>
+            </div>
+            <div className="grid gap-2">
+                <div className={`rounded-md border px-3 py-2 ${hasBusinessName ? "border-emerald-300/25 bg-emerald-400/10" : "border-amber-300/25 bg-amber-400/10"}`}>
+                    <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs text-slate-400">Business name</p>
+                        <p className="text-sm font-semibold text-white">{hasBusinessName ? "Ready" : "Needs setup"}</p>
+                    </div>
+                </div>
+                <div className="rounded-md border border-blue-300/20 bg-blue-400/10 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs text-slate-400">Starter pricing</p>
+                        <p className="text-sm font-semibold text-white">Next step</p>
+                    </div>
+                </div>
+                <div className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs text-slate-400">Payment links</p>
+                        <p className="text-sm font-semibold text-white">Can wait</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+    return error instanceof Error ? error.message : fallback
+}
+
+function formatStarterPrice(price: number) {
+    return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: Number.isInteger(price) ? 0 : 2,
+    }).format(price)
+}
 
 export function SetupWizard({ onComplete }: { onComplete: () => void }) {
     const router = useRouter()
@@ -86,10 +139,18 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
         void fetchProfile()
     }, [])
 
+    useEffect(() => {
+        window.scrollTo({ top: 0, left: 0, behavior: "auto" })
+    }, [step])
+
     const canSaveStarterItem = useMemo(() => {
         if (!starterItemName.trim() && !starterItemPrice.trim()) return true
         return starterItemName.trim().length > 0 && starterItemPrice.trim().length > 0 && !Number.isNaN(Number(starterItemPrice))
     }, [starterItemName, starterItemPrice])
+    const selectedPreset = useMemo(
+        () => TRADE_PRESETS.find((item) => item.id === selectedTrade) ?? null,
+        [selectedTrade],
+    )
 
     const handleNext = () => setStep((current) => Math.min(TOTAL_STEPS, current + 1))
     const handleBack = () => setStep((current) => Math.max(1, current - 1))
@@ -140,8 +201,8 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
             })
 
             handleNext()
-        } catch (error: any) {
-            toast(error.message || "Failed to save business profile.", "error")
+        } catch (error) {
+            toast(getErrorMessage(error, "Failed to save business profile."), "error")
         } finally {
             setLoading(false)
         }
@@ -200,8 +261,8 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
                 "success",
             )
             handleNext()
-        } catch (error: any) {
-            toast(error.message || "Failed to set up your starter price list.", "error")
+        } catch (error) {
+            toast(getErrorMessage(error, "Failed to set up your starter price list."), "error")
         } finally {
             setLoading(false)
         }
@@ -257,8 +318,8 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
             }
 
             window.location.href = data.url
-        } catch (error: any) {
-            toast(error.message || "Failed to connect Stripe.", "error")
+        } catch (error) {
+            toast(getErrorMessage(error, "Failed to connect Stripe."), "error")
         } finally {
             setConnectLoading(false)
         }
@@ -277,12 +338,12 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
     }
 
     const StepIndicator = () => (
-        <div className="flex items-center justify-center gap-2 mb-2">
+        <div className="mb-2 flex items-center justify-center gap-2">
             {Array.from({ length: TOTAL_STEPS }, (_, index) => (
                 <div
                     key={index}
                     className={`h-1.5 rounded-full transition-all ${
-                        index + 1 <= step ? "bg-primary w-8" : "bg-muted w-4"
+                        index + 1 <= step ? "w-8 bg-blue-500" : "w-4 bg-slate-800"
                     }`}
                 />
             ))}
@@ -291,38 +352,54 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
 
     if (step === 1) {
         return (
-            <Card className="w-full max-w-xl mx-auto mt-8 border-primary/20 shadow-lg">
-                <CardHeader>
+            <Card className="field-panel mx-auto mt-4 w-full max-w-xl overflow-hidden sm:mt-8" data-testid="setup-wizard-step-1">
+                <CardHeader className="border-b border-white/10 bg-slate-950/60 p-5">
                     <StepIndicator />
-                    <CardTitle>Set up your field quote profile</CardTitle>
-                    <CardDescription>Start with the name and tax rate you want on every first draft.</CardDescription>
+                    <CardTitle className="text-white">Set up your field quote profile</CardTitle>
+                    <CardDescription className="text-slate-400">Start with the name and tax rate you want on every first draft.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-4 p-5">
+                    <SetupReadinessCard businessName={businessName} />
                     <div className="space-y-2">
-                        <label className="text-sm font-medium">Business Name <span className="text-red-500">*</span></label>
+                        <label className="text-sm font-medium text-slate-200">Business Name <span className="text-red-300">*</span></label>
                         <Input
+                            data-testid="setup-business-name-input"
                             placeholder="e.g. North Shore Plumbing"
                             value={businessName}
                             onChange={(event) => setBusinessName(event.target.value)}
+                            className="rounded-lg border-white/10 bg-slate-950 text-white placeholder:text-slate-500"
                         />
-                        <p className="text-xs text-muted-foreground">This shows on PDFs, payment links, and customer emails.</p>
+                        <p className="text-xs text-slate-500">This shows on PDFs, payment links, and customer emails.</p>
                     </div>
                     <div className="space-y-2">
-                        <label className="text-sm font-medium">Default Tax Rate (%)</label>
+                        <label className="text-sm font-medium text-slate-200">Default Tax Rate (%)</label>
                         <Input
+                            data-testid="setup-tax-rate-input"
                             type="number"
                             step="0.01"
                             min="0"
                             placeholder="e.g. 5"
                             value={taxRate}
                             onChange={(event) => setTaxRate(event.target.value)}
+                            className="rounded-lg border-white/10 bg-slate-950 text-white placeholder:text-slate-500"
                         />
-                        <p className="text-xs text-muted-foreground">You can override tax per quote later.</p>
+                        <p className="text-xs text-slate-500">You can override tax per quote later.</p>
                     </div>
                 </CardContent>
-                <CardFooter>
-                    <Button onClick={handleNext} disabled={!businessName.trim()} className="w-full">
-                        Add Logo
+                <CardFooter className="grid grid-cols-2 gap-2 p-5 pt-0">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleLoadDemoQuote}
+                        className="rounded-lg border-white/10 bg-slate-950 text-slate-100 hover:bg-slate-900"
+                        data-testid="setup-demo-quote-action"
+                    >
+                        <PlayCircle className="mr-2 h-4 w-4" />
+                        Practice quote
+                    </Button>
+                    <Button onClick={handleNext} disabled={!businessName.trim()} className="rounded-lg" data-testid="setup-continue-action">
+                        <span className="sm:hidden">Continue</span>
+                        <span className="hidden sm:inline">Continue to logo</span>
                         <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
                 </CardFooter>
@@ -332,57 +409,63 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
 
     if (step === 2) {
         return (
-            <Card className="w-full max-w-xl mx-auto mt-8 border-primary/20 shadow-lg">
-                <CardHeader>
+            <Card className="field-panel mx-auto mt-4 w-full max-w-xl overflow-hidden sm:mt-8" data-testid="setup-wizard-step-2">
+                <CardHeader className="border-b border-white/10 bg-slate-950/60 p-5">
                     <StepIndicator />
-                    <CardTitle>Brand the quote</CardTitle>
-                    <CardDescription>Add a logo now so your very first PDF already looks like your business.</CardDescription>
+                    <CardTitle className="text-white">Brand the quote</CardTitle>
+                    <CardDescription className="text-slate-400">Add a logo now so your very first PDF already looks like your business.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-5">
-                    <div className="rounded-2xl border border-primary/[0.15] bg-primary/5 p-4">
+                <CardContent className="space-y-5 p-5">
+                    <div className="rounded-lg border border-blue-400/20 bg-blue-500/10 p-4">
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
                             {logoPreview ? (
-                                <div className="relative h-24 w-24 overflow-hidden rounded-xl border bg-background">
+                                <div className="relative h-24 w-24 overflow-hidden rounded-lg border border-white/10 bg-slate-950">
                                     <Image src={logoPreview} alt="Business logo preview" fill className="object-contain p-2" />
                                     <button
                                         type="button"
                                         onClick={() => setLogoPreview(null)}
-                                        className="absolute right-1 top-1 rounded-full bg-destructive p-1 text-destructive-foreground"
+                                        className="absolute right-1 top-1 flex h-11 w-11 items-center justify-center rounded-lg border border-white/20 bg-red-600/90 text-white shadow-lg transition-colors hover:bg-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                                        aria-label="Remove business logo preview"
                                     >
-                                        <X className="h-3 w-3" />
+                                        <X className="h-4 w-4" />
                                     </button>
                                 </div>
                             ) : (
-                                <div className="flex h-24 w-24 items-center justify-center rounded-xl border border-dashed bg-background">
-                                    <ImagePlus className="h-6 w-6 text-muted-foreground" />
+                                <div className="flex h-24 w-24 items-center justify-center rounded-lg border border-dashed border-white/15 bg-slate-950">
+                                    <ImagePlus className="h-6 w-6 text-slate-500" />
                                 </div>
                             )}
                             <div className="flex-1 space-y-2">
+                                <label htmlFor="setup-business-logo-upload" className="text-sm font-medium text-white">
+                                    Business logo
+                                </label>
                                 <Input
+                                    id="setup-business-logo-upload"
                                     type="file"
                                     accept="image/*"
                                     onChange={handleLogoUpload}
                                     disabled={loading}
-                                    className="cursor-pointer"
+                                    className="cursor-pointer rounded-lg border-white/10 bg-slate-950 text-white file:text-slate-200"
                                 />
-                                <p className="text-xs text-muted-foreground">PNG or JPG is enough. We store it locally for PDFs.</p>
+                                <p className="text-xs text-slate-500">PNG or JPG is enough. We store it locally for PDFs.</p>
                             </div>
                         </div>
                     </div>
-                    <div className="rounded-xl border border-border bg-muted/30 p-4">
-                        <p className="text-sm font-medium">Why this matters</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                            Quotes with your own brand look finished even when the draft started from voice notes in the truck.
+                    <div className="rounded-lg border border-white/10 bg-slate-950/60 p-4">
+                        <p className="text-sm font-medium text-white">Logo is optional for the first quote</p>
+                        <p className="mt-1 text-xs text-slate-400">
+                            Save the business name now. You can come back to the logo after the customer sees the estimate.
                         </p>
                     </div>
                 </CardContent>
-                <CardFooter className="flex gap-2">
-                    <Button variant="outline" onClick={handleBack} disabled={loading} className="w-1/3">
+                <CardFooter className="flex gap-2 p-5 pt-0">
+                    <Button variant="outline" onClick={handleBack} disabled={loading} className="w-1/3 rounded-lg border-white/10 bg-slate-950 text-slate-100 hover:bg-slate-900">
                         Back
                     </Button>
-                    <Button onClick={handleSaveBusinessProfile} disabled={loading || !businessName.trim()} className="w-2/3">
+                    <Button onClick={handleSaveBusinessProfile} disabled={loading || !businessName.trim()} className="w-2/3 rounded-lg" data-testid="setup-save-profile-action">
                         {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
-                        Price List Setup
+                        <span className="sm:hidden">Continue</span>
+                        <span className="hidden sm:inline">Save profile and continue</span>
                     </Button>
                 </CardFooter>
             </Card>
@@ -391,28 +474,28 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
 
     if (step === 3) {
         return (
-            <Card className="w-full max-w-xl mx-auto mt-8 border-primary/20 shadow-lg">
-                <CardHeader>
+            <Card className="field-panel mx-auto mt-4 w-full max-w-xl overflow-hidden sm:mt-8" data-testid="setup-wizard-step-3">
+                <CardHeader className="border-b border-white/10 bg-slate-950/60 p-5">
                     <StepIndicator />
-                    <CardTitle>Seed your price list</CardTitle>
-                    <CardDescription>Choose a trade starter pack and add one line item you quote all the time.</CardDescription>
+                    <CardTitle className="text-white">Seed your price list</CardTitle>
+                    <CardDescription className="text-slate-400">Choose a trade starter pack and add one line item you quote all the time.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-5">
-                    <div className="rounded-xl border border-border bg-muted/30 p-4">
+                <CardContent className="space-y-5 p-5">
+                    <div className="rounded-lg border border-white/10 bg-slate-950/60 p-4">
                         <div className="flex items-center justify-between gap-3">
                             <div>
-                                <p className="text-sm font-medium">Current local items</p>
-                                <p className="text-xs text-muted-foreground">We keep existing items and only add missing starters.</p>
+                                <p className="text-sm font-medium text-white">Current local items</p>
+                                <p className="text-xs text-slate-400">We keep existing items and only add missing starters.</p>
                             </div>
-                            <div className="rounded-full bg-background px-3 py-1 text-sm font-semibold">
+                            <div className="rounded-full border border-white/10 bg-slate-900 px-3 py-1 text-sm font-semibold text-white">
                                 {existingPriceCount} items
                             </div>
                         </div>
                     </div>
 
                     <div className="space-y-3">
-                        <p className="text-sm font-medium">Pick your closest trade</p>
-                        <div className="grid grid-cols-2 gap-3">
+                        <p className="text-sm font-medium text-white">Pick your closest trade</p>
+                        <div className="grid grid-cols-2 gap-2 sm:gap-3">
                             {TRADE_PRESETS.map((trade) => {
                                 const isSelected = selectedTrade === trade.id
                                 return (
@@ -420,51 +503,101 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
                                         key={trade.id}
                                         type="button"
                                         onClick={() => setSelectedTrade(trade.id)}
-                                        className={`rounded-xl border p-3 text-left transition-colors ${
-                                            isSelected ? "border-primary bg-primary/10" : "border-border bg-background hover:border-primary/40"
+                                        data-testid={`setup-trade-${trade.id}`}
+                                        className={`min-h-[116px] rounded-lg border p-3 text-left transition-colors ${
+                                            isSelected ? "border-blue-400/45 bg-blue-500/15" : "border-white/10 bg-slate-950/70 hover:border-blue-300/35"
                                         }`}
                                     >
-                                        <p className="text-sm font-semibold">{trade.name}</p>
-                                        <p className="mt-1 text-xs text-muted-foreground">{trade.description}</p>
-                                        <p className="mt-2 text-[11px] text-muted-foreground">{trade.initialItems.length} starter items</p>
+                                        <p className="text-sm font-semibold text-white">{trade.name}</p>
+                                        <p className="mt-1 text-xs text-slate-400">{trade.description}</p>
+                                        <p className="mt-2 text-[11px] text-slate-500">{trade.initialItems.length} starter items</p>
                                     </button>
                                 )
                             })}
                         </div>
                     </div>
 
-                    <div className="space-y-3 rounded-2xl border border-primary/[0.15] bg-primary/5 p-4">
+                    <div className="rounded-lg border border-white/10 bg-slate-950/60 p-4" data-testid="setup-starter-preview">
+                        {selectedPreset ? (
+                            <div className="space-y-3">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-semibold text-white">{selectedPreset.name} starter pack</p>
+                                        <p className="mt-1 text-xs text-slate-400">
+                                            {selectedPreset.initialItems.length} common quote items will be ready offline.
+                                        </p>
+                                    </div>
+                                    <div className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-100">
+                                        Selected
+                                    </div>
+                                </div>
+                                <div className="grid gap-2">
+                                    {selectedPreset.initialItems.slice(0, 3).map((item) => (
+                                        <div key={item.name} className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-slate-900/70 px-3 py-2">
+                                            <p className="min-w-0 truncate text-xs text-slate-300">{item.name}</p>
+                                            <p className="shrink-0 text-xs font-semibold text-white">
+                                                {formatStarterPrice(item.price)} / {item.unit}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex items-start gap-3">
+                                <BadgeDollarSign className="mt-0.5 h-5 w-5 shrink-0 text-blue-300" />
+                                <div>
+                                    <p className="text-sm font-semibold text-white">Starter preview appears here</p>
+                                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                                        Pick a trade to see which repeat items SnapQuote will add before your first real estimate.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="space-y-3 rounded-lg border border-blue-400/20 bg-blue-500/10 p-4">
                         <div className="flex items-center gap-2">
-                            <Package className="h-4 w-4 text-primary" />
-                            <p className="text-sm font-medium">Optional: add one custom starter item</p>
+                            <Package className="h-4 w-4 text-blue-300" />
+                            <p className="text-sm font-medium text-white">Optional: add one custom starter item</p>
                         </div>
-                        <Input
-                            placeholder="e.g. Emergency call-out"
-                            value={starterItemName}
-                            onChange={(event) => setStarterItemName(event.target.value)}
-                        />
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_8rem]">
                             <Input
+                                placeholder="e.g. Emergency call-out"
+                                value={starterItemName}
+                                onChange={(event) => setStarterItemName(event.target.value)}
+                                className="rounded-lg border-white/10 bg-slate-950 text-white placeholder:text-slate-500"
+                                data-testid="setup-starter-item-name"
+                            />
+                            <Input
+                                aria-label="Starter item price"
                                 type="number"
                                 min="0"
                                 step="0.01"
                                 placeholder="Price"
                                 value={starterItemPrice}
                                 onChange={(event) => setStarterItemPrice(event.target.value)}
+                                className="rounded-lg border-white/10 bg-slate-950 text-white placeholder:text-slate-500"
+                                data-testid="setup-starter-item-price"
                             />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
                             <select
+                                aria-label="Starter item unit"
                                 value={starterItemUnit}
                                 onChange={(event) => setStarterItemUnit(event.target.value as PriceUnit)}
-                                className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                                className="h-11 rounded-lg border border-white/10 bg-slate-950 px-3 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
+                                data-testid="setup-starter-item-unit"
                             >
                                 {STARTER_UNITS.map((unit) => (
                                     <option key={unit.value} value={unit.value}>{unit.label}</option>
                                 ))}
                             </select>
                             <select
+                                aria-label="Starter item category"
                                 value={starterItemCategory}
                                 onChange={(event) => setStarterItemCategory(event.target.value as PriceCategory)}
-                                className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                                className="h-11 rounded-lg border border-white/10 bg-slate-950 px-3 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
+                                data-testid="setup-starter-item-category"
                             >
                                 {STARTER_CATEGORIES.map((category) => (
                                     <option key={category.value} value={category.value}>{category.label}</option>
@@ -473,13 +606,14 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
                         </div>
                     </div>
                 </CardContent>
-                <CardFooter className="flex gap-2">
-                    <Button variant="outline" onClick={handleBack} disabled={loading} className="w-1/3">
+                <CardFooter className="flex gap-2 p-5 pt-0">
+                    <Button variant="outline" onClick={handleBack} disabled={loading} className="w-1/3 rounded-lg border-white/10 bg-slate-950 text-slate-100 hover:bg-slate-900">
                         Back
                     </Button>
-                    <Button onClick={handleApplyPriceListSetup} disabled={loading} className="w-2/3">
+                    <Button onClick={handleApplyPriceListSetup} disabled={loading} className="w-2/3 rounded-lg" data-testid="setup-save-starter-kit-action">
                         {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BadgeDollarSign className="mr-2 h-4 w-4" />}
-                        Save and Continue
+                        <span className="sm:hidden">Save kit</span>
+                        <span className="hidden sm:inline">Save starter kit</span>
                     </Button>
                 </CardFooter>
             </Card>
@@ -487,46 +621,53 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
     }
 
     return (
-        <Card className="w-full max-w-xl mx-auto mt-8 border-primary/20 shadow-lg">
-            <CardHeader>
+        <Card className="field-panel mx-auto mt-4 w-full max-w-xl overflow-hidden sm:mt-8" data-testid="setup-wizard-step-4">
+            <CardHeader className="border-b border-white/10 bg-slate-950/60 p-5">
                 <StepIndicator />
-                <CardTitle>Accept payments and load your first quote</CardTitle>
-                <CardDescription>Finish now, or jump straight into a demo quote you can edit and send as practice.</CardDescription>
+                <CardTitle className="text-white">Open your first quote</CardTitle>
+                <CardDescription className="text-slate-400">You have enough setup to practice the full estimate flow. Payments can wait.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-                <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-3">
+            <CardContent className="space-y-4 p-5">
+                <div className="space-y-3 rounded-lg border border-blue-400/20 bg-blue-500/10 p-4">
                     <div className="flex items-start gap-3">
-                        <CheckCircle2 className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+                        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-blue-300" />
                         <div>
-                            <p className="text-sm font-medium">Stripe can wait, but it is ready</p>
-                            <p className="text-xs text-muted-foreground">Connect now if you want deposit and card-payment links on estimates.</p>
+                            <p className="text-sm font-medium text-white">Practice quote is the best next step</p>
+                            <p className="text-xs text-slate-400">Review the editable estimate, PDF identity, line items, and send flow before a live job.</p>
                         </div>
                     </div>
                     <div className="flex items-start gap-3">
-                        <CheckCircle2 className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+                        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-blue-300" />
                         <div>
-                            <p className="text-sm font-medium">Demo quote opens fully editable</p>
-                            <p className="text-xs text-muted-foreground">Change line items, client details, totals, then save or send it like a real job.</p>
+                            <p className="text-sm font-medium text-white">Stripe stays one tap away</p>
+                            <p className="text-xs text-slate-400">Connect only when you are ready to collect deposits and card payments from estimates.</p>
                         </div>
                     </div>
                 </div>
             </CardContent>
-            <CardFooter className="flex flex-col gap-2">
-                <Button onClick={handleConnectStripe} disabled={connectLoading} className="w-full">
+            <CardFooter className="grid gap-2 p-5 pt-0 sm:grid-cols-2">
+                <Button onClick={handleLoadDemoQuote} className="w-full rounded-lg sm:col-span-2" data-testid="setup-final-demo-action">
+                    <PlayCircle className="mr-2 h-4 w-4" />
+                    Open practice quote
+                </Button>
+                <Button
+                    variant="outline"
+                    onClick={handleConnectStripe}
+                    disabled={connectLoading}
+                    className="w-full rounded-lg border-white/10 bg-slate-950 text-slate-100 hover:bg-slate-900"
+                    data-testid="setup-final-stripe-action"
+                >
                     {connectLoading ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
-                        <CreditCard className="h-4 w-4 mr-2" />
+                        <CreditCard className="mr-2 h-4 w-4" />
                     )}
-                    Connect Stripe
+                    Stripe
                 </Button>
-                <Button variant="secondary" onClick={handleLoadDemoQuote} className="w-full">
-                    Load Demo Quote
+                <Button variant="ghost" onClick={handleFinish} className="w-full rounded-lg text-slate-300 hover:bg-white/10 hover:text-white" data-testid="setup-final-home-action">
+                    Finish home
                 </Button>
-                <Button variant="ghost" onClick={handleFinish} className="w-full text-muted-foreground">
-                    Finish and return home
-                </Button>
-                <Button variant="ghost" size="sm" onClick={handleBack} className="w-full">
+                <Button variant="ghost" size="sm" onClick={handleBack} className="w-full rounded-lg text-slate-400 hover:bg-white/10 hover:text-white sm:col-span-2">
                     Back
                 </Button>
             </CardFooter>

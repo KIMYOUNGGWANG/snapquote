@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -22,6 +22,10 @@ type ParsedReceiptItem = {
 type ParsedReceiptResult = {
     items: ParsedReceiptItem[]
     warnings: string[]
+}
+
+function getErrorMessage(error: unknown) {
+    return error instanceof Error ? error.message : "Failed to parse receipt"
 }
 
 interface ReceiptScannerProps {
@@ -78,12 +82,12 @@ export function ReceiptScanner({ isOpen, onClose, onSuccess }: ReceiptScannerPro
             const warnings = Array.isArray(data.warnings)
                 ? data.warnings.filter((warning: unknown): warning is string => typeof warning === "string")
                 : []
-            toast("✅ Receipt parsed successfully!", "success")
+            toast("Receipt parsed successfully.", "success")
             onSuccess({ items, warnings })
             handleClose()
-        } catch (error: any) {
+        } catch (error) {
             console.error("Parse error:", error)
-            toast(`❌ ${error.message || "Failed to parse receipt"}`, "error")
+            toast(getErrorMessage(error), "error")
         } finally {
             setIsParsing(false)
         }
@@ -102,31 +106,38 @@ export function ReceiptScanner({ isOpen, onClose, onSuccess }: ReceiptScannerPro
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
-                        <Receipt className="w-5 h-5 text-indigo-500" />
+                        <Receipt className="h-5 w-5 text-blue-300" />
                         AI Material Receipt Scanner
                     </DialogTitle>
+                    <DialogDescription>
+                        Upload a receipt photo so SnapQuote can extract material line items.
+                    </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-4 py-4">
                     {!file ? (
-                        <div
-                            className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                        <>
+                        <button
+                            type="button"
+                            className="flex min-h-44 w-full cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-white/15 bg-slate-950/60 p-8 text-center transition-colors hover:border-blue-300/40 hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                             onClick={() => fileInputRef.current?.click()}
+                            aria-describedby="receipt-scanner-upload-help"
                         >
-                            <Upload className="w-8 h-8 text-slate-400 mb-3" />
+                            <Upload className="mb-3 h-8 w-8 text-slate-400" />
                             <p className="text-sm font-medium">Click to upload receipt or material list</p>
-                            <p className="text-xs text-slate-500 mt-1">JPEG, PNG, WebP up to 10MB</p>
-                            <input
-                                type="file"
-                                className="hidden"
-                                ref={fileInputRef}
-                                accept="image/*"
-                                onChange={handleFileSelect}
-                            />
-                        </div>
+                            <p id="receipt-scanner-upload-help" className="text-xs text-slate-500 mt-1">JPEG, PNG, WebP up to 10MB</p>
+                        </button>
+                        <input
+                            type="file"
+                            className="hidden"
+                            ref={fileInputRef}
+                            accept="image/*"
+                            onChange={handleFileSelect}
+                        />
+                        </>
                     ) : (
                         <div className="space-y-4">
-                            <div className="relative aspect-[4/3] w-full bg-slate-100 dark:bg-slate-900 rounded-lg overflow-hidden border">
+                            <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg border border-white/10 bg-slate-950">
                                 {previewUrl && (
                                     <Image
                                         src={previewUrl}
@@ -138,12 +149,13 @@ export function ReceiptScanner({ isOpen, onClose, onSuccess }: ReceiptScannerPro
                             </div>
 
                             <div className="space-y-2">
-                                <Label htmlFor="context">Context (Optional)</Label>
+                                <Label htmlFor="context" className="text-slate-200">Context (Optional)</Label>
                                 <Input
                                     id="context"
                                     placeholder="e.g., Home Depot purchase for Smith bathroom"
                                     value={context}
                                     onChange={(e) => setContext(e.target.value)}
+                                    className="rounded-lg border-white/10 bg-slate-950 text-white placeholder:text-slate-500"
                                 />
                                 <p className="text-xs text-slate-500">
                                     Adding context helps the AI understand the receipt better.
@@ -152,12 +164,12 @@ export function ReceiptScanner({ isOpen, onClose, onSuccess }: ReceiptScannerPro
                         </div>
                     )}
 
-                    <div className="flex justify-end gap-2 pt-4 border-t">
-                        <Button variant="ghost" onClick={handleClose} disabled={isParsing}>
+                    <div className="flex justify-end gap-2 border-t border-white/10 pt-4">
+                        <Button variant="ghost" className="rounded-lg text-slate-300 hover:bg-white/10 hover:text-white" onClick={handleClose} disabled={isParsing}>
                             Cancel
                         </Button>
                         <Button
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                            className="rounded-lg bg-blue-600 text-white hover:bg-blue-500"
                             disabled={!file || isParsing}
                             onClick={handleParse}
                         >

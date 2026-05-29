@@ -1,3 +1,5 @@
+create extension if not exists "uuid-ossp";
+
 -- Users (Technician Profiles)
 create table profiles (
   id uuid references auth.users on delete cascade not null primary key,
@@ -18,6 +20,8 @@ create table clients (
   name text,
   address text,
   email text,
+  phone text,
+  notes text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
@@ -33,17 +37,28 @@ create table estimates (
   tax_amount float,
   currency text default 'CAD',
   ai_summary text,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+  sent_at timestamp with time zone,
+  first_followed_up_at timestamp with time zone,
+  second_followed_up_at timestamp with time zone,
+  last_followed_up_at timestamp with time zone,
+  review_requested_at timestamp with time zone,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
 -- Estimate Items
 create table estimate_items (
   id uuid default uuid_generate_v4() primary key,
   estimate_id uuid references estimates(id) on delete cascade,
+  local_id text,
+  item_number int default 0 not null,
+  category text,
+  unit text,
   description text,
   quantity int,
   unit_price float,
-  total float
+  total float,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
 -- Estimate Sections (normalized)
@@ -199,6 +214,31 @@ create table pricing_conversions (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+-- Automation Settings
+create table automations (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references profiles(id) on delete cascade not null,
+  type text not null,
+  is_enabled boolean default false,
+  settings jsonb default '{}'::jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  unique(user_id, type)
+);
+
+-- Job Queue
+create table job_queue (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references profiles(id) on delete cascade not null,
+  task_type text not null,
+  payload jsonb not null,
+  status text check (status in ('pending', 'processing', 'completed', 'failed')) default 'pending',
+  error_message text,
+  scheduled_for timestamp with time zone default timezone('utc'::text, now()) not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
 -- Enable RLS
 alter table profiles enable row level security;
 alter table clients enable row level security;
@@ -216,25 +256,41 @@ alter table usage_counters_monthly enable row level security;
 alter table pricing_experiments enable row level security;
 alter table pricing_assignments enable row level security;
 alter table pricing_conversions enable row level security;
+alter table automations enable row level security;
+alter table job_queue enable row level security;
 
--- Policies (Simple for now: users can see their own data)
+-- Profiles policies
 create policy "Users can view own profile" on profiles for select using (auth.uid() = id);
 create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
 create policy "Users can insert own profile" on profiles for insert with check (auth.uid() = id);
 
+-- Clients policies
 create policy "Users can view own clients" on clients for select using (auth.uid() = user_id);
 create policy "Users can insert own clients" on clients for insert with check (auth.uid() = user_id);
+create policy "Users can update own clients" on clients for update using (auth.uid() = user_id);
+create policy "Users can delete own clients" on clients for delete using (auth.uid() = user_id);
 
+-- Estimates policies
 create policy "Users can view own estimates" on estimates for select using (auth.uid() = user_id);
 create policy "Users can insert own estimates" on estimates for insert with check (auth.uid() = user_id);
+create policy "Users can update own estimates" on estimates for update using (auth.uid() = user_id);
+create policy "Users can delete own estimates" on estimates for delete using (auth.uid() = user_id);
 
+-- Estimate Items policies
 create policy "Users can view own estimate items" on estimate_items for select using (
   exists ( select 1 from estimates where id = estimate_items.estimate_id and user_id = auth.uid() )
 );
 create policy "Users can insert own estimate items" on estimate_items for insert with check (
   exists ( select 1 from estimates where id = estimate_items.estimate_id and user_id = auth.uid() )
 );
+create policy "Users can update own estimate items" on estimate_items for update using (
+  exists ( select 1 from estimates where id = estimate_items.estimate_id and user_id = auth.uid() )
+);
+create policy "Users can delete own estimate items" on estimate_items for delete using (
+  exists ( select 1 from estimates where id = estimate_items.estimate_id and user_id = auth.uid() )
+);
 
+-- Estimate Sections policies
 create policy "Users can view own estimate sections" on estimate_sections for select using (
   exists ( select 1 from estimates where id = estimate_sections.estimate_id and user_id = auth.uid() )
 );
@@ -248,6 +304,7 @@ create policy "Users can delete own estimate sections" on estimate_sections for 
   exists ( select 1 from estimates where id = estimate_sections.estimate_id and user_id = auth.uid() )
 );
 
+-- Estimate Section Items policies
 create policy "Users can view own estimate section items" on estimate_section_items for select using (
   exists ( select 1 from estimates where id = estimate_section_items.estimate_id and user_id = auth.uid() )
 );
@@ -261,6 +318,7 @@ create policy "Users can delete own estimate section items" on estimate_section_
   exists ( select 1 from estimates where id = estimate_section_items.estimate_id and user_id = auth.uid() )
 );
 
+-- Estimate Attachments policies
 create policy "Users can view own estimate attachments" on estimate_attachments for select using (
   exists ( select 1 from estimates where id = estimate_attachments.estimate_id and user_id = auth.uid() )
 );
@@ -274,9 +332,15 @@ create policy "Users can delete own estimate attachments" on estimate_attachment
   exists ( select 1 from estimates where id = estimate_attachments.estimate_id and user_id = auth.uid() )
 );
 
+-- Feedback policies
+create policy "Users can insert feedback" on feedback for insert with check (auth.uid() = user_id);
+create policy "Users can view own feedback" on feedback for select using (auth.uid() = user_id);
+
+-- Analytics Events policies
 create policy "Users can view own analytics events" on analytics_events for select using (auth.uid() = user_id);
 create policy "Users can insert own analytics events" on analytics_events for insert with check (auth.uid() = user_id);
 
+-- Referral Token/Event policies
 create policy "Users can view own referral tokens" on referral_tokens for select using (auth.uid() = user_id);
 create policy "Users can insert own referral tokens" on referral_tokens for insert with check (auth.uid() = user_id);
 create policy "Users can update own referral tokens" on referral_tokens for update using (auth.uid() = user_id);
@@ -290,10 +354,12 @@ create policy "Users can view own referral events" on referral_events for select
   )
 );
 
+-- Usage policies
 create policy "Users can view own usage counters" on usage_counters_monthly for select using (auth.uid() = user_id);
 create policy "Users can insert own usage counters" on usage_counters_monthly for insert with check (auth.uid() = user_id);
 create policy "Users can update own usage counters" on usage_counters_monthly for update using (auth.uid() = user_id);
 
+-- Pricing policies
 create policy "Anyone can view active pricing experiments" on pricing_experiments
   for select
   using (is_active = true);
@@ -310,59 +376,24 @@ create policy "Users can insert own pricing conversions" on pricing_conversions
   for insert to authenticated
   with check (user_id = (select auth.uid()));
 
--- Estimates (Update with tracking columns)
-alter table profiles add column if not exists plan_tier text check (plan_tier in ('free', 'pro')) default 'free';
-alter table estimates add column sent_at timestamp with time zone;
-alter table estimates add column if not exists first_followed_up_at timestamp with time zone;
-alter table estimates add column if not exists second_followed_up_at timestamp with time zone;
-alter table estimates add column last_followed_up_at timestamp with time zone;
-
--- Automation Settings
-create table automations (
-  id uuid default uuid_generate_v4() primary key,
-  user_id uuid references profiles(id) on delete cascade not null,
-  type text not null, -- 'quote_chaser', 'review_request'
-  is_enabled boolean default false,
-  settings jsonb default '{}'::jsonb, -- { "first_delay_hours": 48, "second_delay_hours": 168, "review_link": "..." }
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  unique(user_id, type)
-);
-
--- Job Queue (for Edge Functions)
-create table job_queue (
-  id uuid default uuid_generate_v4() primary key,
-  user_id uuid references profiles(id) on delete cascade not null,
-  task_type text not null, -- 'email_followup', 'sms_followup', 'review_request'
-  payload jsonb not null,
-  status text check (status in ('pending', 'processing', 'completed', 'failed')) default 'pending',
-  error_message text,
-  scheduled_for timestamp with time zone default timezone('utc'::text, now()) not null,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-
--- Enable RLS
-alter table automations enable row level security;
-alter table job_queue enable row level security;
-
--- Policies for Automations
+-- Automations policies
 create policy "Users can view own automations" on automations for select using (auth.uid() = user_id);
 create policy "Users can update own automations" on automations for update using (auth.uid() = user_id);
 create policy "Users can insert own automations" on automations for insert with check (auth.uid() = user_id);
 
--- Policies for Job Queue
--- Note: Edge Functions use service_role key which bypasses RLS
--- These policies protect against direct client-side access
+-- Job Queue policies
 create policy "Users can view own jobs" on job_queue for select using (auth.uid() = user_id);
 create policy "Users cannot insert jobs directly" on job_queue for insert with check (false);
--- Jobs should only be created by Edge Functions with service_role key
 
--- Index for performance
+-- Indexes
 create index idx_job_queue_status_scheduled on job_queue (status, scheduled_for) where status = 'pending';
 create index idx_estimates_followup on estimates (status, last_followed_up_at, created_at) where status = 'sent';
 create index idx_estimates_followup_stage1 on estimates (status, first_followed_up_at, created_at) where status = 'sent';
 create index idx_estimates_followup_stage2 on estimates (status, second_followed_up_at, created_at) where status = 'sent';
+create index idx_estimates_review on estimates (status, review_requested_at, updated_at) where status = 'paid';
+create index idx_clients_user_id on clients (user_id);
+create index idx_estimates_user_id on estimates (user_id);
+create index idx_estimates_client_id on estimates (client_id);
 create index idx_analytics_events_user_created on analytics_events (user_id, created_at desc);
 create index idx_analytics_events_user_event_created on analytics_events (user_id, event_name, created_at desc);
 create index idx_analytics_events_estimate_created on analytics_events (estimate_id, created_at desc) where estimate_id is not null;
@@ -388,6 +419,3 @@ create index idx_estimate_items_estimate on estimate_items (estimate_id);
 create index idx_automations_user on automations (user_id);
 create index idx_job_queue_user on job_queue (user_id);
 create index idx_feedback_user on feedback (user_id);
-
--- Estimates (Add review tracking column)
-alter table estimates add column if not exists review_requested_at timestamp with time zone;

@@ -4,37 +4,37 @@
 
 @layer base {
   :root {
-    --background: 218 39% 8%;
+    --background: 215 26% 8%;
     --foreground: 0 0% 98%;
 
-    --card: 218 32% 12%;
+    --card: 215 22% 12%;
     --card-foreground: 0 0% 98%;
 
     --popover: 218 39% 8%;
     --popover-foreground: 0 0% 98%;
 
-    --primary: 198 93% 60%;
+    --primary: 213 92% 45%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 33 94% 61%;
     --secondary-foreground: 218 39% 8%;
 
-    --muted: 220 23% 16%;
+    --muted: 216 18% 16%;
     --muted-foreground: 218 18% 72%;
 
-    --accent: 195 50% 18%;
+    --accent: 213 28% 18%;
     --accent-foreground: 0 0% 98%;
 
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 217 24% 22%;
-    --input: 217 24% 22%;
-    --ring: 198 93% 60%;
+    --border: 215 17% 24%;
+    --input: 215 17% 24%;
+    --ring: 213 92% 45%;
 
     --radius: 0.875rem;
 
-    --chart-1: 198 93% 60%;
+    --chart-1: 212 100% 52%;
     --chart-2: 172 66% 48%;
     --chart-3: 209 45% 30%;
     --chart-4: 33 94% 61%;
@@ -42,33 +42,33 @@
   }
 
   .dark {
-    --background: 218 39% 8%;
+    --background: 215 26% 8%;
     --foreground: 0 0% 98%;
 
-    --card: 218 32% 12%;
+    --card: 215 22% 12%;
     --card-foreground: 0 0% 98%;
 
     --popover: 218 39% 8%;
     --popover-foreground: 0 0% 98%;
 
-    --primary: 198 93% 60%;
+    --primary: 213 92% 45%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 33 94% 61%;
     --secondary-foreground: 218 39% 8%;
 
-    --muted: 220 23% 16%;
+    --muted: 216 18% 16%;
     --muted-foreground: 218 18% 72%;
 
-    --accent: 195 50% 18%;
+    --accent: 213 28% 18%;
     --accent-foreground: 0 0% 98%;
 
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 217 24% 22%;
+    --border: 215 17% 24%;
     --input: 240 10% 14%;
-    --ring: 198 93% 60%;
+    --ring: 213 92% 45%;
   }
 }
 
@@ -80,10 +80,8 @@
 
   body {
     @apply bg-background text-foreground;
-    background-image:
-      radial-gradient(circle at top, rgba(56, 189, 248, 0.16), transparent 34%),
-      radial-gradient(circle at 85% 14%, rgba(251, 146, 60, 0.14), transparent 24%),
-      linear-gradient(180deg, rgba(8, 15, 28, 0.98) 0%, rgba(8, 15, 28, 1) 100%);
+    background:
+      linear-gradient(180deg, #11130f 0%, #0b1110 46%, #080b0a 100%);
     font-family: "Avenir Next", "Segoe UI", sans-serif;
     overscroll-behavior-y: none;
     scroll-behavior: smooth;
@@ -98,7 +96,7 @@
   }
 
   .glass-card {
-    @apply rounded-2xl border border-white/10 backdrop-blur-lg transition-all duration-300 hover:border-white/20 hover:bg-white/10;
+    @apply rounded-lg border border-white/10 backdrop-blur-lg transition-all duration-300 hover:border-white/20 hover:bg-white/10;
     background-color: rgba(255, 255, 255, 0.06);
   }
 
@@ -111,13 +109,13 @@
   }
 
   .premium-panel {
-    @apply rounded-[28px] border border-white/10 backdrop-blur-xl;
+    @apply rounded-lg border border-white/10 backdrop-blur-xl;
     background-color: rgba(2, 6, 23, 0.55);
     box-shadow: 0 24px 80px -32px rgba(8, 145, 178, 0.45);
   }
 
   .premium-card {
-    @apply rounded-3xl border border-white/10 backdrop-blur-xl transition-all duration-300;
+    @apply rounded-lg border border-white/10 backdrop-blur-xl transition-all duration-300;
     background-color: rgba(255, 255, 255, 0.055);
     box-shadow: 0 20px 60px -32px rgba(15, 23, 42, 0.85);
   }
@@ -143,5 +141,105 @@
 
   .ambient-orb {
     @apply pointer-events-none absolute rounded-full blur-3xl;
+  }
+
+  .field-app {
+    @apply relative isolate overflow-hidden;
+    background:
+      linear-gradient(145deg, rgba(18, 21, 16, 0.98) 0%, rgba(8, 15, 15, 1) 52%, rgba(8, 9, 12, 1) 100%);
+  }
+
+  .field-panel {
+    @apply rounded-lg border text-white;
+    border-color: rgba(214, 198, 164, 0.15);
+    background:
+      linear-gradient(180deg, rgba(21, 25, 23, 0.94) 0%, rgba(10, 15, 17, 0.9) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.055),
+      0 22px 50px -34px rgba(0, 0, 0, 0.96);
+  }
+
+  .field-card {
+    @apply rounded-lg border text-white;
+    border-color: rgba(214, 198, 164, 0.12);
+    background:
+      linear-gradient(180deg, rgba(14, 19, 20, 0.82) 0%, rgba(8, 12, 16, 0.78) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.045),
+      0 18px 42px -34px rgba(0, 0, 0, 0.92);
+  }
+
+  .field-action {
+    @apply flex min-h-16 flex-col items-center justify-center gap-2 rounded-lg border px-2 text-xs font-semibold text-slate-200 transition-colors;
+    border-color: rgba(214, 198, 164, 0.12);
+    background:
+      linear-gradient(180deg, rgba(6, 10, 13, 0.82) 0%, rgba(3, 7, 11, 0.78) 100%);
+  }
+
+  .field-action:hover {
+    border-color: rgba(214, 198, 164, 0.22);
+    background:
+      linear-gradient(180deg, rgba(14, 20, 20, 0.9) 0%, rgba(6, 12, 15, 0.84) 100%);
+  }
+
+  .field-action-primary {
+    @apply text-white;
+    border-color: rgba(125, 211, 252, 0.42);
+    background:
+      linear-gradient(135deg, #2f6df6 0%, #1678d5 58%, #0f9f9a 100%);
+    box-shadow: 0 18px 32px -24px rgba(24, 118, 235, 0.95);
+  }
+
+  .field-action-primary:hover {
+    border-color: rgba(186, 230, 253, 0.55);
+    background:
+      linear-gradient(135deg, #3b7bff 0%, #1884e2 58%, #12aaa3 100%);
+  }
+
+  .field-mini {
+    @apply rounded-lg border px-3 py-2;
+    border-color: rgba(214, 198, 164, 0.11);
+    background-color: rgba(5, 9, 12, 0.62);
+  }
+
+  .field-row {
+    @apply flex items-center justify-between gap-3 rounded-lg border px-3 py-3;
+    border-color: rgba(214, 198, 164, 0.12);
+    background:
+      linear-gradient(180deg, rgba(14, 19, 20, 0.84) 0%, rgba(8, 12, 16, 0.78) 100%);
+    box-shadow: 0 18px 42px -34px rgba(0, 0, 0, 0.92);
+  }
+
+  .field-section-title {
+    @apply flex items-center justify-between text-xs font-semibold uppercase tracking-[0.18em] text-slate-400;
+  }
+
+  .profile-console label {
+    @apply text-slate-300;
+  }
+
+  .profile-console input:not([type="file"]),
+  .profile-console select {
+    @apply rounded-lg border-white/10 bg-slate-950/70 text-white shadow-none;
+  }
+
+  .profile-console input[type="file"] {
+    @apply rounded-lg border-white/10 bg-slate-950/70 text-slate-300 shadow-none file:text-slate-200;
+  }
+
+  .profile-console input::placeholder {
+    @apply text-slate-500;
+  }
+
+  .profile-console .profile-note {
+    @apply text-xs leading-5 text-slate-500;
+  }
+
+  .profile-console .profile-box {
+    @apply rounded-lg border border-white/10 bg-slate-950/55 p-3 text-slate-300;
+  }
+
+  .profile-console .profile-box-strong {
+    @apply rounded-lg border border-white/10 bg-slate-900/70 p-4 text-slate-200;
   }
 }

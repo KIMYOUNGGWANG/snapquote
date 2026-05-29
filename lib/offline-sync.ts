@@ -1,5 +1,4 @@
-import { getUnprocessedAudio } from "@/lib/db"
-import { getEstimates, type LocalEstimate } from "@/lib/estimates-storage"
+import type { LocalEstimate } from "@/lib/estimates-storage"
 
 export interface PendingSyncSummary {
     draftCount: number
@@ -50,6 +49,10 @@ export function summarizePendingSync(
 }
 
 export async function getPendingSyncSummary(): Promise<PendingSyncSummary> {
+    const [{ getUnprocessedAudio }, { getEstimates }] = await Promise.all([
+        import("./db"),
+        import("./estimates-storage"),
+    ])
     const [estimates, pendingAudio] = await Promise.all([
         getEstimates(),
         getUnprocessedAudio(),

@@ -3,9 +3,8 @@
 import { Suspense, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, Sparkles, ArrowRight } from "lucide-react"
+import { Loader2, Sparkles, ArrowRight, CheckCircle2, CreditCard, Gauge, ShieldCheck } from "lucide-react"
 import {
     createBillingCheckoutSession,
     createBillingPortalSession,
@@ -22,8 +21,18 @@ import { MARKETING_PLAN_OPTIONS, getMarketingPlan } from "@/lib/marketing-plans"
 import { toast } from "@/components/toast"
 import { supabase } from "@/lib/supabase"
 import { FREE_PLAN_MARKETING_QUOTE_LIMIT } from "@/lib/free-tier"
+import { cn } from "@/lib/utils"
 
 type BillingInterval = "monthly" | "annual"
+
+const pricingBoxClass = "rounded-lg border border-white/10 bg-slate-950/55 p-4"
+const pricingBoxSoftClass = "rounded-lg border border-white/10 bg-slate-900/55 p-4"
+const pricingOutlineButtonClass = "border-white/10 bg-slate-950/60 text-slate-200 hover:bg-slate-900 hover:text-white"
+
+function getErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error && error.message) return error.message
+    return fallback
+}
 
 function PricingPageContent() {
     const router = useRouter()
@@ -38,6 +47,10 @@ function PricingPageContent() {
     const [selectedPlanTier, setSelectedPlanTier] = useState<BillingPaidPlanTier>(initialPlanTier)
     const [billingInterval, setBillingInterval] = useState<BillingInterval>("monthly")
     const [isAuthed, setIsAuthed] = useState(false)
+
+    useEffect(() => {
+        setSelectedPlanTier(initialPlanTier)
+    }, [initialPlanTier])
 
     useEffect(() => {
         let cancelled = false
@@ -77,11 +90,11 @@ function PricingPageContent() {
         if (typeof window === "undefined") return
         const checkoutState = new URLSearchParams(window.location.search).get("checkout")
         if (checkoutState === "success") {
-            toast("✅ Subscription checkout completed. Billing status will refresh shortly.", "success")
+            toast("Subscription checkout completed. Billing status will refresh shortly.", "success")
             return
         }
         if (checkoutState === "cancel") {
-            toast("ℹ️ Subscription checkout was canceled.", "info")
+            toast("Subscription checkout was canceled.", "info")
         }
     }, [])
 
@@ -128,11 +141,19 @@ function PricingPageContent() {
             : null
 
     const isSubscribed = Boolean(subscription?.subscribed)
+    const upgradeCtaLabel = loading
+        ? "Loading live pricing..."
+        : checkoutLoading
+            ? "Opening checkout..."
+            : isSubscribed
+                ? "Subscription already active"
+                : !isAuthed ? "Log in to Subscribe" : `Upgrade to ${selectedPlan.label} ${billingInterval === "annual" ? "Annually" : "Monthly"}`
+    const upgradeDisabled = loading || checkoutLoading || isSubscribed || (billingInterval === "annual" && !annualEnabled)
 
     const handleUpgradeClick = async () => {
         if (!isAuthed) {
             toast("Please log in to start your subscription.", "info")
-            const params = new URLSearchParams({ next: "/pricing" })
+            const params = new URLSearchParams({ next: `/pricing?plan=${selectedPlanTier}` })
             router.push(`/login?${params.toString()}`)
             return
         }
@@ -155,11 +176,18 @@ function PricingPageContent() {
                     : {}),
             })
             window.location.href = checkout.url
-        } catch (error: any) {
-            toast(`❌ ${error?.message || "Failed to start checkout."}`, "error")
+        } catch (error: unknown) {
+            toast(getErrorMessage(error, "Failed to start checkout."), "error")
         } finally {
             setCheckoutLoading(false)
         }
+    }
+
+    const handlePlanSelect = (tier: BillingPaidPlanTier) => {
+        setSelectedPlanTier(tier)
+        const params = new URLSearchParams(searchParams.toString())
+        params.set("plan", tier)
+        router.replace(`/pricing?${params.toString()}`, { scroll: false })
     }
 
     const handleManageBillingClick = async () => {
@@ -167,283 +195,366 @@ function PricingPageContent() {
         try {
             const portal = await createBillingPortalSession()
             window.location.href = portal.url
-        } catch (error: any) {
-            toast(`❌ ${error?.message || "Failed to open billing portal."}`, "error")
+        } catch (error: unknown) {
+            toast(getErrorMessage(error, "Failed to open billing portal."), "error")
         } finally {
             setPortalLoading(false)
         }
     }
 
     return (
-        <div className="app-shell space-y-4 px-4 pb-32 pt-6">
-            <div className="ambient-orb left-[-80px] top-8 h-40 w-40 bg-sky-500/20" />
-            <div className="ambient-orb right-[-40px] top-24 h-36 w-36 bg-amber-500/[0.15]" />
+        <div className="field-app min-h-screen px-4 pb-16 pt-6 text-white">
+            <div className="mx-auto max-w-5xl space-y-5">
+                <section className="field-panel p-5">
+                    <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="max-w-2xl space-y-3">
+                            <div className="flex items-center gap-2 text-sm font-semibold text-blue-200">
+                                <Sparkles className="h-4 w-4" />
+                                SnapQuote
+                            </div>
+                            <div className="space-y-2">
+                                <h1 className="text-3xl font-semibold leading-tight">SnapQuote Pricing</h1>
+                                <p className="text-sm leading-6 text-slate-300">
+                                    Choose the quote volume, multilingual capture, and PDF branding level that matches how your crew actually works from the field.
+                                </p>
+                            </div>
+                        </div>
 
-            <Card className="premium-panel mesh-border mx-auto w-full max-w-5xl overflow-hidden border-primary/20">
-                <CardHeader className="pb-3">
-                    <div className="section-eyebrow w-fit">
-                        <Sparkles className="h-4 w-4" />
-                        Pricing for trade owner-operators
+                        <div className="grid w-full grid-cols-3 gap-2 lg:max-w-md">
+                            <div className="rounded-lg border border-white/10 bg-slate-950/55 p-3 sm:p-4">
+                                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Free</p>
+                                <p className="mt-2 text-xl font-semibold sm:text-2xl">{FREE_PLAN_MARKETING_QUOTE_LIMIT}</p>
+                                <p className="mt-1 text-[11px] leading-4 text-slate-400">drafts</p>
+                            </div>
+                            <div className="rounded-lg border border-white/10 bg-slate-950/55 p-3 sm:p-4">
+                                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Selected</p>
+                                <p className="mt-2 text-xl font-semibold sm:text-2xl">{selectedPlan.label}</p>
+                                <p className="mt-1 text-[11px] leading-4 text-slate-400">{billingInterval}</p>
+                            </div>
+                            <div className="rounded-lg border border-white/10 bg-slate-950/55 p-3 sm:p-4">
+                                <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Status</p>
+                                <p className="mt-2 text-xl font-semibold sm:text-2xl">{isSubscribed ? "Active" : "Open"}</p>
+                                <p className="mt-1 text-[11px] leading-4 text-slate-400">{subscription?.planTier || "free"} plan</p>
+                            </div>
+                        </div>
                     </div>
-                    <CardTitle className="text-[1.85rem] font-semibold leading-[1.05] tracking-[-0.04em] text-white">
-                        Pick the quoting pace your crew can actually keep up with
-                    </CardTitle>
-                    <p className="text-sm leading-6 text-slate-300">
-                        SnapQuote is for multilingual field capture, cleaner English estimates, and faster follow-through from the truck.
-                    </p>
-                </CardHeader>
-                <CardContent className="space-y-4">
+
+                    <div className="mt-5 rounded-lg border border-sky-400/20 bg-sky-500/10 p-3" data-testid="pricing-hero-cta">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p className="text-xs uppercase tracking-[0.2em] text-sky-200/80">Selected plan</p>
+                                <p className="mt-1 text-lg font-semibold text-white">
+                                    {selectedPlan.label} · {selectedPlan.priceLabel}
+                                </p>
+                                <p className="mt-1 text-xs leading-5 text-slate-300">{selectedPlan.bestFor}</p>
+                            </div>
+                            <div className="grid gap-2 sm:w-72 sm:grid-cols-2">
+                                <Button
+                                    onClick={handleUpgradeClick}
+                                    disabled={upgradeDisabled}
+                                    className="h-11 rounded-lg border border-sky-300/20 bg-blue-600 text-sm font-semibold text-white hover:bg-blue-500"
+                                    data-testid="pricing-hero-upgrade"
+                                >
+                                    {upgradeCtaLabel}
+                                </Button>
+                                <Button
+                                    asChild
+                                    variant="outline"
+                                    className={cn("h-11 rounded-lg text-sm", pricingOutlineButtonClass)}
+                                >
+                                    <Link href="/new-estimate" data-testid="pricing-hero-free-drafts">
+                                        Try free drafts
+                                    </Link>
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section className="space-y-4">
                     {loading && (
-                        <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-muted-foreground flex items-center gap-2">
+                        <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-slate-950/55 p-3 text-sm text-slate-400">
                             <Loader2 className="h-4 w-4 animate-spin" />
                             Checking live pricing and billing status...
                         </div>
                     )}
 
-                    <div className="rounded-[24px] border border-sky-300/10 bg-gradient-to-r from-sky-500/[0.12] via-cyan-400/10 to-amber-400/10 p-4 text-sm leading-6 text-slate-300">
-                        Pay for turning Spanish or Korean field talk into clean English quotes, not for bloated office software you barely open.
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <div className="grid grid-cols-3 gap-2 md:gap-3" data-testid="pricing-plan-selector">
                         {MARKETING_PLAN_OPTIONS.map((plan) => (
                             <button
                                 key={plan.tier}
                                 type="button"
-                                onClick={() => setSelectedPlanTier(plan.tier)}
+                                onClick={() => handlePlanSelect(plan.tier)}
                                 disabled={checkoutLoading || portalLoading}
-                                className={`premium-card premium-card-hover w-full p-4 text-left ${selectedPlanTier === plan.tier
-                                    ? "border-sky-300/30 bg-sky-400/10 shadow-[0_20px_60px_-36px_rgba(56,189,248,0.8)]"
-                                    : "border-white/10 bg-white/[0.045]"
-                                    }`}
+                                data-testid={`pricing-plan-${plan.tier}`}
+                                className={cn(
+                                    "field-card min-w-0 w-full p-3 text-left transition-colors hover:border-white/20 hover:bg-slate-900 md:p-4",
+                                    selectedPlanTier === plan.tier && "border-sky-400/35 bg-sky-500/10 ring-1 ring-sky-400/25"
+                                )}
                             >
-                                <div className="flex items-start justify-between gap-3">
-                                    <div>
-                                        <p className="text-base font-semibold text-white">{plan.label}</p>
-                                        <p className="mt-1 text-sm text-slate-300">{plan.priceLabel}</p>
+                                <div className="flex min-w-0 items-start justify-between gap-2 md:gap-3">
+                                    <div className="min-w-0">
+                                        <p className="truncate text-sm font-semibold text-white md:text-base">{plan.label}</p>
+                                        <p className="mt-1 truncate text-[11px] leading-4 text-slate-300 md:text-sm">{plan.priceLabel}</p>
                                     </div>
-                                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] ${selectedPlanTier === plan.tier
-                                        ? "bg-sky-300/[0.15] text-sky-100"
-                                        : "bg-white/[0.08] text-slate-300"
-                                        }`}>
+                                    <span className={cn(
+                                        "hidden rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] md:inline-flex",
+                                        selectedPlanTier === plan.tier
+                                            ? "border-sky-400/30 bg-sky-500/10 text-sky-100"
+                                            : "border-white/10 bg-slate-950/65 text-slate-300"
+                                    )}>
                                         {plan.tier}
                                     </span>
                                 </div>
-                                <p className="mt-3 text-xs leading-5 text-slate-400">{plan.bestFor}</p>
+                                <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-slate-400 md:mt-3 md:text-xs md:leading-5">{plan.bestFor}</p>
                             </button>
                         ))}
                     </div>
+                </section>
 
-                    <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-4 space-y-3">
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <p className="text-sm font-medium text-white">Billing cadence</p>
-                                <p className="text-xs text-muted-foreground">
-                                    Use annual billing when the plan is configured to reduce churn and push self-serve upgrades through Stripe Checkout.
-                                </p>
+                <section className="grid gap-5 lg:grid-cols-[1.08fr_0.92fr]">
+                    <div className="space-y-5">
+                        <div className="field-card space-y-4 p-4">
+                            <div className="flex items-start gap-3">
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-sky-400/25 bg-sky-500/10 text-sky-200">
+                                    <CreditCard className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-semibold text-white">Billing cadence</p>
+                                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                                        Monthly keeps cash flow flexible. Annual uses the configured Stripe annual price when available.
+                                    </p>
+                                </div>
                             </div>
+
                             {annualEnabled ? (
-                                <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-200">
+                                <span className="w-fit rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-200">
                                     Save up to {annualDiscountPct}%
                                 </span>
                             ) : null}
-                        </div>
 
-                        <div className="grid grid-cols-2 gap-2">
-                            <Button
-                                type="button"
-                                variant={billingInterval === "monthly" ? "default" : "outline"}
-                                onClick={() => setBillingInterval("monthly")}
-                                disabled={checkoutLoading || portalLoading}
-                                className="w-full rounded-2xl"
-                            >
-                                Monthly
-                            </Button>
-                            <Button
-                                type="button"
-                                variant={billingInterval === "annual" ? "default" : "outline"}
-                                onClick={() => setBillingInterval("annual")}
-                                disabled={checkoutLoading || portalLoading || !annualEnabled}
-                                className="w-full rounded-2xl"
-                            >
-                                Annual
-                            </Button>
-                        </div>
-
-                        <p className="text-xs text-muted-foreground">
-                            {billingInterval === "annual"
-                                ? annualEnabled
-                                    ? "Stripe Checkout will use the annual billing price for this plan."
-                                    : "Annual billing is not configured for this plan yet."
-                                : "Stripe Checkout will use the monthly billing price for this plan."}
-                        </p>
-                    </div>
-
-                    <div className="rounded-[24px] border border-white/10 bg-slate-950/[0.45] p-4 space-y-2">
-                        <p className="text-sm text-muted-foreground">Selected plan</p>
-                        <p className="text-3xl font-semibold tracking-[-0.04em] text-white">
-                            {selectedPlan.priceLabel}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                            Tier: <span className="font-medium uppercase">{selectedPlan.tier}</span>
-                        </p>
-                        <p className="text-sm leading-6 text-slate-200">
-                            {selectedPlan.bestFor}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                            Best chosen by quote volume and language friction, not by seat count.
-                        </p>
-                        {variant?.name && (
-                            <p className="text-xs text-muted-foreground">
-                                Variant: <span className="font-mono">{variant.name}</span>
-                            </p>
-                        )}
-                        {subscription && (
-                            <div className="space-y-1 text-xs text-muted-foreground">
-                                <p>
-                                    Current plan:{" "}
-                                    <span className="font-medium uppercase">{subscription.planTier}</span>
-                                    {subscription.status ? ` (${subscription.status})` : ""}
-                                    {currentBillingInterval ? ` · ${currentBillingInterval}` : ""}
-                                </p>
-                                {subscription.currentPeriodEnd && (
-                                    <p>
-                                        Renews or ends on: <span className="font-medium">{new Date(subscription.currentPeriodEnd).toLocaleDateString()}</span>
-                                    </p>
-                                )}
-                                {subscription.cancelAtPeriodEnd && (
-                                    <p className="text-amber-300">
-                                        Cancel at period end is enabled. Use the billing portal to resume or change plans.
-                                    </p>
-                                )}
+                            <div className="grid grid-cols-2 gap-2">
+                                <Button
+                                    type="button"
+                                    variant={billingInterval === "monthly" ? "default" : "outline"}
+                                    onClick={() => setBillingInterval("monthly")}
+                                    disabled={checkoutLoading || portalLoading}
+                                    className={cn("w-full rounded-lg", billingInterval !== "monthly" && pricingOutlineButtonClass)}
+                                >
+                                    Monthly
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant={billingInterval === "annual" ? "default" : "outline"}
+                                    onClick={() => setBillingInterval("annual")}
+                                    disabled={checkoutLoading || portalLoading || !annualEnabled}
+                                    className={cn("w-full rounded-lg", billingInterval !== "annual" && pricingOutlineButtonClass)}
+                                >
+                                    Annual
+                                </Button>
                             </div>
-                        )}
-                    </div>
 
-                    {usageSnapshot && (
-                        <div className="rounded-[24px] border border-white/10 bg-white/[0.045] p-4 space-y-3">
-                            <div className="flex items-center justify-between gap-3">
+                            <p className="text-xs text-slate-400">
+                                {billingInterval === "annual"
+                                    ? annualEnabled
+                                        ? "Stripe Checkout will use the annual billing price for this plan."
+                                        : "Annual billing is not configured for this plan yet."
+                                    : "Stripe Checkout will use the monthly billing price for this plan."}
+                            </p>
+                        </div>
+
+                        <div className="field-card space-y-3 p-4 text-sm">
+                            <p className="font-semibold text-white">What you get</p>
+                            <ul className="space-y-2 text-slate-300">
+                                {selectedPlan.includes.map((include) => (
+                                    <li key={include} className="flex gap-2">
+                                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                                        <span className="leading-5">{include}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+
+                        <div className="field-card space-y-3 p-4 text-sm">
+                            <div className="flex items-start gap-3">
+                                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-400/25 bg-emerald-500/10 text-emerald-200">
+                                    <ShieldCheck className="h-5 w-5" />
+                                </div>
                                 <div>
-                                    <p className="text-sm font-medium">Live monthly usage</p>
-                                    <p className="text-xs text-muted-foreground">
-                                        Measured from {usageSnapshot.periodStart} UTC month start.
+                                    <p className="font-semibold text-white">PDF branding by plan</p>
+                                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                                        Customer-facing PDFs should look like the contractor&apos;s business as the plan grows.
                                     </p>
                                 </div>
-                                <span className="text-xs font-medium uppercase text-muted-foreground">
-                                    {usageSnapshot.planTier}
-                                </span>
                             </div>
 
-                            <div className="space-y-2">
-                                {usageRows.map((row) => {
-                                    const width = Math.min(100, Math.max(0, row.percent))
-                                    const color = row.percent >= 100
-                                        ? "bg-red-500"
-                                        : row.percent >= 80
-                                            ? "bg-amber-500"
-                                            : "bg-emerald-500"
+                            <div className="space-y-2 text-slate-300">
+                                <div className={pricingBoxClass}>
+                                    <p className="font-medium text-white">Free</p>
+                                    <p className="mt-1 text-xs leading-5 text-slate-400">Standard SnapQuote PDF layout and email watermarking.</p>
+                                </div>
+                                <div className={pricingBoxClass}>
+                                    <p className="font-medium text-white">Starter</p>
+                                    <p className="mt-1 text-xs leading-5 text-slate-400">Logo branding on the PDF header so estimates look like your business.</p>
+                                </div>
+                                <div className="rounded-lg border border-sky-400/25 bg-sky-500/10 p-4">
+                                    <p className="font-medium text-white">Pro and Team</p>
+                                    <p className="mt-1 text-xs leading-5 text-sky-100/80">Full-page branded estimate background for premium customer-facing PDFs.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
-                                    return (
-                                        <div key={row.label} className="space-y-1">
-                                            <div className="flex items-center justify-between text-xs">
-                                                <span>{row.label}</span>
-                                                <span>{row.used}/{row.limit}</span>
-                                            </div>
-                                            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
-                                                <div className={`h-full transition-all ${color}`} style={{ width: `${width}%` }} />
-                                            </div>
-                                        </div>
-                                    )
-                                })}
+                    <div className="space-y-5">
+                        <div className="field-panel space-y-4 p-5">
+                            <div>
+                                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Selected plan</p>
+                                <p className="mt-2 text-3xl font-semibold leading-[1.25] text-white" data-testid="pricing-selected-price">
+                                    {selectedPlan.priceLabel}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-400">
+                                    Tier <span className="font-medium uppercase text-slate-200">{selectedPlan.tier}</span>
+                                </p>
                             </div>
 
-                            {usageSnapshot.planTier === "free" && (
-                                <p className="text-xs text-muted-foreground">
-                                    You have {usageSnapshot.remaining.generate} free quote drafts left this month out of {FREE_PLAN_MARKETING_QUOTE_LIMIT}. Live usage here makes the upgrade point explicit before you hit the cap.
+                            <p className="text-sm leading-6 text-slate-300">{selectedPlan.bestFor}</p>
+                            <p className="text-xs leading-5 text-slate-500">
+                                Best chosen by quote volume and language friction, not by seat count.
+                            </p>
+
+                            {variant?.name && (
+                                <p className="rounded-lg border border-white/10 bg-slate-950/55 px-3 py-2 text-xs text-slate-400">
+                                    Variant <span className="font-mono text-slate-200">{variant.name}</span>
                                 </p>
                             )}
+
+                            {subscription && (
+                                <div className={pricingBoxSoftClass}>
+                                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Current subscription</p>
+                                    <p className="mt-2 text-sm text-slate-300">
+                                        <span className="font-medium uppercase text-white">{subscription.planTier}</span>
+                                        {subscription.status ? ` (${subscription.status})` : ""}
+                                        {currentBillingInterval ? ` · ${currentBillingInterval}` : ""}
+                                    </p>
+                                    {subscription.currentPeriodEnd && (
+                                        <p className="mt-1 text-xs text-slate-400">
+                                            Renews or ends on {new Date(subscription.currentPeriodEnd).toLocaleDateString()}
+                                        </p>
+                                    )}
+                                    {subscription.cancelAtPeriodEnd && (
+                                        <p className="mt-1 text-xs text-amber-300">
+                                            Cancel at period end is enabled. Use the billing portal to resume or change plans.
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-1 gap-2">
+                                <Button
+                                    onClick={handleUpgradeClick}
+                                    disabled={upgradeDisabled}
+                                    className="h-12 w-full justify-between rounded-lg border border-sky-300/20 bg-blue-600 font-semibold text-white shadow-[0_18px_32px_-24px_rgba(37,99,235,0.9)] hover:bg-blue-500"
+                                >
+                                    {upgradeCtaLabel}
+                                    {!loading && !isSubscribed && <ArrowRight className="h-4 w-4" />}
+                                </Button>
+                                <Button
+                                    asChild
+                                    variant="outline"
+                                    className={cn("h-12 w-full rounded-lg", pricingOutlineButtonClass)}
+                                >
+                                    <Link href="/new-estimate">
+                                        Try {FREE_PLAN_MARKETING_QUOTE_LIMIT} free English quote drafts first
+                                    </Link>
+                                </Button>
+                                {isAuthed && (
+                                    <Button
+                                        variant="outline"
+                                        onClick={handleManageBillingClick}
+                                        disabled={loading || portalLoading || !subscription?.customerId}
+                                        className={cn("h-12 w-full rounded-lg", pricingOutlineButtonClass)}
+                                    >
+                                        {portalLoading ? "Opening portal..." : "Manage billing in Stripe"}
+                                    </Button>
+                                )}
+                            </div>
                         </div>
-                    )}
 
-                    <div className="rounded-[24px] border border-white/10 bg-white/[0.045] p-4 text-sm">
-                        <p className="mb-2 font-medium text-white">What you get</p>
-                        <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
-                            {selectedPlan.includes.map((include) => (
-                                <li key={include}>{include}</li>
-                            ))}
-                        </ul>
-                    </div>
+                        {usageSnapshot && (
+                            <div className="field-card space-y-3 p-4">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="flex items-start gap-3">
+                                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-slate-950/55 text-slate-300">
+                                            <Gauge className="h-5 w-5" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-semibold">Live monthly usage</p>
+                                            <p className="mt-1 text-xs text-slate-400">
+                                                Measured from {usageSnapshot.periodStart} UTC month start.
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <span className="text-xs font-medium uppercase text-slate-500">
+                                        {usageSnapshot.planTier}
+                                    </span>
+                                </div>
 
-                    <div className="rounded-[24px] border border-white/10 bg-white/[0.045] p-4 space-y-3 text-sm">
-                        <p className="font-medium text-white">PDF Branding by Plan</p>
-                        <div className="space-y-2 text-muted-foreground">
-                            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                                <p className="font-medium text-white">Free</p>
-                                <p className="text-xs leading-5">Standard SnapQuote PDF layout and email watermarking.</p>
+                                <div className="space-y-3">
+                                    {usageRows.map((row) => {
+                                        const width = Math.min(100, Math.max(0, row.percent))
+                                        const color = row.percent >= 100
+                                            ? "bg-red-500"
+                                            : row.percent >= 80
+                                                ? "bg-amber-500"
+                                                : "bg-emerald-500"
+
+                                        return (
+                                            <div key={row.label} className="space-y-1">
+                                                <div className="flex items-center justify-between text-xs text-slate-300">
+                                                    <span>{row.label}</span>
+                                                    <span>{row.used}/{row.limit}</span>
+                                                </div>
+                                                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-950">
+                                                    <div className={`h-full transition-all ${color}`} style={{ width: `${width}%` }} />
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+
+                                {usageSnapshot.planTier === "free" && (
+                                    <p className="text-xs leading-5 text-slate-400">
+                                        You have {usageSnapshot.remaining.generate} free quote drafts left this month out of {FREE_PLAN_MARKETING_QUOTE_LIMIT}. Live usage makes the upgrade point explicit before you hit the cap.
+                                    </p>
+                                )}
                             </div>
-                            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                                <p className="font-medium text-white">Starter</p>
-                                <p className="text-xs leading-5">Unlock logo branding on the PDF header so estimates look like your business, not a generic tool.</p>
-                            </div>
-                            <div className="rounded-2xl border border-sky-300/20 bg-sky-400/10 p-3">
-                                <p className="font-medium text-white">Pro and Team</p>
-                                <p className="text-xs leading-5">Upload a full-page branded estimate background for premium customer-facing PDFs.</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="rounded-[24px] border border-white/10 bg-white/[0.035] p-4 text-xs leading-5 text-muted-foreground">
-                        Best fit: repair calls, installs, replacements, change orders, and small projects where the job is explained one way on site and sent another way to the customer.
-                    </div>
-
-                    <div className="rounded-[24px] border border-white/10 bg-white/[0.035] p-4 text-xs leading-5 text-muted-foreground">
-                        SnapQuote is not trying to replace dispatch, CRM, or accounting. It is for owner-operators and small crews who need a faster multilingual field-to-English quote workflow.
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-2">
-                        <Button
-                            onClick={handleUpgradeClick}
-                            disabled={loading || checkoutLoading || isSubscribed || (billingInterval === "annual" && !annualEnabled)}
-                            className="h-12 w-full justify-between rounded-[22px] border border-sky-300/20 bg-gradient-to-r from-sky-500 via-cyan-400 to-amber-400 font-semibold text-slate-950 shadow-[0_18px_50px_-18px_rgba(56,189,248,0.75)]"
-                        >
-                            {loading
-                                ? "Loading live pricing..."
-                                : checkoutLoading
-                                ? "Opening checkout..."
-                                : isSubscribed
-                                    ? "Subscription already active"
-                                    : !isAuthed ? "Log in to Subscribe" : `Upgrade to ${selectedPlan.label} ${billingInterval === "annual" ? "Annually" : "Monthly"}`}
-                            {!loading && !isSubscribed && <ArrowRight className="h-4 w-4" />}
-                        </Button>
-                        <Button
-                            asChild
-                            variant="outline"
-                            className="h-12 w-full rounded-[22px] border-white/[0.15] bg-white/5 text-white hover:bg-white/10"
-                        >
-                            <Link href="/new-estimate">
-                                Try {FREE_PLAN_MARKETING_QUOTE_LIMIT} free English quote drafts first
-                            </Link>
-                        </Button>
-                        {isAuthed && (
-                            <Button
-                                variant="outline"
-                                onClick={handleManageBillingClick}
-                                disabled={loading || portalLoading || !subscription?.customerId}
-                                className="h-12 w-full rounded-[22px] border-white/[0.15] bg-white/5 text-white hover:bg-white/10"
-                            >
-                                {portalLoading ? "Opening portal..." : "Manage billing in Stripe"}
-                            </Button>
                         )}
+
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                            <div className={pricingBoxSoftClass}>
+                                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Best fit</p>
+                                <p className="mt-2 text-xs leading-5 text-slate-400">
+                                    Repair calls, installs, replacements, change orders, and small projects where the job is explained one way on site and sent another way to the customer.
+                                </p>
+                            </div>
+                            <div className={pricingBoxSoftClass}>
+                                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Product boundary</p>
+                                <p className="mt-2 text-xs leading-5 text-slate-400">
+                                    SnapQuote is not trying to replace dispatch, CRM, or accounting. It is a faster multilingual field-to-English quote workflow.
+                                </p>
+                            </div>
+                        </div>
                     </div>
-                </CardContent>
-            </Card>
+                </section>
+            </div>
         </div>
     )
 }
 
 function PricingPageFallback() {
     return (
-        <div className="flex min-h-[50vh] items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="field-app flex min-h-screen items-center justify-center text-slate-300">
+            <Loader2 className="h-5 w-5 animate-spin" />
         </div>
     )
 }

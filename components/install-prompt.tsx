@@ -1,9 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Download, X, Share } from "lucide-react"
+import { Download, Share, X } from "lucide-react"
 import { usePWAInstall } from "@/hooks/usePWAInstall"
 
 export function InstallPrompt() {
@@ -12,11 +11,9 @@ export function InstallPrompt() {
     const [showIOSGuide, setShowIOSGuide] = useState(false)
 
     useEffect(() => {
-        // Check if user dismissed previously
         const wasDismissed = localStorage.getItem("snapquote_install_dismissed")
         if (wasDismissed) {
             const dismissedAt = parseInt(wasDismissed)
-            // Show again after 7 days
             if (Date.now() - dismissedAt < 7 * 24 * 60 * 60 * 1000) {
                 setDismissed(true)
             }
@@ -35,46 +32,41 @@ export function InstallPrompt() {
         }
     }
 
-    const handleIOSClick = () => {
-        setShowIOSGuide(true)
-    }
-
-    // Don't show if already installed or dismissed
     if (isInstalled || dismissed) return null
-
-    // Don't show if not installable (not Android/Chrome) and not iOS
     if (!isInstallable && !isIOS) return null
 
     return (
         <>
-            {/* Install Banner */}
-            <div className="fixed top-0 left-0 right-0 z-40 p-2 bg-primary/95 backdrop-blur-sm">
-                <div className="flex items-center justify-between max-w-md mx-auto">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-white/20 rounded-lg">
-                            <Download className="h-4 w-4 text-white" />
+            <div
+                className="fixed inset-x-3 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 mx-auto max-w-md"
+                role="region"
+                aria-label="Install SnapQuote"
+            >
+                <div className="field-panel flex items-center justify-between gap-3 p-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-blue-200">
+                            <Download className="h-4 w-4" />
                         </div>
-                        <div className="text-white">
-                            <p className="text-sm font-medium">Install SnapQuote</p>
-                            <p className="text-xs opacity-80">Use it like a native app</p>
+                        <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-white">Install SnapQuote</p>
+                            <p className="truncate text-xs text-slate-400">Faster access from the jobsite.</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-2">
                         {isIOS ? (
                             <Button
                                 size="sm"
-                                variant="secondary"
-                                onClick={handleIOSClick}
-                                className="h-8"
+                                variant="outline"
+                                onClick={() => setShowIOSGuide(true)}
+                                className="rounded-lg border-white/10 bg-slate-950/70 px-3 text-xs text-white hover:bg-slate-900"
                             >
-                                How to Install
+                                How
                             </Button>
                         ) : (
                             <Button
                                 size="sm"
-                                variant="secondary"
                                 onClick={handleInstall}
-                                className="h-8"
+                                className="rounded-lg bg-blue-600 px-3 text-xs text-white hover:bg-blue-500"
                             >
                                 Install
                             </Button>
@@ -83,7 +75,8 @@ export function InstallPrompt() {
                             size="icon"
                             variant="ghost"
                             onClick={handleDismiss}
-                            className="h-8 w-8 text-white hover:bg-white/20"
+                            aria-label="Dismiss install prompt"
+                            className="rounded-lg text-slate-300 hover:bg-white/10 hover:text-white"
                         >
                             <X className="h-4 w-4" />
                         </Button>
@@ -91,66 +84,62 @@ export function InstallPrompt() {
                 </div>
             </div>
 
-            {/* iOS Installation Guide Modal */}
             {showIOSGuide && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                    <Card className="w-full max-w-sm">
-                        <CardContent className="p-6">
-                            <div className="flex items-center justify-between mb-4">
-                                <h3 className="font-bold text-lg">Install on iPhone/iPad</h3>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                    <div className="field-panel w-full max-w-sm overflow-hidden">
+                        <div className="border-b border-white/10 px-5 py-4">
+                            <div className="flex items-center justify-between gap-3">
+                                <h3 className="text-base font-semibold text-white">Install on iPhone/iPad</h3>
                                 <Button
                                     size="icon"
                                     variant="ghost"
                                     onClick={() => setShowIOSGuide(false)}
-                                    className="h-8 w-8"
+                                    aria-label="Close install instructions"
+                                    className="rounded-lg text-slate-300 hover:bg-white/10 hover:text-white"
                                 >
                                     <X className="h-4 w-4" />
                                 </Button>
                             </div>
+                        </div>
 
-                            <div className="space-y-4">
+                        <div className="space-y-4 p-5">
+                            <div className="space-y-3">
                                 <div className="flex items-start gap-3">
-                                    <div className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-sm font-bold shrink-0">
+                                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-xs font-bold text-blue-200">
                                         1
                                     </div>
-                                    <div>
-                                        <p className="text-sm">
-                                            Tap the <Share className="h-4 w-4 inline text-primary" /> Share button in Safari
-                                        </p>
-                                    </div>
+                                    <p className="text-sm text-slate-200">
+                                        Tap the <Share className="inline h-4 w-4 text-blue-200" /> Share button in Safari.
+                                    </p>
                                 </div>
 
                                 <div className="flex items-start gap-3">
-                                    <div className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-sm font-bold shrink-0">
+                                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-xs font-bold text-blue-200">
                                         2
                                     </div>
-                                    <div>
-                                        <p className="text-sm">
-                                            Scroll down and tap <strong>&quot;Add to Home Screen&quot;</strong>
-                                        </p>
-                                    </div>
+                                    <p className="text-sm text-slate-200">
+                                        Scroll down and tap <strong className="text-white">&quot;Add to Home Screen&quot;</strong>.
+                                    </p>
                                 </div>
 
                                 <div className="flex items-start gap-3">
-                                    <div className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-sm font-bold shrink-0">
+                                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-xs font-bold text-blue-200">
                                         3
                                     </div>
-                                    <div>
-                                        <p className="text-sm">
-                                            Tap <strong>&quot;Add&quot;</strong> to confirm
-                                        </p>
-                                    </div>
+                                    <p className="text-sm text-slate-200">
+                                        Tap <strong className="text-white">&quot;Add&quot;</strong> to confirm.
+                                    </p>
                                 </div>
                             </div>
 
                             <Button
-                                className="w-full mt-6"
+                                className="w-full rounded-lg bg-blue-600 text-white hover:bg-blue-500"
                                 onClick={() => setShowIOSGuide(false)}
                             >
                                 Got it!
                             </Button>
-                        </CardContent>
-                    </Card>
+                        </div>
+                    </div>
                 </div>
             )}
         </>
