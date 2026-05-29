@@ -81,6 +81,9 @@ function buildEstimateRow(overrides = {}) {
     clients: {
       name: "Harbor Dental",
       address: "44 Bay St",
+      email: "office@harbordental.test",
+      phone: "+14165550123",
+      notes: "Use side entrance.",
     },
     profiles: {
       business_name: "Crew West",
@@ -146,6 +149,9 @@ describe("Team estimate editing routes", () => {
     assert.equal(data.ok, true)
     assert.equal(data.estimate.estimateId, "estimate_1")
     assert.equal(data.estimate.ownerBusinessName, "Crew West")
+    assert.equal(data.estimate.clientEmail, "office@harbordental.test")
+    assert.equal(data.estimate.clientPhone, "+14165550123")
+    assert.equal(data.estimate.clientNotes, "Use side entrance.")
     assert.equal(data.estimate.sections.length, 1)
   })
 
@@ -361,6 +367,9 @@ describe("Team estimate editing routes", () => {
     const req = jsonRequest("http://localhost/api/team/estimates/estimate_1", {
       clientName: "Harbor Dental",
       clientAddress: "44 Bay St",
+      clientEmail: "dispatch@harbordental.test",
+      clientPhone: "+14165550999",
+      clientNotes: "Confirm parking access before arrival.",
       summary_note: "Updated summary",
       status: "draft",
       taxRate: 5,
@@ -495,6 +504,9 @@ describe("Team estimate editing routes", () => {
     const req = jsonRequest("http://localhost/api/team/estimates/estimate_1", {
       clientName: "Harbor Dental",
       clientAddress: "44 Bay St",
+      clientEmail: "dispatch@harbordental.test",
+      clientPhone: "+14165550999",
+      clientNotes: "Confirm parking access before arrival.",
       summary_note: "Updated summary",
       status: "draft",
       taxRate: 5,
@@ -548,5 +560,13 @@ describe("Team estimate editing routes", () => {
     )
     assert.ok(updateCall)
     assert.equal(updateCall.payload.ai_summary, "Updated summary")
+
+    const clientUpdateCall = state.supabase.queryCalls.find(
+      (query) => query.table === "clients" && query.action === "update"
+    )
+    assert.ok(clientUpdateCall)
+    assert.equal(clientUpdateCall.payload.email, "dispatch@harbordental.test")
+    assert.equal(clientUpdateCall.payload.phone, "+14165550999")
+    assert.equal(clientUpdateCall.payload.notes, "Confirm parking access before arrival.")
   })
 })

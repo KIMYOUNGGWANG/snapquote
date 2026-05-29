@@ -964,6 +964,10 @@ describe('POST /api/create-payment-link', () => {
     assert.equal(capturedPayload.metadata.userId, 'user-1')
     assert.equal(capturedPayload.metadata.estimateId, '11111111-1111-4111-8111-111111111111')
     assert.equal(capturedPayload.metadata.estimateNumber, 'EST-249')
+    assert.match(capturedPayload.after_completion.redirect.url, /payment-success/)
+    assert.match(capturedPayload.after_completion.redirect.url, /estimateId=11111111-1111-4111-8111-111111111111/)
+    assert.match(capturedPayload.after_completion.redirect.url, /estimateNumber=EST-249/)
+    assert.match(capturedPayload.after_completion.redirect.url, /session_id=\{CHECKOUT_SESSION_ID\}/)
     assert.equal(capturedPayload.line_items[0].price_data.currency, 'usd')
   })
 
