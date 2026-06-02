@@ -4,29 +4,41 @@ import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 import { resolveEffectivePlanTier } from "@/lib/server/effective-plan"
+import { needsScopeAssumptionsReview } from "@/lib/estimates/draft-state"
+import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
 
 const PRO_TIERS = new Set(["pro", "team"])
 const RECOVERY_LOOKBACK_MS = 48 * 60 * 60 * 1000
 const MAX_CANDIDATES = 50
-const MAX_PREVIEW_LENGTH = 220
+const MAX_PREVIEW_LENGTH = 320
 const ESTIMATE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/
 const E164_PHONE_PATTERN = /^\+[1-9]\d{7,14}$/
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const GEMINI_RECOVERY_MODEL = process.env.GEMINI_RECOVERY_MODEL?.trim() || "gemini-2.5-flash"
 
-type RecoveryAction = "sent_sms" | "sent_email" | "skipped_no_contact"
+type RecoveryAction =
+    | "sent_sms"
+    | "sent_email"
+    | "skipped_no_contact"
+    | "skipped_scope_review_needed"
+    | "skipped_customer_paid"
+    | "skipped_customer_approved"
+    | "skipped_customer_change_requested"
 
 type RecoveryResult = {
     estimateId: string
     estimateNumber: string
     action: RecoveryAction
     messagePreview: string
+    customerPortalStatus?: CustomerPortalFollowupStatus
 }
 
 type RecoveryPayload = {
     estimateId?: string
     dryRun: boolean
 }
+
+type CustomerPortalFollowupStatus = "shared" | "viewed" | "approved" | "change_requested"
 
 type CandidateEstimate = {
     id: string
@@ -38,8 +50,16 @@ type CandidateEstimate = {
     first_followup_queued_at?: string | null
     first_followed_up_at?: string | null
     last_followed_up_at?: string | null
+    payment_completed_at?: string | null
     clients?: unknown
     profiles?: unknown
+    estimate_attachments?: unknown
+}
+
+type CandidateCustomerPortal = {
+    status: CustomerPortalFollowupStatus
+    shareUrl: string
+    customerNote: string
 }
 
 type CandidateContact = {
@@ -56,6 +76,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function asTrimmedString(value: unknown, maxLength: number): string {
     if (typeof value !== "string") return ""
     return value.trim().slice(0, maxLength)
+}
+
+function asOptionalHttpUrl(value: unknown): string {
+    const url = asTrimmedString(value, 2048)
+    if (!url) return ""
+
+    try {
+        const parsed = new URL(url)
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return ""
+        return parsed.toString()
+    } catch {
+        return ""
+    }
 }
 
 function asPositiveNumber(value: unknown): number | null {
@@ -193,16 +226,174 @@ function shouldProcessEstimate(estimate: CandidateEstimate, nowMs: number): bool
     return true
 }
 
+function normalizeCustomerPortalStatus(value: unknown): CustomerPortalFollowupStatus {
+    if (
+        value === "shared" ||
+        value === "viewed" ||
+        value === "approved" ||
+        value === "change_requested"
+    ) {
+        return value
+    }
+
+    return "shared"
+}
+
+function getErrorCode(error: unknown): string {
+    if (!isPlainObject(error)) return ""
+    return asTrimmedString(error.code, 80)
+}
+
+function getErrorMessage(error: unknown): string {
+    if (!isPlainObject(error)) return ""
+    return asTrimmedString(error.message, 500)
+}
+
+function customerPortalKey(userId: unknown, estimateId: unknown): string {
+    return `${asTrimmedString(userId, 128)}:${asTrimmedString(estimateId, 128)}`
+}
+
+function getCustomerDecisionSkipAction(portal: CandidateCustomerPortal | undefined): RecoveryAction | null {
+    if (portal?.status === "approved") return "skipped_customer_approved"
+    if (portal?.status === "change_requested") return "skipped_customer_change_requested"
+    return null
+}
+
+function isActionableRecoveryAction(action: RecoveryAction): boolean {
+    return action === "sent_sms" || action === "sent_email"
+}
+
+function buildCustomerDecisionSkipPreview(portal: CandidateCustomerPortal, estimateNumber: string): string {
+    if (portal.status === "approved") {
+        return `Estimate ${estimateNumber} is already approved by the customer, so Quote Recovery will not send a reminder.`
+    }
+
+    const note = portal.customerNote
+        ? ` Customer note: ${portal.customerNote}`
+        : ""
+
+    return `Estimate ${estimateNumber} has a customer change request, so start a revision instead of sending a reminder.${note}`
+}
+
+function extractAttachmentObject(value: unknown): Record<string, unknown> | null {
+    if (Array.isArray(value)) {
+        const first = value.find((entry) => isPlainObject(entry))
+        return isPlainObject(first) ? first : null
+    }
+
+    return isPlainObject(value) ? value : null
+}
+
+function extractCandidateScopeReviewState(estimate: CandidateEstimate) {
+    const attachment = extractAttachmentObject(estimate.estimate_attachments)
+    const photos = Array.isArray(attachment?.photos)
+        ? attachment.photos.filter((photo): photo is string => typeof photo === "string" && photo.trim() !== "")
+        : []
+    const originalTranscript = asTrimmedString(attachment?.original_transcript, 20000)
+    const scopeAssumptionsConfirmedAt = asTrimmedString(attachment?.scope_assumptions_confirmed_at, 80)
+
+    return {
+        attachments: {
+            photos,
+            ...(originalTranscript ? { originalTranscript } : {}),
+            ...(scopeAssumptionsConfirmedAt ? { scopeAssumptionsConfirmedAt } : {}),
+        },
+    }
+}
+
+function candidateNeedsScopeReview(estimate: CandidateEstimate): boolean {
+    return needsScopeAssumptionsReview(extractCandidateScopeReviewState(estimate))
+}
+
+function buildScopeReviewSkipPreview(estimateNumber: string): string {
+    return `Estimate ${estimateNumber} has thin field scope notes that need review before Quote Recovery sends a reminder. Open the estimate and confirm the scope assumptions first.`
+}
+
+function buildPaidSkipPreview(estimateNumber: string): string {
+    return `Estimate ${estimateNumber} is already marked paid, so Quote Recovery will not send a reminder.`
+}
+
+function appendCustomerPortalReviewLink(message: string, shareUrl: string): string {
+    if (!shareUrl || message.includes(shareUrl)) return message
+    return `${message.trim()} Review or approve here: ${shareUrl}`
+}
+
+async function loadCustomerPortalLinks(
+    supabase: any,
+    estimates: CandidateEstimate[]
+): Promise<Map<string, CandidateCustomerPortal>> {
+    const estimateIds = Array.from(
+        new Set(estimates.map((estimate) => asTrimmedString(estimate.id, 128)).filter(Boolean))
+    )
+    const userIds = Array.from(
+        new Set(estimates.map((estimate) => asTrimmedString(estimate.user_id, 128)).filter(Boolean))
+    )
+
+    if (estimateIds.length === 0 || userIds.length === 0) {
+        return new Map()
+    }
+
+    let query = supabase
+        .from("estimate_share_links")
+        .select("user_id, estimate_id, share_url, status, customer_note, updated_at")
+        .in("estimate_id", estimateIds)
+
+    query = query.in("user_id", userIds)
+
+    const { data, error } = await query
+    if (error) {
+        const code = getErrorCode(error)
+        const message = getErrorMessage(error) || "Failed to load customer quote portal links."
+
+        if (code === "42P01" || code === "PGRST204" || code === "PGRST205") {
+            console.warn("Quote recovery customer portal links unavailable:", message)
+            return new Map()
+        }
+
+        console.error("Quote recovery customer portal link query error:", error)
+        throw new Error(message)
+    }
+
+    const rows = Array.isArray(data) ? data : []
+    const links = new Map<string, CandidateCustomerPortal>()
+
+    for (const row of rows) {
+        if (!isPlainObject(row)) continue
+
+        const estimateId = asTrimmedString(row.estimate_id, 128)
+        const userId = asTrimmedString(row.user_id, 128)
+        if (!estimateId || !userId) continue
+
+        links.set(customerPortalKey(userId, estimateId), {
+            status: normalizeCustomerPortalStatus(row.status),
+            shareUrl: asOptionalHttpUrl(row.share_url),
+            customerNote: asTrimmedString(row.customer_note, 500),
+        })
+    }
+
+    return links
+}
+
 function defaultRecoveryMessage(input: {
     clientName: string
     estimateNumber: string
     totalAmount?: number | null
     businessName: string
+    customerPortalStatus?: CustomerPortalFollowupStatus
+    customerPortalUrl?: string
 }): string {
     const totalText =
         typeof input.totalAmount === "number" && Number.isFinite(input.totalAmount)
             ? ` regarding your ${Math.max(0, input.totalAmount).toFixed(2)} quote`
             : ""
+
+    if (input.customerPortalUrl) {
+        if (input.customerPortalStatus === "viewed") {
+            return `Hi ${input.clientName}, just checking in on estimate ${input.estimateNumber}${totalText} from ${input.businessName}. If the scope looks good, you can approve it or request changes here: ${input.customerPortalUrl}`
+        }
+
+        return `Hi ${input.clientName}, following up on estimate ${input.estimateNumber}${totalText} from ${input.businessName}. The review link is ready here: ${input.customerPortalUrl} Let me know if you want to adjust anything or lock in a schedule.`
+    }
 
     return `Hi ${input.clientName}, just checking in on estimate ${input.estimateNumber}${totalText} from ${input.businessName}. Let me know if you have any questions or want to lock in a schedule.`
 }
@@ -224,10 +415,18 @@ async function generateRecoveryMessage(input: {
     estimateNumber: string
     totalAmount?: number | null
     businessName: string
+    customerPortalStatus?: CustomerPortalFollowupStatus
+    customerPortalUrl?: string
 }): Promise<string> {
-    const fallback = defaultRecoveryMessage(input)
+    const fallback = appendCustomerPortalReviewLink(defaultRecoveryMessage(input), input.customerPortalUrl || "")
     const apiKey = process.env.GEMINI_API_KEY?.trim()
     if (!apiKey) return fallback
+
+    const customerContext = input.customerPortalStatus === "viewed"
+        ? "The customer has already opened the quote link; write a timely, helpful follow-up."
+        : input.customerPortalUrl
+            ? "The customer has an approval link available; do not invent a URL because the app appends the real link after your message."
+            : "No approval link is available."
 
     const prompt = [
         "You are a contractor follow-up assistant.",
@@ -246,6 +445,8 @@ async function generateRecoveryMessage(input: {
                 : "not provided"
         }`,
         `Business name: ${input.businessName}`,
+        `Customer quote status: ${input.customerPortalStatus || "not shared"}`,
+        `Customer context: ${customerContext}`,
     ].join("\n")
 
     try {
@@ -281,7 +482,7 @@ async function generateRecoveryMessage(input: {
 
         const generated = extractGeminiText(payload)
         if (!generated) return fallback
-        return generated.slice(0, 350)
+        return appendCustomerPortalReviewLink(generated.slice(0, 350), input.customerPortalUrl || "")
     } catch (error) {
         console.error("Quote recovery Gemini exception:", error)
         return fallback
@@ -537,9 +738,11 @@ export async function POST(req: Request) {
 
     let query = supabase
         .from("estimates")
-        .select("id, user_id, estimate_number, total_amount, sent_at, created_at, first_followup_queued_at, first_followed_up_at, last_followed_up_at, clients(*), profiles(business_name)")
+        .select("id, user_id, estimate_number, total_amount, sent_at, created_at, first_followup_queued_at, first_followed_up_at, last_followed_up_at, payment_completed_at, clients(*), profiles(business_name), estimate_attachments(photos, original_transcript, scope_assumptions_confirmed_at)")
         .eq("status", "sent")
         .is("first_followup_queued_at", null)
+        .is("first_followed_up_at", null)
+        .is("last_followed_up_at", null)
         .order("created_at", { ascending: true })
         .limit(250)
 
@@ -562,9 +765,18 @@ export async function POST(req: Request) {
 
     const nowMs = Date.now()
     const allCandidates = Array.isArray(data) ? (data as CandidateEstimate[]) : []
-    const candidates = allCandidates
-        .filter((candidate) => shouldProcessEstimate(candidate, nowMs))
-        .slice(0, MAX_CANDIDATES)
+    const processableCandidates = allCandidates.filter((candidate) => shouldProcessEstimate(candidate, nowMs))
+    let customerPortalByEstimate: Map<string, CandidateCustomerPortal>
+    try {
+        customerPortalByEstimate = await loadCustomerPortalLinks(supabase, processableCandidates)
+    } catch (error) {
+        return NextResponse.json(
+            { error: error instanceof Error ? error.message : "Failed to load customer quote portal links." },
+            { status: 500 }
+        )
+    }
+
+    const candidates = processableCandidates.slice(0, MAX_CANDIDATES)
 
     const smsBalanceByUser = new Map<string, number>()
     const results: RecoveryResult[] = []
@@ -576,12 +788,49 @@ export async function POST(req: Request) {
         const estimateNumber = asTrimmedString(candidate.estimate_number, 80) || estimateId
         const totalAmount = asPositiveNumber(candidate.total_amount)
         const contact = extractCandidateContact(candidate)
+        const customerPortal = customerPortalByEstimate.get(customerPortalKey(candidate.user_id, estimateId))
+        const customerDecisionSkipAction = getCustomerDecisionSkipAction(customerPortal)
+
+        if (isEstimatePaidLike(candidate)) {
+            results.push({
+                estimateId,
+                estimateNumber,
+                action: "skipped_customer_paid",
+                customerPortalStatus: customerPortal?.status,
+                messagePreview: toMessagePreview(buildPaidSkipPreview(estimateNumber)),
+            })
+            continue
+        }
+
+        if (customerDecisionSkipAction && customerPortal) {
+            results.push({
+                estimateId,
+                estimateNumber,
+                action: customerDecisionSkipAction,
+                customerPortalStatus: customerPortal.status,
+                messagePreview: toMessagePreview(buildCustomerDecisionSkipPreview(customerPortal, estimateNumber)),
+            })
+            continue
+        }
+
+        if (candidateNeedsScopeReview(candidate)) {
+            results.push({
+                estimateId,
+                estimateNumber,
+                action: "skipped_scope_review_needed",
+                customerPortalStatus: customerPortal?.status,
+                messagePreview: toMessagePreview(buildScopeReviewSkipPreview(estimateNumber)),
+            })
+            continue
+        }
 
         const message = await generateRecoveryMessage({
             clientName: contact.clientName,
             estimateNumber,
             totalAmount,
             businessName: contact.businessName,
+            customerPortalStatus: customerPortal?.status,
+            customerPortalUrl: customerPortal?.shareUrl,
         })
         const messagePreview = toMessagePreview(message)
 
@@ -615,6 +864,7 @@ export async function POST(req: Request) {
                 estimateId,
                 estimateNumber,
                 action,
+                customerPortalStatus: customerPortal?.status,
                 messagePreview,
             })
             continue
@@ -678,6 +928,7 @@ export async function POST(req: Request) {
                 estimateId,
                 estimateNumber,
                 action,
+                customerPortalStatus: customerPortal?.status,
                 messagePreview,
             })
         } catch (error: any) {
@@ -692,9 +943,14 @@ export async function POST(req: Request) {
         }
     }
 
+    const actionableCount = results.filter((result) => isActionableRecoveryAction(result.action)).length
+    const skippedCount = results.length - actionableCount
+
     return NextResponse.json({
         ok: true,
         processedCount: results.length,
+        actionableCount,
+        skippedCount,
         results,
     })
 }

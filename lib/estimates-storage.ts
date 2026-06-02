@@ -1,4 +1,5 @@
 import { saveEstimateToDB, getEstimatesFromDB, initDB } from "@/lib/db"
+import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
 import { emitOfflineQueueChanged } from "@/lib/offline-events"
 
 // Unit types for professional estimating
@@ -25,6 +26,7 @@ export interface EstimateAttachments {
     photos: string[]           // base64 data URLs
     audioUrl?: string          // base64 audio data
     originalTranscript?: string // Original voice transcript
+    scopeAssumptionsConfirmedAt?: string // Field review timestamp for thin AI scope assumptions
 }
 
 // Section/Division for large construction projects (CSI Divisions)
@@ -84,6 +86,22 @@ export interface LocalEstimate {
     paymentLink?: string
     paymentLinkId?: string
     paymentLinkType?: 'full' | 'deposit' | 'custom'
+    customerPortalUrl?: string
+    customerPortalStatus?: 'shared' | 'viewed' | 'approved' | 'change_requested'
+    customerViewedAt?: string
+    customerApprovedAt?: string
+    customerChangeRequestedAt?: string
+    customerPortalName?: string
+    customerPortalEmail?: string
+    customerPortalNote?: string
+    revisionOfEstimateId?: string
+    revisionOfEstimateNumber?: string
+    revisionRequestedAt?: string
+    supersededByEstimateId?: string
+    supersededAt?: string
+    firstFollowedUpAt?: string
+    lastFollowedUpAt?: string
+    lastFollowUpChannel?: 'email' | 'sms' | 'automation'
     paymentCompletedAt?: string
     lastPaymentSessionId?: string
     quickbooksInvoiceId?: string
@@ -164,13 +182,13 @@ export async function getDraftEstimates(): Promise<LocalEstimate[]> {
 // NEW: Get only sent estimates
 export async function getSentEstimates(): Promise<LocalEstimate[]> {
     const estimates = await getEstimates()
-    return estimates.filter(e => e.status === 'sent')
+    return estimates.filter(e => e.status === 'sent' && !isEstimatePaidLike(e))
 }
 
 // NEW: Get only paid estimates
 export async function getPaidEstimates(): Promise<LocalEstimate[]> {
     const estimates = await getEstimates()
-    return estimates.filter(e => e.status === 'paid')
+    return estimates.filter(isEstimatePaidLike)
 }
 
 // NEW: Update estimate status (Legacy)

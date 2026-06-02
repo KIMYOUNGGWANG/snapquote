@@ -42,6 +42,7 @@ export interface TeamEstimatesResponse {
         clientName?: string
         status: "draft" | "sent" | "paid"
         totalAmount: number
+        paymentCompletedAt?: string
         updatedAt: string
         createdAt: string
     }>
@@ -68,6 +69,7 @@ export interface TeamEstimateDetailResponse {
         createdAt: string
         updatedAt: string
         sentAt?: string
+        paymentCompletedAt?: string
         items: Array<{
             id: string
             itemNumber: number

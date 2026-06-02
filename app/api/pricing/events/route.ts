@@ -57,6 +57,18 @@ function normalizeMetadata(value: unknown): Record<string, unknown> {
     return metadata
 }
 
+function normalizeMetadataSource(metadata: Record<string, unknown>): string {
+    const rawSource = normalizeOptionalString(metadata.source, 64)
+    if (!rawSource) return "direct"
+
+    const normalized = rawSource
+        .toLowerCase()
+        .replace(/[^a-z0-9_.:-]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+
+    return normalized || "direct"
+}
+
 function normalizeAssignmentRow(value: unknown): { experimentId: string; variant: string } | null {
     if (!value || typeof value !== "object" || Array.isArray(value)) return null
     const record = value as PricingAssignmentRow
@@ -170,9 +182,10 @@ export async function POST(req: Request) {
         }
 
         const dateKey = new Date().toISOString().slice(0, 10)
+        const metadataSource = normalizeMetadataSource(metadata)
         const externalId =
             normalizeOptionalString(body?.externalId, 140) ||
-            `pricing:${user.id}:${assignment.experimentId}:${assignment.variant}:${eventNameRaw}:${dateKey}`
+            `pricing:${user.id}:${assignment.experimentId}:${assignment.variant}:${eventNameRaw}:${metadataSource}:${dateKey}`
 
         const { data: inserted, error: insertError } = await supabase
             .from("pricing_conversions")

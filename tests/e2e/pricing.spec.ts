@@ -1,4 +1,164 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type BrowserContext, type Page } from "@playwright/test"
+import { config as loadEnv } from "dotenv"
+
+loadEnv({ path: ".env.local", quiet: true })
+
+function getSupabaseAuthStorageKey() {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://example.supabase.co"
+    const projectRef = new URL(supabaseUrl).hostname.split(".")[0]
+    return `sb-${projectRef}-auth-token`
+}
+
+async function seedAuthenticatedSupabaseSession(context: BrowserContext) {
+    await context.addInitScript(({ storageKey }) => {
+        window.localStorage.setItem(
+            storageKey,
+            JSON.stringify({
+                access_token: "test-access-token",
+                refresh_token: "test-refresh-token",
+                token_type: "bearer",
+                expires_in: 3600,
+                expires_at: Math.floor(Date.now() / 1000) + 3600,
+                user: {
+                    id: "00000000-0000-4000-8000-000000000001",
+                    aud: "authenticated",
+                    role: "authenticated",
+                    email: "test@example.com",
+                },
+            })
+        )
+    }, { storageKey: getSupabaseAuthStorageKey() })
+}
+
+async function mockAuthenticatedPricingNetwork(page: Page) {
+    await page.route("**/auth/v1/token**", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                access_token: "test-access-token",
+                refresh_token: "test-refresh-token",
+                token_type: "bearer",
+                expires_in: 3600,
+                expires_at: Math.floor(Date.now() / 1000) + 3600,
+                user: {
+                    id: "00000000-0000-4000-8000-000000000001",
+                    aud: "authenticated",
+                    role: "authenticated",
+                    email: "test@example.com",
+                },
+            }),
+        })
+    })
+
+    await page.route("**/auth/v1/user", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                id: "00000000-0000-4000-8000-000000000001",
+                aud: "authenticated",
+                role: "authenticated",
+                email: "test@example.com",
+            }),
+        })
+    })
+
+    await page.route("**/api/pricing/offer", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                ok: true,
+                experiment: null,
+                variant: null,
+                billing: {
+                    annualDiscountPct: 20,
+                    plans: {
+                        starter: {
+                            monthlyPriceId: "price_starter_monthly",
+                            annualPriceId: "price_starter_annual",
+                            annualEnabled: true,
+                        },
+                        pro: {
+                            monthlyPriceId: "price_pro_monthly",
+                            annualPriceId: "price_pro_annual",
+                            annualEnabled: true,
+                        },
+                        team: {
+                            monthlyPriceId: "price_team_monthly",
+                            annualPriceId: "price_team_annual",
+                            annualEnabled: true,
+                        },
+                    },
+                },
+            }),
+        })
+    })
+
+    await page.route("**/api/billing/subscription", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                ok: true,
+                planTier: "starter",
+                subscribed: true,
+                status: "active",
+                customerId: "cus_pricing_portal_failure",
+                subscriptionId: "sub_pricing_portal_failure",
+                priceId: "price_starter_monthly",
+                currentPeriodEnd: "2026-07-02T00:00:00.000Z",
+                cancelAtPeriodEnd: false,
+            }),
+        })
+    })
+
+    await page.route("**/api/billing/usage", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                planTier: "starter",
+                periodStart: "2026-06-01",
+                usage: {
+                    generate: 12,
+                    transcribe: 8,
+                    send_email: 4,
+                },
+                limits: {
+                    generate: 80,
+                    transcribe: 60,
+                    send_email: 60,
+                },
+                remaining: {
+                    generate: 68,
+                    transcribe: 52,
+                    send_email: 56,
+                },
+                usageRatePct: {
+                    generate: 15,
+                    transcribe: 13,
+                    send_email: 7,
+                },
+                openaiPromptTokens: 1200,
+                openaiCompletionTokens: 640,
+                estimatedCosts: {
+                    openai: 0.42,
+                    resend: 0.05,
+                    total: 0.47,
+                },
+            }),
+        })
+    })
+
+    await page.route("**/api/pricing/events", async (route) => {
+        await route.fulfill({
+            status: 204,
+            body: "",
+        })
+    })
+}
 
 test("pricing page updates plan messaging when a different plan is selected", async ({ page }) => {
     await page.goto("/pricing")
@@ -58,6 +218,104 @@ test("pricing login handoff preserves the selected plan", async ({ page }) => {
 
     await expect(page).toHaveURL(/\/login\?next=%2Fpricing%3Fplan%3Dteam/)
     await expect(page.getByTestId("login-return-target")).toHaveText("After sign-in, you'll return to Pricing for the Team plan.")
+})
+
+test("pricing explains email quota source and preserves it through login handoff", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/pricing?source=send_email_quota")
+
+    const sourceContext = page.getByTestId("pricing-source-context")
+    await expect(sourceContext).toBeVisible()
+    await expect(sourceContext).toContainText("Email delivery quota")
+    await expect(sourceContext).toContainText("Keep sending PDFs from the jobsite.")
+    await expect(sourceContext).toContainText("Starter includes 60 sent estimate emails per month.")
+    await expect(page.getByTestId("pricing-source-recommended-plan")).toContainText("Starter")
+    await expect(page.getByTestId("pricing-hero-cta")).toContainText("Starter · USD $34/mo")
+
+    await page.getByTestId("pricing-hero-upgrade").click()
+
+    await expect(page).toHaveURL(/\/login\?next=%2Fpricing%3Fplan%3Dstarter%26source%3Dsend_email_quota/)
+    await expect(page.getByTestId("login-return-target")).toHaveText("After sign-in, you'll return to Pricing for the Starter plan.")
+})
+
+test("pricing explains voice transcription quota source", async ({ page }) => {
+    await page.goto("/pricing?source=transcribe_quota")
+
+    const sourceContext = page.getByTestId("pricing-source-context")
+    await expect(sourceContext).toBeVisible()
+    await expect(sourceContext).toContainText("Voice capture limit")
+    await expect(sourceContext).toContainText("Keep turning recordings into quote-ready scope.")
+    await expect(sourceContext).toContainText("Starter includes 60 transcription minutes")
+    await expect(page.getByTestId("pricing-source-recommended-plan")).toContainText("Starter")
+    await expect(page.getByTestId("pricing-hero-cta")).toContainText("Starter · USD $34/mo")
+})
+
+test("pricing explains SMS credit source and keeps it when plans change", async ({ page }) => {
+    await page.goto("/pricing?source=sms_credits")
+
+    const sourceContext = page.getByTestId("pricing-source-context")
+    await expect(sourceContext).toBeVisible()
+    await expect(sourceContext).toContainText("SMS credits")
+    await expect(sourceContext).toContainText("Add sending room for text follow-ups.")
+    await expect(page.getByTestId("pricing-source-recommended-plan")).toContainText("Pro")
+    await expect(page.getByTestId("pricing-hero-cta")).toContainText("Pro · USD $59/mo")
+
+    await page.getByRole("button", { name: "Team" }).click()
+
+    await expect(page).toHaveURL(/\/pricing\?source=sms_credits&plan=team/)
+    await expect(page.getByTestId("pricing-hero-cta")).toContainText("Team · USD $129/mo")
+})
+
+test("pricing explains QuickBooks sync source", async ({ page }) => {
+    await page.goto("/pricing?plan=pro&source=quickbooks_sync")
+
+    const sourceContext = page.getByTestId("pricing-source-context")
+    await expect(sourceContext).toBeVisible()
+    await expect(sourceContext).toContainText("QuickBooks sync")
+    await expect(sourceContext).toContainText("Push won estimates into accounting.")
+    await expect(sourceContext).toContainText("Pro unlocks direct QuickBooks invoice sync")
+    await expect(page.getByTestId("pricing-source-recommended-plan")).toContainText("Pro")
+    await expect(page.getByTestId("pricing-hero-cta")).toContainText("Pro · USD $59/mo")
+})
+
+test("pricing keeps billing portal failures visible with retry and refresh", async ({ page, context }) => {
+    await seedAuthenticatedSupabaseSession(context)
+    await mockAuthenticatedPricingNetwork(page)
+
+    let portalAttempts = 0
+    await page.route("**/api/billing/stripe/portal", async (route) => {
+        portalAttempts += 1
+        await route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "Stripe billing portal is temporarily unavailable." }),
+        })
+    })
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/pricing")
+
+    const manageBilling = page.getByTestId("pricing-manage-billing-action")
+    await manageBilling.scrollIntoViewIfNeeded()
+    await expect(manageBilling).toBeVisible()
+    await expect(manageBilling).toContainText("Manage billing in Stripe")
+
+    await manageBilling.click()
+
+    const portalIssue = page.getByTestId("pricing-billing-portal-issue")
+    await expect(portalIssue).toBeVisible()
+    await expect(portalIssue).toContainText("Billing portal could not open")
+    await expect(portalIssue).toContainText("Stripe billing portal is temporarily unavailable.")
+    await expect(page.getByTestId("pricing-billing-portal-retry-action")).toContainText("Retry portal")
+    await expect(page.getByTestId("pricing-billing-status-refresh-action")).toContainText("Refresh billing status")
+    expect(portalAttempts).toBe(1)
+
+    await page.getByTestId("pricing-billing-portal-retry-action").click()
+    await expect(portalIssue).toBeVisible()
+    await expect.poll(() => portalAttempts).toBe(2)
+
+    await page.getByTestId("pricing-billing-status-refresh-action").click()
+    await expect(portalIssue).toHaveCount(0)
 })
 
 test("pricing plan selection is reflected in the URL and survives reload", async ({ page }) => {

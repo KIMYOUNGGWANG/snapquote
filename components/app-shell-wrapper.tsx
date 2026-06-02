@@ -12,8 +12,9 @@ export function AppShellWrapper({ children }: { children: React.ReactNode }) {
                             pathname?.startsWith("/terms")
     const isAuthPage = pathname?.startsWith("/login") ||
                        pathname?.startsWith("/auth/callback")
+    const isPublicCustomerPage = pathname?.startsWith("/q/")
 
-    if (isMarketingPage || isAuthPage) {
+    if (isMarketingPage || isAuthPage || isPublicCustomerPage) {
         return (
             <div className="w-full min-h-screen bg-[#050505] sm:bg-[#0a0a0a]">
                 <main className="w-full min-h-screen relative">

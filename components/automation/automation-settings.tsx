@@ -79,7 +79,71 @@ function getAutomationBadgeClass(enabled: boolean) {
 }
 
 function formatRecoveryAction(action: QuoteRecoveryResult["action"]) {
-    return action.replace(/_/g, ' ')
+    if (action === 'sent_sms') return 'SMS'
+    if (action === 'sent_email') return 'Email'
+    if (action === 'skipped_customer_approved') return 'Approved'
+    if (action === 'skipped_customer_change_requested') return 'Changes requested'
+    if (action === 'skipped_scope_review_needed') return 'Scope review'
+    return 'No contact'
+}
+
+function getRecoveryActionClass(action: QuoteRecoveryResult["action"]) {
+    if (action === 'sent_sms' || action === 'sent_email') {
+        return 'border-emerald-400/25 bg-emerald-500/10 text-emerald-100'
+    }
+
+    if (action === 'skipped_customer_approved') {
+        return 'border-sky-400/25 bg-sky-500/10 text-sky-100'
+    }
+
+    if (action === 'skipped_scope_review_needed') {
+        return 'border-amber-400/25 bg-amber-500/10 text-amber-100'
+    }
+
+    return 'border-amber-400/25 bg-amber-500/10 text-amber-100'
+}
+
+function isActionableRecoveryResult(result: QuoteRecoveryResult) {
+    return result.action === 'sent_sms' || result.action === 'sent_email'
+}
+
+function getRecoveryCounts(data: {
+    actionableCount?: number
+    skippedCount?: number
+    results: QuoteRecoveryResult[]
+}) {
+    const fallbackActionable = data.results.filter(isActionableRecoveryResult).length
+    const actionableCount = Number.isFinite(data.actionableCount)
+        ? Math.max(0, Number(data.actionableCount))
+        : fallbackActionable
+    const skippedCount = Number.isFinite(data.skippedCount)
+        ? Math.max(0, Number(data.skippedCount))
+        : Math.max(0, data.results.length - fallbackActionable)
+
+    return {
+        actionableCount,
+        skippedCount,
+    }
+}
+
+function formatRecoveryFeedback(input: {
+    dryRun: boolean
+    actionableCount: number
+    skippedCount: number
+}) {
+    const skippedSuffix = input.skippedCount > 0
+        ? ` ${input.skippedCount} already handled or missing contact.`
+        : ''
+
+    if (input.dryRun) {
+        return input.actionableCount > 0
+            ? `Preview ready: ${input.actionableCount} quote${input.actionableCount > 1 ? 's' : ''} ready for follow-up.${skippedSuffix}`
+            : `Preview ready: no quotes currently need follow-up.${skippedSuffix}`
+    }
+
+    return input.actionableCount > 0
+        ? `Quote Recovery sent ${input.actionableCount} follow-up${input.actionableCount > 1 ? 's' : ''}.${skippedSuffix}`
+        : `Quote Recovery run finished with no follow-ups sent.${skippedSuffix}`
 }
 
 function buildAutomationStatusSummary(input: {
@@ -296,23 +360,16 @@ export function AutomationSettings({ onStatusSummaryChange }: AutomationSettings
         setRecoveryFeedback(null)
         try {
             const data = await triggerQuoteRecovery({ dryRun })
+            const recoveryCounts = getRecoveryCounts(data)
             setRecoveryResults(data.results)
 
             if (dryRun) {
                 setRecoveryPreviewed(true)
-                setRecoveryFeedback(
-                    data.processedCount > 0
-                        ? `Preview ready: ${data.processedCount} quote${data.processedCount > 1 ? 's' : ''} eligible for follow-up.`
-                        : 'Preview ready: no quotes currently eligible for follow-up.'
-                )
+                setRecoveryFeedback(formatRecoveryFeedback({ dryRun, ...recoveryCounts }))
                 return
             }
 
-            setRecoveryFeedback(
-                data.processedCount > 0
-                    ? `Quote Recovery sent ${data.processedCount} follow-up${data.processedCount > 1 ? 's' : ''}.`
-                    : 'Quote Recovery run finished with no eligible quotes.'
-            )
+            setRecoveryFeedback(formatRecoveryFeedback({ dryRun, ...recoveryCounts }))
         } catch (error: unknown) {
             console.error('Quote recovery trigger failed:', error)
             toast(error instanceof Error ? error.message : 'Failed to run Quote Recovery.', 'error')
@@ -538,7 +595,7 @@ create policy "Users can update own automations" on automations for update using
                                                     <span className="min-w-0 break-words font-medium leading-5 text-white [overflow-wrap:anywhere]" data-testid="quote-recovery-result-estimate">
                                                         {result.estimateNumber}
                                                     </span>
-                                                    <span className="shrink-0 text-xs uppercase tracking-wide text-slate-500" data-testid="quote-recovery-result-action">
+                                                    <span className={`shrink-0 rounded-md border px-2 py-1 text-xs font-semibold uppercase tracking-wide ${getRecoveryActionClass(result.action)}`} data-testid="quote-recovery-result-action">
                                                         {formatRecoveryAction(result.action)}
                                                     </span>
                                                 </div>

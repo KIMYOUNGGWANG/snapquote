@@ -11,6 +11,7 @@ const QUICKBOOKS_INVOICE_STATUS_VALUES = ["open", "paid", "unknown"] as const
 const TEAM_MEMBER_ROLE_VALUES = ["owner", "admin", "member"] as const
 const TEAM_INVITE_ROLE_VALUES = ["admin", "member"] as const
 const TEAM_SESSION_ACTION_VALUES = ["claim", "heartbeat", "release", "takeover"] as const
+const CUSTOMER_PORTAL_DECISION_VALUES = ["approve", "request_changes"] as const
 
 const generateImageSchema = z
     .string({ error: "Invalid image payload" })
@@ -134,6 +135,7 @@ export const teamEstimateUpdateSchema = z.object({
     taxAmount: z.number({ error: "Invalid Team estimate payload" }).finite("Invalid Team estimate payload").min(0, "Invalid Team estimate payload").max(1_000_000, "Invalid Team estimate payload"),
     totalAmount: z.number({ error: "Invalid Team estimate payload" }).finite("Invalid Team estimate payload").min(0, "Invalid Team estimate payload").max(1_000_000, "Invalid Team estimate payload"),
     sentAt: z.string({ error: "Invalid Team estimate payload" }).trim().datetime("Invalid Team estimate payload").optional(),
+    paymentCompletedAt: z.string({ error: "Invalid Team estimate payload" }).trim().datetime("Invalid Team estimate payload").optional(),
     items: z.array(teamEstimateItemSchema, { error: "Invalid Team estimate payload" }).max(200, "Invalid Team estimate payload"),
     sections: z.array(teamEstimateSectionSchema, { error: "Invalid Team estimate payload" }).max(50, "Invalid Team estimate payload").optional(),
 }).strict()
@@ -141,3 +143,64 @@ export const teamEstimateUpdateSchema = z.object({
 export const teamEstimateSessionActionSchema = z.object({
     action: z.enum(TEAM_SESSION_ACTION_VALUES, { error: "Invalid Team session action" }),
 }).strict()
+
+const customerQuoteItemSchema = z.object({
+    id: z.string({ error: "Invalid customer quote payload" }).trim().max(120, "Invalid customer quote payload").optional(),
+    itemNumber: z.number({ error: "Invalid customer quote payload" }).int("Invalid customer quote payload").min(1, "Invalid customer quote payload").max(1000, "Invalid customer quote payload").optional(),
+    category: z.string({ error: "Invalid customer quote payload" }).trim().max(40, "Invalid customer quote payload").optional(),
+    description: z.string({ error: "Invalid customer quote payload" }).trim().min(1, "Invalid customer quote payload").max(320, "Invalid customer quote payload"),
+    quantity: z.number({ error: "Invalid customer quote payload" }).finite("Invalid customer quote payload").min(0, "Invalid customer quote payload").max(100_000, "Invalid customer quote payload"),
+    unit: z.string({ error: "Invalid customer quote payload" }).trim().max(20, "Invalid customer quote payload").optional(),
+    unit_price: z.number({ error: "Invalid customer quote payload" }).finite("Invalid customer quote payload").min(0, "Invalid customer quote payload").max(1_000_000, "Invalid customer quote payload"),
+    total: z.number({ error: "Invalid customer quote payload" }).finite("Invalid customer quote payload").min(0, "Invalid customer quote payload").max(1_000_000, "Invalid customer quote payload").optional(),
+}).strict()
+
+const customerQuoteSectionSchema = z.object({
+    id: z.string({ error: "Invalid customer quote payload" }).trim().max(120, "Invalid customer quote payload").optional(),
+    name: z.string({ error: "Invalid customer quote payload" }).trim().min(1, "Invalid customer quote payload").max(160, "Invalid customer quote payload"),
+    divisionCode: z.string({ error: "Invalid customer quote payload" }).trim().max(20, "Invalid customer quote payload").optional(),
+    items: z.array(customerQuoteItemSchema, { error: "Invalid customer quote payload" }).max(200, "Invalid customer quote payload"),
+}).strict()
+
+export const customerQuoteSnapshotSchema = z.object({
+    estimateNumber: z.string({ error: "Invalid customer quote payload" }).trim().min(1, "Invalid customer quote payload").max(120, "Invalid customer quote payload"),
+    clientName: z.string({ error: "Invalid customer quote payload" }).trim().max(160, "Invalid customer quote payload").optional(),
+    clientEmail: z.string({ error: "Invalid customer quote payload" }).trim().max(320, "Invalid customer quote payload").optional(),
+    clientPhone: z.string({ error: "Invalid customer quote payload" }).trim().max(80, "Invalid customer quote payload").optional(),
+    clientAddress: z.string({ error: "Invalid customer quote payload" }).trim().max(240, "Invalid customer quote payload").optional(),
+    summaryNote: z.string({ error: "Invalid customer quote payload" }).trim().max(4000, "Invalid customer quote payload").optional(),
+    paymentTerms: z.string({ error: "Invalid customer quote payload" }).trim().max(1000, "Invalid customer quote payload").optional(),
+    closingNote: z.string({ error: "Invalid customer quote payload" }).trim().max(1000, "Invalid customer quote payload").optional(),
+    taxRate: z.number({ error: "Invalid customer quote payload" }).finite("Invalid customer quote payload").min(0, "Invalid customer quote payload").max(100, "Invalid customer quote payload"),
+    taxAmount: z.number({ error: "Invalid customer quote payload" }).finite("Invalid customer quote payload").min(0, "Invalid customer quote payload").max(1_000_000, "Invalid customer quote payload"),
+    totalAmount: z.number({ error: "Invalid customer quote payload" }).finite("Invalid customer quote payload").min(0, "Invalid customer quote payload").max(1_000_000, "Invalid customer quote payload"),
+    currency: z.enum(["USD", "CAD"], { error: "Invalid customer quote payload" }).optional(),
+    paymentLink: z.string({ error: "Invalid customer quote payload" }).trim().url("Invalid customer quote payload").max(600, "Invalid customer quote payload").optional(),
+    paymentLinkType: z.enum(["full", "deposit", "custom"], { error: "Invalid customer quote payload" }).optional(),
+    paymentStatus: z.enum(["paid"], { error: "Invalid customer quote payload" }).optional(),
+    paymentCompletedAt: z.string({ error: "Invalid customer quote payload" }).trim().max(80, "Invalid customer quote payload").optional(),
+    items: z.array(customerQuoteItemSchema, { error: "Invalid customer quote payload" }).max(300, "Invalid customer quote payload"),
+    sections: z.array(customerQuoteSectionSchema, { error: "Invalid customer quote payload" }).max(50, "Invalid customer quote payload").optional(),
+    createdAt: z.string({ error: "Invalid customer quote payload" }).trim().max(80, "Invalid customer quote payload").optional(),
+    sentAt: z.string({ error: "Invalid customer quote payload" }).trim().max(80, "Invalid customer quote payload").optional(),
+}).strict()
+
+export const customerQuoteShareLinkSchema = z.object({
+    estimate: customerQuoteSnapshotSchema,
+    resetCustomerDecision: z.boolean({ error: "Invalid customer quote payload" }).optional(),
+}).strict()
+
+export const customerPortalDecisionSchema = z.object({
+    action: z.enum(CUSTOMER_PORTAL_DECISION_VALUES, { error: "Invalid customer quote decision" }),
+    customerName: z.string({ error: "Invalid customer quote decision" }).trim().max(160, "Invalid customer quote decision").optional(),
+    customerEmail: z.string({ error: "Invalid customer quote decision" }).trim().email("Invalid customer quote decision").max(320, "Invalid customer quote decision").optional(),
+    message: z.string({ error: "Invalid customer quote decision" }).trim().max(1200, "Invalid customer quote decision").optional(),
+}).strict().superRefine((value, context) => {
+    if (value.action === "request_changes" && !value.message) {
+        context.addIssue({
+            code: "custom",
+            path: ["message"],
+            message: "Invalid customer quote decision",
+        })
+    }
+})

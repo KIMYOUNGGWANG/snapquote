@@ -108,6 +108,42 @@ describe('POST /api/pricing/events', () => {
     assert.equal(state.supabase.rpcCalls.length, 1)
   })
 
+  test('includes pricing source in the generated dedupe id', async () => {
+    const state = getTestState()
+
+    state.supabase.rpcResolver = async () => ({
+      data: [{ experiment_id: 'exp_source', variant: 'control' }],
+      error: null,
+    })
+
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'pricing_conversions' && query.action === 'insert' && query.mode === 'single') {
+        return { data: { id: 'conv_source' }, error: null }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = jsonRequest('http://localhost/api/pricing/events', {
+      event: 'pricing_viewed',
+      metadata: { source: 'Send Email Quota!', selectedPlanTier: 'starter' },
+    }, {
+      headers: bearerHeader(),
+    })
+
+    const res = await pricingEvents(req)
+    const data = await res.json()
+    const insertCall = state.supabase.queryCalls.find(
+      (query) => query.table === 'pricing_conversions' && query.action === 'insert'
+    )
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.ok(insertCall)
+    assert.match(insertCall.payload.external_id, /:pricing_viewed:send_email_quota:/)
+    assert.equal(insertCall.payload.metadata.source, 'Send Email Quota!')
+  })
+
   test('accepts RPC payloads that use out_ column names', async () => {
     const state = getTestState()
 
@@ -696,9 +732,9 @@ describe('POST /api/analytics/events', () => {
     }
 
     const req = jsonRequest('http://localhost/api/analytics/events', {
-      event: 'quote_sent',
+      event: 'quote_approved',
       estimateId: '11111111-1111-4111-8111-111111111111',
-      channel: 'email',
+      channel: 'customer_portal',
       metadata: { from: 'new_estimate' },
     }, {
       headers: bearerHeader(),
@@ -710,6 +746,7 @@ describe('POST /api/analytics/events', () => {
     assert.equal(res.status, 200)
     assert.equal(data.ok, true)
     assert.equal(data.eventId, 'event_analytics_1')
+    assert.equal(state.supabase.queryCalls[0].payload.event_name, 'quote_approved')
   })
 })
 
@@ -726,7 +763,12 @@ describe('GET /api/analytics/funnel', () => {
             { event_name: 'draft_saved' },
             { event_name: 'draft_saved' },
             { event_name: 'quote_sent' },
+            { event_name: 'customer_portal_link_created' },
+            { event_name: 'quote_viewed' },
+            { event_name: 'quote_approved' },
+            { event_name: 'quote_change_requested' },
             { event_name: 'payment_completed' },
+            { event_name: 'payment_completed', metadata: { status_transitioned: false } },
           ],
           error: null,
         }
@@ -747,9 +789,18 @@ describe('GET /api/analytics/funnel', () => {
     assert.equal(data.ok, true)
     assert.equal(data.draft_saved, 2)
     assert.equal(data.quote_sent, 1)
+    assert.equal(data.customer_portal_link_created, 1)
+    assert.equal(data.quote_viewed, 1)
+    assert.equal(data.quote_approved, 1)
+    assert.equal(data.quote_change_requested, 1)
     assert.equal(data.payment_completed, 1)
     assert.equal(data.send_rate, 50)
+    assert.equal(data.approval_link_rate, 100)
+    assert.equal(data.view_rate, 100)
+    assert.equal(data.approval_rate, 100)
+    assert.equal(data.change_request_rate, 100)
     assert.equal(data.payment_rate, 100)
+    assert.equal(data.payment_after_approval_rate, 100)
   })
 
   test('rejects invalid date range', async () => {

@@ -7,6 +7,7 @@ export type PaymentEstimateRecord = {
     user_id: string
     estimate_number: string | null
     status?: string | null
+    payment_completed_at?: string | null
 }
 
 type PaymentLinkEstimateInput = {
@@ -46,7 +47,7 @@ type SettlementEstimateResolution =
 async function fetchEstimateById(supabase: ServiceSupabaseClient, estimateId: string) {
     const result = await supabase
         .from("estimates")
-        .select("id, user_id, estimate_number, status")
+        .select("id, user_id, estimate_number, status, payment_completed_at")
         .eq("id", estimateId)
         .maybeSingle()
 
@@ -63,7 +64,7 @@ async function fetchEstimateByNumber(
 ) {
     const result = await supabase
         .from("estimates")
-        .select("id, user_id, estimate_number, status")
+        .select("id, user_id, estimate_number, status, payment_completed_at")
         .eq("user_id", userId)
         .eq("estimate_number", estimateNumber)
         .order("created_at", { ascending: false })

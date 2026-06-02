@@ -2,10 +2,22 @@ import { supabase } from './supabase'
 import { getEstimates, saveEstimate, LocalEstimate } from './estimates-storage' // Correct imports
 import { resolveLwwSyncAction } from './sync-resolution'
 import {
+    applyCloudCustomerPortalLinkToLocalEstimate,
+    applyCloudQuickBooksLinkToLocalEstimate,
     assertSupabaseMutation,
+    hasCustomerPortalEstimatePatchChanged,
+    hasQuickBooksEstimatePatchChanged,
+    mapCloudCustomerPortalLinkToLocalPatch,
+    mapLocalEstimateAttachmentsToCloudRow,
     mapLocalEstimateItemToCloudRow,
+    mapLocalEstimateSectionItemToCloudRow,
+    mapLocalEstimateToCloudRow,
     mapCloudEstimateToLocal,
+    selectLatestCloudCustomerPortalLink,
+    type CloudCustomerPortalLinkRow,
     type CloudEstimateRow,
+    type CloudQuickBooksInvoiceLinkRow,
+    mapCloudQuickBooksLinkToLocalPatch,
 } from './sync-estimate-mapping'
 
 export type SyncEstimatesResult =
@@ -207,7 +219,8 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
                 estimate_attachments (
                     photos,
                     audio_url,
-                    original_transcript
+                    original_transcript,
+                    scope_assumptions_confirmed_at
                 ),
                 clients (name, address, email, phone, notes)
             `)
@@ -215,10 +228,63 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
 
         if (pullError) throw pullError
 
+        const { data: quickBooksLinksRaw, error: quickBooksPullError } = await supabase
+            .from('quickbooks_invoice_links')
+            .select(`
+                estimate_id,
+                quickbooks_invoice_id,
+                quickbooks_customer_id,
+                quickbooks_invoice_doc_number,
+                quickbooks_invoice_status,
+                synced_at
+            `)
+            .eq('user_id', user.id)
+
+        if (quickBooksPullError) throw quickBooksPullError
+
+        const { data: customerPortalLinksRaw, error: customerPortalPullError } = await supabase
+            .from('estimate_share_links')
+            .select(`
+                estimate_id,
+                share_url,
+                status,
+                viewed_at,
+                approved_at,
+                change_requested_at,
+                customer_name,
+                customer_email,
+                customer_note,
+                created_at,
+                updated_at
+            `)
+            .eq('user_id', user.id)
+
+        if (customerPortalPullError) throw customerPortalPullError
+
         const cloudMap = new Map<string, CloudEstimateRow>()
         for (const c of cloudEstimatesRaw || []) {
             if (typeof c?.id === "string") {
                 cloudMap.set(c.id, c)
+            }
+        }
+
+        const quickBooksLinkMap = new Map<string, CloudQuickBooksInvoiceLinkRow>()
+        for (const link of quickBooksLinksRaw || []) {
+            const quickBooksLink = link as CloudQuickBooksInvoiceLinkRow
+            if (typeof quickBooksLink.estimate_id === "string" && quickBooksLink.estimate_id.trim()) {
+                quickBooksLinkMap.set(quickBooksLink.estimate_id.trim(), quickBooksLink)
+            }
+        }
+
+        const customerPortalLinkMap = new Map<string, CloudCustomerPortalLinkRow>()
+        for (const link of customerPortalLinksRaw || []) {
+            const customerPortalLink = link as CloudCustomerPortalLinkRow
+            if (typeof customerPortalLink.estimate_id === "string" && customerPortalLink.estimate_id.trim()) {
+                const estimateId = customerPortalLink.estimate_id.trim()
+                customerPortalLinkMap.set(
+                    estimateId,
+                    selectLatestCloudCustomerPortalLink(customerPortalLinkMap.get(estimateId), customerPortalLink)
+                )
             }
         }
 
@@ -235,6 +301,20 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
             if (!cloud) {
                 // Not on cloud yet? PUSH
                 await pushEstimateToCloud(user.id, local)
+                const quickBooksPatch = mapCloudQuickBooksLinkToLocalPatch(quickBooksLinkMap.get(local.id))
+                const customerPortalPatch = mapCloudCustomerPortalLinkToLocalPatch(customerPortalLinkMap.get(local.id))
+                if (
+                    hasQuickBooksEstimatePatchChanged(local, quickBooksPatch) ||
+                    hasCustomerPortalEstimatePatchChanged(local, customerPortalPatch)
+                ) {
+                    await saveEstimate({
+                        ...local,
+                        ...(quickBooksPatch || {}),
+                        ...(customerPortalPatch || {}),
+                        synced: true,
+                    })
+                    updatedLocalCount++
+                }
                 pushedToCloudCount++
                 continue
             }
@@ -249,12 +329,39 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
             if (syncAction === 'push') {
                 // Local is newer: PUSH
                 await pushEstimateToCloud(user.id, local)
+                const quickBooksPatch = mapCloudQuickBooksLinkToLocalPatch(quickBooksLinkMap.get(local.id))
+                const customerPortalPatch = mapCloudCustomerPortalLinkToLocalPatch(customerPortalLinkMap.get(local.id))
+                if (
+                    hasQuickBooksEstimatePatchChanged(local, quickBooksPatch) ||
+                    hasCustomerPortalEstimatePatchChanged(local, customerPortalPatch)
+                ) {
+                    await saveEstimate({
+                        ...local,
+                        ...(quickBooksPatch || {}),
+                        ...(customerPortalPatch || {}),
+                        synced: true,
+                    })
+                    updatedLocalCount++
+                }
                 pushedToCloudCount++
             } else if (syncAction === 'pull') {
                 // Cloud is newer: PULL (will be handled by the pull loop below)
             } else {
                 // Same? Just ensure local synced flag is true if it was false
-                if (local.synced === false) {
+                const quickBooksPatch = mapCloudQuickBooksLinkToLocalPatch(quickBooksLinkMap.get(local.id))
+                const customerPortalPatch = mapCloudCustomerPortalLinkToLocalPatch(customerPortalLinkMap.get(local.id))
+                if (
+                    hasQuickBooksEstimatePatchChanged(local, quickBooksPatch) ||
+                    hasCustomerPortalEstimatePatchChanged(local, customerPortalPatch)
+                ) {
+                    await saveEstimate({
+                        ...local,
+                        ...(quickBooksPatch || {}),
+                        ...(customerPortalPatch || {}),
+                        synced: true,
+                    })
+                    updatedLocalCount++
+                } else if (local.synced === false) {
                     await saveEstimate({ ...local, synced: true })
                 }
             }
@@ -275,7 +382,14 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
 
             if (!local || syncAction === 'pull') {
                 // Convert cloud shape to local shape
-                const localEst = mapCloudEstimateToLocal(cloud)
+                const cloudId = typeof cloud.id === "string" ? cloud.id : ""
+                const localEst = applyCloudCustomerPortalLinkToLocalEstimate(
+                    applyCloudQuickBooksLinkToLocalEstimate(
+                        mapCloudEstimateToLocal(cloud),
+                        quickBooksLinkMap.get(cloudId)
+                    ),
+                    customerPortalLinkMap.get(cloudId)
+                )
                 await saveEstimate(localEst)
                 updatedLocalCount++
             }
@@ -314,22 +428,7 @@ async function pushEstimateToCloud(userId: string, estimate: LocalEstimate) {
     // 1. Upsert Estimate
     const { error: estError } = await supabase
         .from('estimates')
-        .upsert({
-            id: estimate.id,
-            user_id: userId,
-            client_id: clientId,
-            estimate_number: estimate.estimateNumber,
-            total_amount: estimate.totalAmount,
-            tax_rate: estimate.taxRate,
-            tax_amount: estimate.taxAmount,
-            ai_summary: estimate.summary_note,
-            created_at: estimate.createdAt,
-            updated_at: estimate.updatedAt || estimate.createdAt || now,
-            sent_at: (estimate.status === 'sent' || estimate.status === 'paid')
-                ? (estimate.sentAt || estimate.createdAt)
-                : null,
-            status: estimate.status,
-        })
+        .upsert(mapLocalEstimateToCloudRow(userId, clientId, estimate, { now }))
 
     if (estError) throw estError
 
@@ -372,17 +471,9 @@ async function pushEstimateToCloud(userId: string, estimate: LocalEstimate) {
         const sectionItems = estimate.sections.flatMap(section => {
             const sectionId = sectionIdByLocalId.get(section.id)
             if (!sectionId) return []
-            return section.items.map(item => ({
-                estimate_id: estimate.id,
-                section_id: sectionId,
-                local_id: item.id,
-                item_number: item.itemNumber ?? 0,
-                description: item.description,
-                quantity: item.quantity,
-                unit_price: item.unit_price,
-                total: item.total,
-                updated_at: now
-            }))
+            return section.items.map(item =>
+                mapLocalEstimateSectionItemToCloudRow(estimate.id, sectionId, item, { updatedAt: now })
+            )
         })
 
         const missingSectionWithItems = estimate.sections.find((section) =>
@@ -399,21 +490,12 @@ async function pushEstimateToCloud(userId: string, estimate: LocalEstimate) {
     }
 
     // 4. Refresh Attachments
-    const attachmentPhotos = estimate.attachments?.photos?.filter((photo) => typeof photo === "string" && photo.trim() !== "") || []
-    const attachmentAudioUrl = estimate.attachments?.audioUrl?.trim() || null
-    const attachmentTranscript = estimate.attachments?.originalTranscript?.trim() || null
-    const hasAttachments = attachmentPhotos.length > 0 || Boolean(attachmentAudioUrl) || Boolean(attachmentTranscript)
+    const attachmentRow = mapLocalEstimateAttachmentsToCloudRow(estimate.id, estimate.attachments, { updatedAt: now })
 
-    if (hasAttachments) {
+    if (attachmentRow) {
         const upsertAttachments = await supabase
             .from('estimate_attachments')
-            .upsert({
-                estimate_id: estimate.id,
-                photos: attachmentPhotos,
-                audio_url: attachmentAudioUrl,
-                original_transcript: attachmentTranscript,
-                updated_at: now,
-            }, {
+            .upsert(attachmentRow, {
                 onConflict: 'estimate_id',
             })
         assertSupabaseMutation(upsertAttachments, "Failed to store estimate attachments")

@@ -117,6 +117,21 @@ describe("POST /api/quotes/recovery/trigger", () => {
         }
       }
 
+      if (query.table === "estimate_share_links" && query.action === "select") {
+        return {
+          data: [
+            {
+              user_id: "user-pro",
+              estimate_id: "estimate-1",
+              status: "viewed",
+              share_url: "https://snapquote.test/q/review-1001",
+              customer_note: null,
+            },
+          ],
+          error: null,
+        }
+      }
+
       return { data: null, error: null }
     }
 
@@ -132,10 +147,377 @@ describe("POST /api/quotes/recovery/trigger", () => {
     assert.equal(res.status, 200)
     assert.equal(data.ok, true)
     assert.equal(data.processedCount, 1)
+    assert.equal(data.actionableCount, 1)
+    assert.equal(data.skippedCount, 0)
     assert.equal(data.results[0].estimateId, "estimate-1")
     assert.equal(data.results[0].estimateNumber, "SQ-1001")
     assert.equal(data.results[0].action, "sent_email")
+    assert.equal(data.results[0].customerPortalStatus, "viewed")
     assert.equal(typeof data.results[0].messagePreview, "string")
+    assert.match(data.results[0].messagePreview, /approve it or request changes/i)
+    assert.match(data.results[0].messagePreview, /snapquote\.test\/q\/review-1001/)
+    assert.equal(state.resend.sendCalls.length, 0)
+
+    const candidateQuery = state.supabase.queryCalls.find((call) => (
+      call.table === "estimates" &&
+      call.action === "select" &&
+      typeof call.selectColumns === "string" &&
+      call.selectColumns.includes("first_followup_queued_at")
+    ))
+    assert.ok(candidateQuery)
+    assert.deepEqual(
+      candidateQuery.filters
+        .filter((filter) => filter.op === "is" && [
+          "first_followup_queued_at",
+          "first_followed_up_at",
+          "last_followed_up_at",
+        ].includes(filter.column))
+        .map((filter) => [filter.column, filter.value]),
+      [
+        ["first_followup_queued_at", null],
+        ["first_followed_up_at", null],
+        ["last_followed_up_at", null],
+      ]
+    )
+  })
+
+  test("skips paid sent quotes before automated recovery dispatch", async () => {
+    setServiceEnv()
+    const state = getTestState()
+    state.routeAuth.result = {
+      ok: true,
+      userId: "user-pro",
+    }
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === "profiles" && query.action === "select") {
+        return { data: { plan_tier: "pro" }, error: null }
+      }
+
+      if (query.table === "estimates" && query.action === "select") {
+        return {
+          data: [
+            {
+              id: "estimate-paid-stale-sent",
+              user_id: "user-pro",
+              estimate_number: "SQ-PAID-STALE",
+              total_amount: 1250,
+              sent_at: staleSentAt(),
+              created_at: staleSentAt(),
+              first_followup_queued_at: null,
+              first_followed_up_at: null,
+              last_followed_up_at: null,
+              payment_completed_at: "2026-05-29T12:00:00.000Z",
+              clients: { name: "Paid Client", email: "paid@example.com" },
+              profiles: { business_name: "SnapQuote Plumbing" },
+            },
+          ],
+          error: null,
+        }
+      }
+
+      if (query.table === "estimate_share_links" && query.action === "select") {
+        return {
+          data: [
+            {
+              user_id: "user-pro",
+              estimate_id: "estimate-paid-stale-sent",
+              status: "viewed",
+              share_url: "https://snapquote.test/q/paid-stale-sent",
+              customer_note: null,
+            },
+          ],
+          error: null,
+        }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = jsonRequest(
+      "http://localhost/api/quotes/recovery/trigger",
+      { dryRun: true },
+      { headers: bearerHeader("token-pro") }
+    )
+
+    const res = await recoveryPost(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.processedCount, 1)
+    assert.equal(data.actionableCount, 0)
+    assert.equal(data.skippedCount, 1)
+    assert.equal(data.results[0].estimateId, "estimate-paid-stale-sent")
+    assert.equal(data.results[0].action, "skipped_customer_paid")
+    assert.equal(data.results[0].customerPortalStatus, "viewed")
+    assert.match(data.results[0].messagePreview, /already marked paid/i)
+    assert.equal(state.resend.sendCalls.length, 0)
+  })
+
+  test("skips quotes with completed customer portal decisions", async () => {
+    setServiceEnv()
+    const state = getTestState()
+    state.routeAuth.result = {
+      ok: true,
+      userId: "user-pro",
+    }
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === "profiles" && query.action === "select") {
+        return { data: { plan_tier: "pro" }, error: null }
+      }
+
+      if (query.table === "estimates" && query.action === "select") {
+        return {
+          data: [
+            {
+              id: "estimate-approved",
+              user_id: "user-pro",
+              estimate_number: "SQ-APPROVED",
+              total_amount: 900,
+              sent_at: staleSentAt(),
+              created_at: staleSentAt(),
+              first_followup_queued_at: null,
+              first_followed_up_at: null,
+              last_followed_up_at: null,
+              clients: { name: "Approved Client", email: "approved@example.com" },
+              profiles: { business_name: "SnapQuote Plumbing" },
+            },
+            {
+              id: "estimate-change-request",
+              user_id: "user-pro",
+              estimate_number: "SQ-CHANGE",
+              total_amount: 1200,
+              sent_at: staleSentAt(),
+              created_at: staleSentAt(),
+              first_followup_queued_at: null,
+              first_followed_up_at: null,
+              last_followed_up_at: null,
+              clients: { name: "Change Client", email: "change@example.com" },
+              profiles: { business_name: "SnapQuote Plumbing" },
+            },
+          ],
+          error: null,
+        }
+      }
+
+      if (query.table === "estimate_share_links" && query.action === "select") {
+        return {
+          data: [
+            {
+              user_id: "user-pro",
+              estimate_id: "estimate-approved",
+              status: "approved",
+              share_url: "https://snapquote.test/q/approved-token",
+              customer_note: null,
+            },
+            {
+              user_id: "user-pro",
+              estimate_id: "estimate-change-request",
+              status: "change_requested",
+              share_url: "https://snapquote.test/q/change-token",
+              customer_note: "Please add disposal.",
+            },
+          ],
+          error: null,
+        }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = jsonRequest(
+      "http://localhost/api/quotes/recovery/trigger",
+      { dryRun: true },
+      { headers: bearerHeader("token-pro") }
+    )
+
+    const res = await recoveryPost(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.processedCount, 2)
+    assert.equal(data.actionableCount, 0)
+    assert.equal(data.skippedCount, 2)
+    assert.equal(data.results[0].estimateId, "estimate-approved")
+    assert.equal(data.results[0].action, "skipped_customer_approved")
+    assert.equal(data.results[0].customerPortalStatus, "approved")
+    assert.match(data.results[0].messagePreview, /already approved/i)
+    assert.equal(data.results[1].estimateId, "estimate-change-request")
+    assert.equal(data.results[1].action, "skipped_customer_change_requested")
+    assert.equal(data.results[1].customerPortalStatus, "change_requested")
+    assert.match(data.results[1].messagePreview, /Please add disposal/)
+    assert.equal(state.resend.sendCalls.length, 0)
+  })
+
+  test("skips quotes that need scope review before recovery follow-up", async () => {
+    setServiceEnv()
+    process.env.RESEND_API_KEY = "resend_test_key"
+
+    const state = getTestState()
+    state.routeAuth.result = {
+      ok: true,
+      userId: "user-pro",
+    }
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === "profiles" && query.action === "select") {
+        return { data: { plan_tier: "pro" }, error: null }
+      }
+
+      if (query.table === "estimates" && query.action === "select") {
+        return {
+          data: [
+            {
+              id: "estimate-thin-scope",
+              user_id: "user-pro",
+              estimate_number: "SQ-THIN",
+              total_amount: 850,
+              sent_at: staleSentAt(),
+              created_at: staleSentAt(),
+              first_followup_queued_at: null,
+              first_followed_up_at: null,
+              last_followed_up_at: null,
+              clients: { name: "Thin Scope Client", email: "thin@example.com" },
+              profiles: { business_name: "SnapQuote Plumbing" },
+              estimate_attachments: [
+                {
+                  photos: [],
+                  original_transcript: "Fix sink",
+                },
+              ],
+            },
+          ],
+          error: null,
+        }
+      }
+
+      if (query.table === "estimate_share_links" && query.action === "select") {
+        return {
+          data: [
+            {
+              user_id: "user-pro",
+              estimate_id: "estimate-thin-scope",
+              status: "viewed",
+              share_url: "https://snapquote.test/q/thin-scope",
+              customer_note: null,
+            },
+          ],
+          error: null,
+        }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = jsonRequest(
+      "http://localhost/api/quotes/recovery/trigger",
+      {},
+      { headers: bearerHeader("token-pro") }
+    )
+
+    const res = await recoveryPost(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.processedCount, 1)
+    assert.equal(data.actionableCount, 0)
+    assert.equal(data.skippedCount, 1)
+    assert.equal(data.results[0].estimateId, "estimate-thin-scope")
+    assert.equal(data.results[0].action, "skipped_scope_review_needed")
+    assert.equal(data.results[0].customerPortalStatus, "viewed")
+    assert.match(data.results[0].messagePreview, /scope notes/i)
+    assert.match(data.results[0].messagePreview, /confirm the scope/i)
+    assert.equal(state.resend.sendCalls.length, 0)
+    assert.equal(
+      state.supabase.queryCalls.some((call) => call.table === "estimates" && call.action === "update"),
+      false
+    )
+
+    const candidateQuery = state.supabase.queryCalls.find((call) => (
+      call.table === "estimates" &&
+      call.action === "select" &&
+      typeof call.selectColumns === "string"
+    ))
+    assert.match(candidateQuery.selectColumns, /estimate_attachments\(photos, original_transcript, scope_assumptions_confirmed_at\)/)
+  })
+
+  test("does not skip cloud-confirmed thin scope quotes", async () => {
+    setServiceEnv()
+    const state = getTestState()
+    state.routeAuth.result = {
+      ok: true,
+      userId: "user-pro",
+    }
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === "profiles" && query.action === "select") {
+        return { data: { plan_tier: "pro" }, error: null }
+      }
+
+      if (query.table === "estimates" && query.action === "select") {
+        return {
+          data: [
+            {
+              id: "estimate-confirmed-thin-scope",
+              user_id: "user-pro",
+              estimate_number: "SQ-CONFIRMED-THIN",
+              total_amount: 850,
+              sent_at: staleSentAt(),
+              created_at: staleSentAt(),
+              first_followup_queued_at: null,
+              first_followed_up_at: null,
+              last_followed_up_at: null,
+              clients: { name: "Confirmed Scope Client", email: "confirmed@example.com" },
+              profiles: { business_name: "SnapQuote Plumbing" },
+              estimate_attachments: [
+                {
+                  photos: [],
+                  original_transcript: "Fix sink",
+                  scope_assumptions_confirmed_at: "2026-05-24T09:45:00.000Z",
+                },
+              ],
+            },
+          ],
+          error: null,
+        }
+      }
+
+      if (query.table === "estimate_share_links" && query.action === "select") {
+        return {
+          data: [
+            {
+              user_id: "user-pro",
+              estimate_id: "estimate-confirmed-thin-scope",
+              status: "viewed",
+              share_url: "https://snapquote.test/q/confirmed-thin-scope",
+              customer_note: null,
+            },
+          ],
+          error: null,
+        }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = jsonRequest(
+      "http://localhost/api/quotes/recovery/trigger",
+      { dryRun: true },
+      { headers: bearerHeader("token-pro") }
+    )
+
+    const res = await recoveryPost(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.processedCount, 1)
+    assert.equal(data.actionableCount, 1)
+    assert.equal(data.skippedCount, 0)
+    assert.equal(data.results[0].estimateId, "estimate-confirmed-thin-scope")
+    assert.equal(data.results[0].action, "sent_email")
+    assert.equal(data.results[0].customerPortalStatus, "viewed")
+    assert.match(data.results[0].messagePreview, /confirmed-thin-scope/)
     assert.equal(state.resend.sendCalls.length, 0)
   })
 
@@ -175,6 +557,21 @@ describe("POST /api/quotes/recovery/trigger", () => {
         }
       }
 
+      if (query.table === "estimate_share_links" && query.action === "select") {
+        return {
+          data: [
+            {
+              user_id: "user-pro",
+              estimate_id: "estimate-2",
+              status: "shared",
+              share_url: "https://snapquote.test/q/review-1002",
+              customer_note: null,
+            },
+          ],
+          error: null,
+        }
+      }
+
       if (query.table === "estimates" && query.action === "update" && query.mode === "maybeSingle") {
         return { data: { id: "estimate-2" }, error: null }
       }
@@ -198,9 +595,13 @@ describe("POST /api/quotes/recovery/trigger", () => {
     assert.equal(res.status, 200)
     assert.equal(data.ok, true)
     assert.equal(data.processedCount, 1)
+    assert.equal(data.actionableCount, 1)
+    assert.equal(data.skippedCount, 0)
     assert.equal(data.results[0].action, "sent_email")
     assert.equal(state.resend.sendCalls.length, 1)
     assert.match(state.resend.sendCalls[0].subject, /SQ-1002/)
+    assert.match(state.resend.sendCalls[0].html, /review link is ready/i)
+    assert.match(state.resend.sendCalls[0].html, /snapquote\.test\/q\/review-1002/)
   })
 
   test("sends follow-up SMS and deducts one credit when phone exists", async () => {
@@ -287,10 +688,12 @@ describe("POST /api/quotes/recovery/trigger", () => {
       const res = await recoveryPost(req)
       const data = await res.json()
 
-      assert.equal(res.status, 200)
-      assert.equal(data.ok, true)
-      assert.equal(data.processedCount, 1)
-      assert.equal(data.results[0].action, "sent_sms")
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.processedCount, 1)
+    assert.equal(data.actionableCount, 1)
+    assert.equal(data.skippedCount, 0)
+    assert.equal(data.results[0].action, "sent_sms")
 
       const ledgerInsert = state.supabase.queryCalls.find(
         (call) => call.table === "sms_credit_ledger" && call.action === "insert"
@@ -351,6 +754,8 @@ describe("POST /api/quotes/recovery/trigger", () => {
     assert.equal(res.status, 200)
     assert.equal(data.ok, true)
     assert.equal(data.processedCount, 1)
+    assert.equal(data.actionableCount, 0)
+    assert.equal(data.skippedCount, 1)
     assert.equal(data.results[0].action, "skipped_no_contact")
   })
 

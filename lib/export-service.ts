@@ -1,5 +1,6 @@
 import { LocalEstimate, BusinessInfo } from "./estimates-storage";
 import { PriceListItem } from "@/types";
+import { isEstimatePaidLike } from "@/lib/estimate-payment-state";
 
 export interface SnapQuoteBackup {
     version: number;
@@ -41,10 +42,19 @@ export function generateQuickBooksCSV(estimates: LocalEstimate[]): string {
     ];
 
     const rows = estimates.map(est => {
-        const date = new Date(est.createdAt).toLocaleDateString('en-US'); // Format: MM/DD/YYYY
+        const isPaid = isEstimatePaidLike(est);
+        const activityDate = isPaid
+            ? est.paymentCompletedAt || est.updatedAt || est.createdAt
+            : est.sentAt || est.updatedAt || est.createdAt;
+        const date = new Date(activityDate).toLocaleDateString('en-US'); // Format: MM/DD/YYYY
         // Escape quotes in strings
         const customer = (est.clientName || "Client").replace(/"/g, '""');
         const summary = (est.summary_note || "Service").replace(/"/g, '""');
+        const status = isPaid
+            ? "Paid"
+            : est.status === "sent"
+                ? "Sent"
+                : "Draft";
 
         // CSV Format
         return [
@@ -57,7 +67,7 @@ export function generateQuickBooksCSV(estimates: LocalEstimate[]): string {
             est.totalAmount.toFixed(2),
             est.taxAmount.toFixed(2),
             est.totalAmount.toFixed(2),
-            `"${est.type === 'invoice' ? 'Invoice' : 'Estimate'}"`
+            `"${status}"`
         ].join(",");
     });
 

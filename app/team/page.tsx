@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "@/components/toast"
 import { Loader2, RefreshCw, Users, Copy, Lock, ArrowRight, UserPlus, FolderKanban, Clock3, ShieldCheck, PlayCircle } from "lucide-react"
+import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
 import { cn } from "@/lib/utils"
 
 const teamBoxClass = "rounded-lg border border-white/10 bg-slate-950/55 p-4"
@@ -86,9 +87,9 @@ function TeamPageContent() {
     }, [workspace?.pendingInvites, inviteToken])
     const sharedEstimates = useMemo(() => estimateFeed?.estimates ?? [], [estimateFeed?.estimates])
     const sharedEstimateMetrics = useMemo(() => {
-        const draftCount = sharedEstimates.filter((estimate) => estimate.status === "draft").length
-        const sentCount = sharedEstimates.filter((estimate) => estimate.status === "sent").length
-        const paidCount = sharedEstimates.filter((estimate) => estimate.status === "paid").length
+        const draftCount = sharedEstimates.filter((estimate) => estimate.status === "draft" && !isEstimatePaidLike(estimate)).length
+        const sentCount = sharedEstimates.filter((estimate) => estimate.status === "sent" && !isEstimatePaidLike(estimate)).length
+        const paidCount = sharedEstimates.filter(isEstimatePaidLike).length
         const latestUpdatedAt = sharedEstimates.reduce<string | null>((latest, estimate) => {
             if (!latest) return estimate.updatedAt
             return new Date(estimate.updatedAt).getTime() > new Date(latest).getTime() ? estimate.updatedAt : latest
@@ -408,40 +409,44 @@ function TeamPageContent() {
                                 </CardHeader>
                                 <CardContent className="space-y-3">
                                     {sharedEstimates.length ? (
-                                        sharedEstimates.map((estimate) => (
-                                            <div key={estimate.estimateId} className={teamBoxClass}>
-                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                                    <div className="min-w-0 space-y-1">
-                                                        <p className="line-clamp-2 break-words font-semibold [overflow-wrap:anywhere]">{estimate.clientName || "Client"}</p>
-                                                        <p className="line-clamp-2 break-words text-xs text-slate-400 [overflow-wrap:anywhere]">
-                                                            {estimate.ownerBusinessName || estimate.ownerUserId} · {estimate.estimateNumber}
-                                                        </p>
+                                        sharedEstimates.map((estimate) => {
+                                            const estimateStatus = isEstimatePaidLike(estimate) ? "paid" : estimate.status
+
+                                            return (
+                                                <div key={estimate.estimateId} className={teamBoxClass}>
+                                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                                        <div className="min-w-0 space-y-1">
+                                                            <p className="line-clamp-2 break-words font-semibold [overflow-wrap:anywhere]">{estimate.clientName || "Client"}</p>
+                                                            <p className="line-clamp-2 break-words text-xs text-slate-400 [overflow-wrap:anywhere]">
+                                                                {estimate.ownerBusinessName || estimate.ownerUserId} · {estimate.estimateNumber}
+                                                            </p>
+                                                        </div>
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={cn(
+                                                                "w-fit uppercase",
+                                                                getTeamEstimateStatusTone(estimateStatus),
+                                                            )}
+                                                        >
+                                                            {estimateStatus}
+                                                        </Badge>
                                                     </div>
-                                                    <Badge
-                                                        variant="outline"
-                                                        className={cn(
-                                                            "w-fit uppercase",
-                                                            getTeamEstimateStatusTone(estimate.status),
-                                                        )}
-                                                    >
-                                                        {estimate.status}
-                                                    </Badge>
-                                                </div>
-                                                <div className="mt-4 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                                                    <div className="space-y-1">
-                                                        <p className="text-lg font-semibold">${estimate.totalAmount.toFixed(2)}</p>
-                                                        <p className="line-clamp-2 break-words text-xs text-slate-400 [overflow-wrap:anywhere]">
-                                                            Updated {new Date(estimate.updatedAt).toLocaleString()}
-                                                        </p>
+                                                    <div className="mt-4 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                                                        <div className="space-y-1">
+                                                            <p className="text-lg font-semibold">${estimate.totalAmount.toFixed(2)}</p>
+                                                            <p className="line-clamp-2 break-words text-xs text-slate-400 [overflow-wrap:anywhere]">
+                                                                Updated {new Date(estimate.updatedAt).toLocaleString()}
+                                                            </p>
+                                                        </div>
+                                                        <Button asChild size="sm" variant="outline" className={teamOutlineButtonClass}>
+                                                            <Link href={`/new-estimate?teamEstimateId=${encodeURIComponent(estimate.estimateId)}`}>
+                                                                Open in Composer
+                                                            </Link>
+                                                        </Button>
                                                     </div>
-                                                    <Button asChild size="sm" variant="outline" className={teamOutlineButtonClass}>
-                                                        <Link href={`/new-estimate?teamEstimateId=${encodeURIComponent(estimate.estimateId)}`}>
-                                                            Open in Composer
-                                                        </Link>
-                                                    </Button>
                                                 </div>
-                                            </div>
-                                        ))
+                                            )
+                                        })
                                     ) : (
                                         <div className="rounded-lg border border-dashed border-white/15 p-8 text-center text-sm text-slate-400">
                                             No synced team estimates yet.

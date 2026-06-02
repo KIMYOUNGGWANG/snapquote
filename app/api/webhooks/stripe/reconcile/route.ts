@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
+import { isEstimatePaidLike } from '@/lib/estimate-payment-state'
 import { recordOpsAlert } from '@/lib/ops-alerts'
 import { resolveEstimateForSettlement } from '@/lib/server/payment-estimate-ownership'
 
@@ -38,6 +39,14 @@ type ReconcileStats = {
     missingMetadata: number
     missingEstimate: number
     errors: number
+}
+
+function getCheckoutSessionPaidAt(session: Stripe.Checkout.Session): string {
+    const createdUnixSeconds = typeof session.created === 'number' && Number.isFinite(session.created)
+        ? session.created
+        : Math.floor(Date.now() / 1000)
+
+    return new Date(createdUnixSeconds * 1000).toISOString()
 }
 
 async function reconcilePaidSessions(req: Request) {
@@ -194,12 +203,19 @@ async function reconcilePaidSessions(req: Request) {
 
             const targetEstimate = settlementResolution.estimate
             stats.matched += 1
+            const statusTransitioned = !isEstimatePaidLike(targetEstimate)
+            const paymentCompletedAt = targetEstimate.payment_completed_at || getCheckoutSessionPaidAt(session)
+            const syncedAt = new Date().toISOString()
 
             const { data: updatedRows, error: updateError } = await supabase
                 .from('estimates')
-                .update({ status: 'paid' })
+                .update({
+                    status: 'paid',
+                    payment_completed_at: paymentCompletedAt,
+                    last_payment_session_id: session.id,
+                    updated_at: syncedAt,
+                })
                 .eq('id', targetEstimate.id)
-                .neq('status', 'paid')
                 .select('id')
 
             if (updateError) {
@@ -208,7 +224,9 @@ async function reconcilePaidSessions(req: Request) {
                 continue
             }
 
-            if ((updatedRows?.length || 0) > 0) {
+            const didUpdateEstimate = (updatedRows?.length || 0) > 0
+
+            if (didUpdateEstimate && statusTransitioned) {
                 stats.updated += 1
             } else {
                 stats.alreadyPaid += 1
@@ -225,7 +243,7 @@ async function reconcilePaidSessions(req: Request) {
                     external_id: `reconcile:${session.id}`,
                     metadata: {
                         checkout_session_id: session.id,
-                        status_transitioned: (updatedRows?.length || 0) > 0,
+                        status_transitioned: didUpdateEstimate && statusTransitioned,
                     },
                 }], {
                     onConflict: 'external_id',

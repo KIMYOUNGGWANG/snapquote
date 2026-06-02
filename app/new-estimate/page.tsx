@@ -1,7 +1,7 @@
 "use client"
 
 import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from "react"
-import { AlertTriangle, ArrowRight, Camera, CheckCircle2, ClipboardList, CreditCard, Download, Eye, FileText, Link as LinkIcon, Loader2, LogIn, Mail, MapPin, MessageSquare, Mic, PenTool, Phone, Save, Share2, SlidersHorizontal, Sparkles, Users, X } from "lucide-react"
+import { AlertTriangle, ArrowRight, Camera, CheckCircle2, ClipboardList, CreditCard, Download, Eye, FileText, Link as LinkIcon, Loader2, LogIn, Mail, MapPin, MessageSquare, Mic, PenTool, Phone, RefreshCw, Save, Share2, SlidersHorizontal, Sparkles, Users, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
@@ -21,8 +21,8 @@ import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { saveEstimate, generateEstimateNumber, getProfile, saveProfile, getEstimates, updateEstimate } from "@/lib/estimates-storage"
 import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI, getClients, type Client } from "@/lib/db"
-import type { BusinessInfo, EstimateItem, EstimateSection } from "@/lib/estimates-storage"
-import { normalizeCategory, normalizeEstimateItem, normalizeEstimatePayload, normalizeUnit, type EstimateDraft } from "@/lib/estimates/normalize"
+import type { BusinessInfo, EstimateItem, EstimateSection, LocalEstimate } from "@/lib/estimates-storage"
+import { normalizeCategory, normalizeEstimateItem, normalizeEstimatePayload, normalizeUnit, toSafeNumber, type EstimateDraft } from "@/lib/estimates/normalize"
 import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
 import { dismissToasts, toast } from "@/components/toast"
 import { trackAnalyticsEvent } from "@/lib/analytics"
@@ -55,6 +55,12 @@ import {
     type TeamEstimateSessionResponse,
 } from "@/lib/team"
 import { buildEstimatePdfFileName, downloadBlobAsFile } from "@/lib/estimate-pdf-file"
+import {
+    appendCustomerPortalLink,
+    createCustomerPortalLinkForEstimate,
+    getCustomerPortalEstimateUpdates,
+    maybeCreateCustomerPortalLinkForEstimate,
+} from "@/lib/customer-portal-client"
 const PaymentOptionModal = dynamic(() => import("@/components/payment-option-modal").then(mod => mod.PaymentOptionModal), { ssr: false })
 import { AudioRecorder } from "@/components/audio-recorder"
 const PDFPreviewModal = dynamic(() => import("@/components/pdf-preview-modal").then(mod => mod.PDFPreviewModal), { ssr: false })
@@ -68,6 +74,39 @@ import { cn } from "@/lib/utils"
 
 type Estimate = EstimateDraft
 
+type CustomerRevisionContext = {
+    originalEstimateId?: string
+    originalEstimateNumber?: string
+    requestedAt?: string
+    customerName?: string
+    customerEmail?: string
+    note?: string
+}
+
+type EstimateResumeIntent = "payment-link" | "referral-invite" | "approval-link"
+type ApprovalLinkStatus = "included" | "signin" | "offline" | "saving"
+type QuotaIssueMetric = "generate" | "transcribe" | "send_email"
+
+type QuotaIssue = {
+    metric: QuotaIssueMetric
+    title: string
+    message: string
+    toastMessage: string
+}
+
+type GenerationIssue = {
+    title: string
+    message: string
+    actionHref?: string
+    actionLabel?: string
+}
+
+type PdfDeliveryIssue = {
+    kind: "share" | "download" | "sent_status"
+    title: string
+    message: string
+}
+
 type ReceiptScanResult = {
     items: Array<{
         id?: string
@@ -80,10 +119,240 @@ type ReceiptScanResult = {
     warnings: string[]
 }
 
+function getOptionalString(value: unknown): string | undefined {
+    return typeof value === "string" && value.trim() ? value.trim() : undefined
+}
+
+function getEffectiveCustomerPaymentLink(paymentLink: string | null, businessProfile?: BusinessInfo): string {
+    return paymentLink?.trim() || businessProfile?.payment_link?.trim() || ""
+}
+
+function getQuotaIssue(metric: QuotaIssueMetric): QuotaIssue {
+    if (metric === "transcribe") {
+        return {
+            metric,
+            title: "Voice quota reached",
+            message: "Your field notes are still saved here. Upgrade from Pricing to process more recordings this month, or type the scope manually and keep moving.",
+            toastMessage: "Monthly voice quota reached. Your capture is still saved.",
+        }
+    }
+
+    if (metric === "send_email") {
+        return {
+            metric,
+            title: "Email quota reached",
+            message: "The estimate is still available. Upgrade from Pricing to send more PDF emails this month, or download the PDF and send it manually.",
+            toastMessage: "Monthly email quota reached. Download the PDF or upgrade to keep sending.",
+        }
+    }
+
+    return {
+        metric,
+        title: "AI draft quota reached",
+        message: "Your capture is still saved in the composer. Upgrade from Pricing for more AI drafts this month, or save the field capture and finish later.",
+        toastMessage: "Monthly AI generation quota reached. Your capture is still saved.",
+    }
+}
+
+function buildGenerationIssue(message: string): GenerationIssue {
+    const normalizedMessage = message.toLowerCase()
+
+    if (normalizedMessage.includes("network") || normalizedMessage.includes("fetch")) {
+        return {
+            title: "AI draft paused by connection",
+            message: "Your field notes and photos are still here. Reconnect and try again, or save the capture to Drafts before leaving.",
+        }
+    }
+
+    if (normalizedMessage.includes("photo estimate") || normalizedMessage.includes("pro or team")) {
+        return {
+            title: "Photo Estimate is not available yet",
+            message: "Your photos and notes are still in the composer. Open Pricing to unlock Photo Estimate, retry with the right plan, or switch to manual line entry.",
+            actionHref: "/pricing?source=photo_estimate_generation",
+            actionLabel: "Open Pricing",
+        }
+    }
+
+    return {
+        title: "AI draft did not finish",
+        message: "Your field capture is still in the composer. Retry the AI draft, save it to Drafts, or switch to manual line entry.",
+    }
+}
+
+function buildPdfDeliveryIssue(kind: PdfDeliveryIssue["kind"]): PdfDeliveryIssue {
+    if (kind === "sent_status") {
+        return {
+            kind,
+            title: "PDF prepared, but status was not saved",
+            message: "The customer PDF was prepared. Retry sharing to mark the estimate sent, or download the PDF and send it manually before leaving.",
+        }
+    }
+
+    if (kind === "download") {
+        return {
+            kind,
+            title: "PDF download did not finish",
+            message: "The estimate is still here. Retry the PDF download, preview it, or keep editing the quote before trying again.",
+        }
+    }
+
+    return {
+        kind,
+        title: "PDF share did not finish",
+        message: "The customer PDF was built, but the share step did not complete. Retry sharing or download the PDF and send it manually.",
+    }
+}
+
+function getCustomerRevisionContextFromDraft(draft: Record<string, unknown>): CustomerRevisionContext | null {
+    const rawContext = draft.revisionContext
+    if (!rawContext || typeof rawContext !== "object" || Array.isArray(rawContext)) return null
+
+    const context = rawContext as Record<string, unknown>
+    const revisionContext: CustomerRevisionContext = {
+        originalEstimateId: getOptionalString(context.originalEstimateId),
+        originalEstimateNumber: getOptionalString(context.originalEstimateNumber),
+        requestedAt: getOptionalString(context.requestedAt),
+        customerName: getOptionalString(context.customerName),
+        customerEmail: getOptionalString(context.customerEmail),
+        note: getOptionalString(context.note),
+    }
+
+    return Object.values(revisionContext).some(Boolean) ? revisionContext : null
+}
+
+function getDraftAttachments(draft: Record<string, unknown>): Record<string, unknown> | null {
+    if (!draft.attachments || typeof draft.attachments !== "object" || Array.isArray(draft.attachments)) return null
+    return draft.attachments as Record<string, unknown>
+}
+
+function getDraftAttachmentPhotos(draft: Record<string, unknown>): string[] {
+    const attachments = getDraftAttachments(draft)
+    if (!attachments || !Array.isArray(attachments.photos)) return []
+    return attachments.photos.filter((photo): photo is string => typeof photo === "string" && photo.trim().length > 0)
+}
+
+function getDraftOriginalTranscript(draft: Record<string, unknown>): string {
+    const attachments = getDraftAttachments(draft)
+    return typeof attachments?.originalTranscript === "string" ? attachments.originalTranscript.trim() : ""
+}
+
+function getDraftScopeAssumptionsConfirmedAt(draft: Record<string, unknown>): string | null {
+    const attachments = getDraftAttachments(draft)
+    if (typeof attachments?.scopeAssumptionsConfirmedAt !== "string") return null
+
+    const confirmedAt = attachments.scopeAssumptionsConfirmedAt.trim()
+    return confirmedAt ? confirmedAt : null
+}
+
+function hasDraftLineItems(draft: Record<string, unknown>): boolean {
+    if (Array.isArray(draft.items) && draft.items.length > 0) return true
+    if (!Array.isArray(draft.sections)) return false
+
+    return draft.sections.some((section) => {
+        if (!section || typeof section !== "object" || Array.isArray(section)) return false
+        const items = (section as Record<string, unknown>).items
+        return Array.isArray(items) && items.length > 0
+    })
+}
+
+function isCaptureOnlyDraftRecord(draft: Record<string, unknown>): boolean {
+    const status = typeof draft.status === "string" ? draft.status : "draft"
+    if (status !== "draft") return false
+    if (hasDraftLineItems(draft)) return false
+    if (toSafeNumber(draft.totalAmount) > 0) return false
+
+    const summaryNote = typeof draft.summary_note === "string" ? draft.summary_note.trim() : ""
+    return Boolean(summaryNote || getDraftOriginalTranscript(draft) || getDraftAttachmentPhotos(draft).length > 0)
+}
+
+function getCaptureResumeText(draft: Record<string, unknown>): string {
+    const originalTranscript = getDraftOriginalTranscript(draft)
+    if (originalTranscript) return originalTranscript
+
+    return typeof draft.summary_note === "string" ? draft.summary_note.trim() : ""
+}
+
+function getCaptureResumePhotoContext(draft: Record<string, unknown>): string {
+    if (typeof draft.summary_note !== "string") return ""
+
+    const match = draft.summary_note.match(/(?:^|\n)Photo context:\s*([^\n]+)/i)
+    return match?.[1]?.trim() || ""
+}
+
+function buildCaptureNarrative(notes: string, photoContext: string): string {
+    const trimmedNotes = notes.trim()
+    const trimmedPhotoContext = photoContext.trim()
+    if (!trimmedPhotoContext) return trimmedNotes
+
+    const photoContextLine = `Photo context: ${trimmedPhotoContext}`
+    if (!trimmedNotes) return photoContextLine
+    if (trimmedNotes.toLowerCase().includes(photoContextLine.toLowerCase())) return trimmedNotes
+
+    return `${trimmedNotes}\n\n${photoContextLine}`
+}
+
+function dataUrlToFile(dataUrl: string, index: number): File | null {
+    if (typeof File === "undefined" || typeof atob === "undefined") return null
+
+    const [header, payload] = dataUrl.split(",")
+    const mimeMatch = header?.match(/^data:([^;]+);base64$/)
+    if (!mimeMatch || !payload) return null
+
+    try {
+        const mimeType = mimeMatch[1] || "image/jpeg"
+        const binary = atob(payload)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i += 1) {
+            bytes[i] = binary.charCodeAt(i)
+        }
+        const extension = mimeType.split("/")[1] || "jpg"
+        return new File([bytes], `saved-site-photo-${index + 1}.${extension}`, {
+            type: mimeType,
+            lastModified: Date.now(),
+        })
+    } catch {
+        return null
+    }
+}
+
+function formatRevisionRequestDate(value?: string): string {
+    if (!value) return ""
+
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return ""
+
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+}
+
 type Step = "input" | "transcribing" | "verifying" | "generating" | "result"
 type SourceLanguage = "auto" | "en" | "es" | "ko"
 type GenerateWorkflow = "standard" | "photo_estimate"
 type CaptureIntent = "voice" | "photos" | "type"
+type ProjectType = "residential" | "commercial"
+type ScopeGuidancePrompt = {
+    id: "work" | "cost" | "site"
+    label: string
+    title: string
+    helper: string
+    template: string
+}
+
+type UnsentCaptureDraft = {
+    version: 1
+    updatedAt: string
+    captureIntent: CaptureIntent
+    transcribedText: string
+    photoContext: string
+    generateWorkflow: GenerateWorkflow
+    sourceLanguage: SourceLanguage
+    projectType: ProjectType
+    clientName: string
+    clientAddress: string
+    clientEmail: string
+    clientPhone: string
+    clientNotes: string
+    clientDetailsOpen: boolean
+}
 
 const SOURCE_LANGUAGE_OPTIONS: Array<{ value: SourceLanguage; label: string; hint: string }> = [
     { value: "auto", label: "Auto", hint: "Detect mixed site language" },
@@ -98,6 +367,34 @@ const SOURCE_LANGUAGE_EXAMPLES: Record<SourceLanguage, string> = {
     en: "\"Replace the angle stop under the sink, fix the drain leak, and pressure-test the line.\"",
 }
 const PHOTO_ESTIMATE_PRO_TIERS = new Set(["pro", "team"])
+const UNSENT_CAPTURE_DRAFT_KEY = "snapquote_unsent_capture_draft"
+const UNSENT_CAPTURE_DRAFT_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 3
+const SCOPE_ACTION_PATTERN = /\b(replace|install|repair|fix|remove|add|test|inspect|service|clean|paint|wire|plumb|frame|patch|seal|mount|connect|diagnos(?:e|is))\b/i
+const SCOPE_MATERIAL_PATTERN = /\b(material|part|labor|hour|hr|valve|pipe|wire|fixture|panel|paint|drywall|tile|cartridge|assembly|permit|cleanup|haul|disposal|trim|shutoff|drain|breaker|outlet)\b/i
+const SCOPE_CONDITION_PATTERN = /\b(leak\w*|damage|access|under|behind|ceiling|crawl|attic|pressure|height|old|existing|photo|condition|customer|request|around|area|before|after)\b/i
+const SCOPE_GUIDANCE_PROMPTS: Record<ScopeGuidancePrompt["id"], ScopeGuidancePrompt> = {
+    work: {
+        id: "work",
+        label: "Add work",
+        title: "Work to perform",
+        helper: "Name the repair, install, test, or cleanup.",
+        template: "Work to perform: ",
+    },
+    cost: {
+        id: "cost",
+        label: "Add cost drivers",
+        title: "Materials or labor",
+        helper: "List parts, labor hours, finish level, or owner-supplied items.",
+        template: "Materials/labor: ",
+    },
+    site: {
+        id: "site",
+        label: "Add site context",
+        title: "Site conditions",
+        helper: "Add access, location, measurements, damage, or hidden conditions.",
+        template: "Site/context: ",
+    },
+}
 const CAPTURE_INTENT_COPY: Record<CaptureIntent, { eyebrow: string; title: string; description: string; status: string }> = {
     voice: {
         eyebrow: "Voice scope",
@@ -159,6 +456,24 @@ function parseCaptureIntent(value: string | null): CaptureIntent | null {
     return null
 }
 
+function parseSourceLanguage(value: unknown): SourceLanguage {
+    if (value === "auto" || value === "en" || value === "es" || value === "ko") return value
+    return "auto"
+}
+
+function parseGenerateWorkflow(value: unknown): GenerateWorkflow {
+    return value === "photo_estimate" ? "photo_estimate" : "standard"
+}
+
+function parseProjectType(value: unknown): ProjectType {
+    return value === "commercial" ? "commercial" : "residential"
+}
+
+function getRecordString(record: Record<string, unknown>, key: string): string {
+    const value = record[key]
+    return typeof value === "string" ? value : ""
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
     if (error instanceof Error) return error.message || fallback
     if (error && typeof error === "object" && "message" in error) {
@@ -217,9 +532,10 @@ function NewEstimatePageContent() {
     // UI States
     const [isSaving, setIsSaving] = useState(false)
     const [isSharing, setIsSharing] = useState(false)
-    const [isPreparingAuthRedirect, setIsPreparingAuthRedirect] = useState<"payment-link" | "referral-invite" | null>(null)
+    const [scopeAssumptionsConfirmedAt, setScopeAssumptionsConfirmedAt] = useState<string | null>(null)
+    const [isPreparingAuthRedirect, setIsPreparingAuthRedirect] = useState<EstimateResumeIntent | null>(null)
     const [authenticatedResumeIntent, setAuthenticatedResumeIntent] = useState<{
-        intent: "payment-link" | "referral-invite"
+        intent: EstimateResumeIntent
         expectsDraft: boolean
     } | null>(null)
     const [taxRate, setTaxRate] = useState(13)
@@ -228,18 +544,20 @@ function NewEstimatePageContent() {
     const [clientEmail, setClientEmail] = useState("")
     const [clientPhone, setClientPhone] = useState("")
     const [clientNotes, setClientNotes] = useState("")
+    const [revisionContext, setRevisionContext] = useState<CustomerRevisionContext | null>(null)
     const [isClientContactEditorOpen, setIsClientContactEditorOpen] = useState(false)
     const [isInputClientDetailsOpen, setIsInputClientDetailsOpen] = useState(false)
     const [isResultContactEditorOpen, setIsResultContactEditorOpen] = useState(false)
     const [isResultClientDetailsOpen, setIsResultClientDetailsOpen] = useState(false)
     const [businessProfile, setBusinessProfile] = useState<BusinessInfo | undefined>(undefined)
+    const [canCreateCustomerPortalLinks, setCanCreateCustomerPortalLinks] = useState(false)
     const [isPreviewOpen, setIsPreviewOpen] = useState(false)
     const [isEmailModalOpen, setIsEmailModalOpen] = useState(false)
     const [isSmsModalOpen, setIsSmsModalOpen] = useState(false)
     const [isExcelModalOpen, setIsExcelModalOpen] = useState(false)
     const [isOffline, setIsOffline] = useState(false)
     const [pendingAudioId, setPendingAudioId] = useState<string | null>(null)
-    const [projectType, setProjectType] = useState<'residential' | 'commercial'>('residential')
+    const [projectType, setProjectType] = useState<ProjectType>('residential')
     const [sourceLanguage, setSourceLanguage] = useState<SourceLanguage>("auto")
     const [generateWorkflow, setGenerateWorkflow] = useState<GenerateWorkflow>("standard")
     const [photoContext, setPhotoContext] = useState("")
@@ -260,20 +578,27 @@ function NewEstimatePageContent() {
     const [showDemoTutorial, setShowDemoTutorial] = useState(false)
     const [billingUsageSnapshot, setBillingUsageSnapshot] = useState<BillingUsageSnapshot | null>(null)
     const [subscription, setSubscription] = useState<BillingSubscriptionStatusResponse | null>(null)
+    const [quotaIssue, setQuotaIssue] = useState<QuotaIssue | null>(null)
+    const [generationIssue, setGenerationIssue] = useState<GenerationIssue | null>(null)
+    const [pdfDeliveryIssue, setPdfDeliveryIssue] = useState<PdfDeliveryIssue | null>(null)
     const [teamEstimateContext, setTeamEstimateContext] = useState<TeamEstimateDetailResponse["estimate"] | null>(null)
     const [teamEstimateSession, setTeamEstimateSession] = useState<TeamEstimateSessionResponse["session"] | null>(null)
     const [teamEstimateLoading, setTeamEstimateLoading] = useState(false)
     const [teamSessionMutating, setTeamSessionMutating] = useState(false)
+    const [savedCaptureDraftFingerprint, setSavedCaptureDraftFingerprint] = useState("")
 
     const fileInputRef = useRef<HTMLInputElement>(null)
     const notesTextareaRef = useRef<HTMLTextAreaElement>(null)
     const draftMetaRef = useRef<{ id: string; estimateNumber: string; createdAt?: string } | null>(null)
     const handledPaymentIntentRef = useRef(false)
     const handledReferralIntentRef = useRef(false)
+    const handledApprovalLinkIntentRef = useRef(false)
     const suppressPostAuthDraftToastRef = useRef(false)
     const handledClientPrefillRef = useRef(false)
     const handledReceiptPrefillRef = useRef(false)
     const handledTimeEntryPrefillRef = useRef(false)
+    const hasHandledUnsentCaptureRestoreRef = useRef(false)
+    const canPersistUnsentCaptureDraftRef = useRef(false)
     const resultQuickActionsRef = useRef<HTMLDivElement>(null)
     const resultClientCardRef = useRef<HTMLDivElement>(null)
     const resultClientNameInputRef = useRef<HTMLInputElement>(null)
@@ -294,6 +619,55 @@ function NewEstimatePageContent() {
     const hasInvalidDeliveryContactValue = Boolean(
         (trimmedClientEmail && !hasEmailDeliveryContact) || (trimmedClientPhone && !hasSmsDeliveryContact)
     )
+    const trimmedScopeText = transcribedText.trim()
+    const trimmedPhotoContext = photoContext.trim()
+    const captureNarrative = buildCaptureNarrative(transcribedText, photoContext)
+    const combinedScopeText = [trimmedScopeText, trimmedPhotoContext].filter(Boolean).join(" ")
+    const scopeWordCount = combinedScopeText ? combinedScopeText.split(/\s+/).filter(Boolean).length : 0
+    const scopeTextLength = combinedScopeText.length
+    const hasPhotoScope = images.length > 0
+    const hasScopeWorkAction = SCOPE_ACTION_PATTERN.test(combinedScopeText) || scopeTextLength >= 40
+    const hasScopeMaterialOrLabor = SCOPE_MATERIAL_PATTERN.test(combinedScopeText) || scopeWordCount >= 12 || hasPhotoScope
+    const hasScopeSiteContext = SCOPE_CONDITION_PATTERN.test(combinedScopeText) || scopeWordCount >= 18 || hasPhotoScope
+    const scopeDetailScore = [hasScopeWorkAction, hasScopeMaterialOrLabor, hasScopeSiteContext].filter(Boolean).length
+    const scopeDetailStatusLabel = !canGenerateEstimate
+        ? "Needs scope"
+        : scopeDetailScore >= 3
+            ? "Quote-ready scope"
+            : scopeDetailScore >= 2
+                ? "Good start"
+                : "Thin scope"
+    const scopeDetailStatusClassName = !canGenerateEstimate
+        ? "text-amber-200"
+        : scopeDetailScore >= 3
+            ? "text-emerald-200"
+            : scopeDetailScore >= 2
+                ? "text-blue-200"
+                : "text-amber-200"
+    const missingScopeDetailLabel = !canGenerateEstimate
+        ? activeCaptureIntent === "photos" ? "Add photos or rough notes" : "Start with the work requested"
+        : !hasScopeWorkAction
+            ? "work to perform"
+            : !hasScopeMaterialOrLabor
+                ? "materials or labor"
+                : !hasScopeSiteContext
+                    ? "site context"
+                    : "Ready for AI draft"
+    const scopeDetailHelper = !canGenerateEstimate
+        ? missingScopeDetailLabel
+        : scopeDetailScore >= 3
+            ? "Scope has work, cost drivers, and site context."
+            : `Add ${missingScopeDetailLabel} for a cleaner draft.`
+    const scopeDetailMessage = scopeDetailScore >= 3 ? "Ready for AI draft." : scopeDetailHelper
+    const scopeDetailQuickHelper = !canGenerateEstimate
+        ? "Type notes."
+        : scopeDetailScore >= 3
+            ? "Ready."
+            : !hasScopeWorkAction
+                ? "Add work."
+                : !hasScopeMaterialOrLabor
+                    ? "Add cost."
+                    : "Add site."
     const scopeReadinessLabel = canGenerateEstimate
         ? "Scope ready"
         : activeCaptureIntent === "photos"
@@ -301,8 +675,63 @@ function NewEstimatePageContent() {
             : activeCaptureIntent === "type"
                 ? "Add rough scope"
                 : "Record or type scope"
+    const scopeGuidancePrompts = useMemo(() => {
+        if (!canGenerateEstimate || scopeDetailScore >= 3) return []
+
+        const prompts: ScopeGuidancePrompt[] = []
+        if (!hasScopeWorkAction) prompts.push(SCOPE_GUIDANCE_PROMPTS.work)
+        if (!hasScopeMaterialOrLabor) prompts.push(SCOPE_GUIDANCE_PROMPTS.cost)
+        if (!hasScopeSiteContext) prompts.push(SCOPE_GUIDANCE_PROMPTS.site)
+
+        return prompts.slice(0, 2)
+    }, [
+        canGenerateEstimate,
+        hasScopeMaterialOrLabor,
+        hasScopeSiteContext,
+        hasScopeWorkAction,
+        scopeDetailScore,
+    ])
     const clientReadinessLabel = hasClientContext ? trimmedClientName : "Client later"
     const deliveryReadinessLabel = hasDeliveryContact ? "Delivery ready" : "Before sending"
+    const hasInputCaptureDraftContent = Boolean(
+        transcribedText.trim()
+        || photoContext.trim()
+        || images.length > 0
+        || clientName.trim()
+        || clientAddress.trim()
+        || clientEmail.trim()
+        || clientPhone.trim()
+        || clientNotes.trim()
+    )
+    const inputCaptureDraftFingerprint = useMemo(() => JSON.stringify({
+        captureIntent: activeCaptureIntent,
+        transcribedText,
+        photoContext,
+        generateWorkflow,
+        sourceLanguage,
+        projectType,
+        clientName,
+        clientAddress,
+        clientEmail,
+        clientPhone,
+        clientNotes,
+        clientDetailsOpen: isInputClientDetailsOpen,
+        images: images.map((image) => `${image.name}:${image.size}:${image.lastModified}`),
+    }), [
+        activeCaptureIntent,
+        clientAddress,
+        clientEmail,
+        clientName,
+        clientNotes,
+        clientPhone,
+        generateWorkflow,
+        images,
+        isInputClientDetailsOpen,
+        photoContext,
+        projectType,
+        sourceLanguage,
+        transcribedText,
+    ])
     const shouldShowClientContactFields = hasClientContext && (!hasDeliveryContact || hasInvalidDeliveryContactValue || isClientContactEditorOpen)
     const shouldShowInputClientDetailsFields = isInputClientDetailsOpen
     const shouldShowResultDeliveryContactFields = !hasDeliveryContact || hasInvalidDeliveryContactValue || isResultContactEditorOpen
@@ -527,11 +956,110 @@ function NewEstimatePageContent() {
         replaceComposerUrl(`/new-estimate?capture=${intent}`)
     }, [replaceComposerUrl])
 
+    const handleAddScopeGuidancePrompt = useCallback((prompt: ScopeGuidancePrompt) => {
+        setTranscribedText((currentText) => {
+            const trimmedText = currentText.trimEnd()
+            return trimmedText ? `${trimmedText}\n${prompt.template}` : prompt.template
+        })
+
+        window.requestAnimationFrame(() => {
+            notesTextareaRef.current?.focus()
+        })
+    }, [])
+
     const openManualEntry = useCallback(() => {
         setCaptureIntent("type")
         setStep("verifying")
         replaceComposerUrl("/new-estimate?mode=manual")
     }, [replaceComposerUrl])
+
+    const clearUnsentCaptureDraft = useCallback(() => {
+        if (typeof window === "undefined") return
+        window.localStorage.removeItem(UNSENT_CAPTURE_DRAFT_KEY)
+    }, [])
+
+    const restoreUnsentCaptureDraft = useCallback((options: { requestedCaptureIntent?: CaptureIntent | null } = {}) => {
+        if (typeof window === "undefined") return false
+
+        const rawValue = window.localStorage.getItem(UNSENT_CAPTURE_DRAFT_KEY)
+        if (!rawValue) return false
+
+        try {
+            const parsedValue: unknown = JSON.parse(rawValue)
+            if (!parsedValue || typeof parsedValue !== "object" || Array.isArray(parsedValue)) {
+                clearUnsentCaptureDraft()
+                return false
+            }
+
+            const record = parsedValue as Record<string, unknown>
+            if (record.version !== 1) {
+                clearUnsentCaptureDraft()
+                return false
+            }
+
+            const updatedAt = getRecordString(record, "updatedAt")
+            const updatedAtTime = Date.parse(updatedAt)
+            if (!updatedAt || Number.isNaN(updatedAtTime) || Date.now() - updatedAtTime > UNSENT_CAPTURE_DRAFT_MAX_AGE_MS) {
+                clearUnsentCaptureDraft()
+                return false
+            }
+
+            const restoredTranscribedText = getRecordString(record, "transcribedText")
+            const restoredPhotoContext = getRecordString(record, "photoContext")
+            const restoredClientName = getRecordString(record, "clientName")
+            const restoredClientAddress = getRecordString(record, "clientAddress")
+            const restoredClientEmail = getRecordString(record, "clientEmail")
+            const restoredClientPhone = getRecordString(record, "clientPhone")
+            const restoredClientNotes = getRecordString(record, "clientNotes")
+            const hasRestorableDraft = Boolean(
+                restoredTranscribedText.trim()
+                || restoredPhotoContext.trim()
+                || restoredClientName.trim()
+                || restoredClientAddress.trim()
+                || restoredClientEmail.trim()
+                || restoredClientPhone.trim()
+                || restoredClientNotes.trim()
+            )
+
+            if (!hasRestorableDraft) {
+                clearUnsentCaptureDraft()
+                return false
+            }
+
+            const restoredCaptureIntent = parseCaptureIntent(getRecordString(record, "captureIntent")) ?? "type"
+            if (options.requestedCaptureIntent && restoredCaptureIntent !== options.requestedCaptureIntent) {
+                return false
+            }
+
+            const restoredGenerateWorkflow = parseGenerateWorkflow(record.generateWorkflow)
+            const restoredClientDetailsOpen = record.clientDetailsOpen === true || Boolean(
+                restoredClientAddress.trim()
+                || restoredClientEmail.trim()
+                || restoredClientPhone.trim()
+                || restoredClientNotes.trim()
+            )
+
+            setCaptureIntent(restoredCaptureIntent)
+            setTranscribedText(restoredTranscribedText)
+            setPhotoContext(restoredPhotoContext)
+            setGenerateWorkflow(restoredGenerateWorkflow)
+            setSourceLanguage(parseSourceLanguage(record.sourceLanguage))
+            setProjectType(parseProjectType(record.projectType))
+            setClientName(restoredClientName)
+            setClientAddress(restoredClientAddress)
+            setClientEmail(restoredClientEmail)
+            setClientPhone(restoredClientPhone)
+            setClientNotes(restoredClientNotes)
+            setIsInputClientDetailsOpen(restoredClientDetailsOpen)
+            setStep("input")
+            toast("Recovered unsent field notes from this device.", "info")
+            return true
+        } catch (error) {
+            console.error("Failed to restore unsent capture draft:", error)
+            clearUnsentCaptureDraft()
+            return false
+        }
+    }, [clearUnsentCaptureDraft])
 
     const redirectToLoginForTeamEstimate = useCallback((estimateId: string) => {
         const params = new URLSearchParams({
@@ -553,18 +1081,67 @@ function NewEstimatePageContent() {
         } else {
             resetDraftMeta()
         }
+        clearUnsentCaptureDraft()
         resetPaymentLinkState()
+        const draftClientName = typeof draft.clientName === "string" ? draft.clientName : ""
+        const draftClientAddress = typeof draft.clientAddress === "string" ? draft.clientAddress : ""
+        const draftClientEmail = typeof draft.clientEmail === "string" ? draft.clientEmail : ""
+        const draftClientPhone = typeof draft.clientPhone === "string" ? draft.clientPhone : ""
+        const draftClientNotes = typeof draft.clientNotes === "string" ? draft.clientNotes : ""
+        const draftTaxRate = typeof draft.taxRate === "number" ? draft.taxRate : 13
+
+        if (isCaptureOnlyDraftRecord(draft)) {
+            const attachmentPhotos = getDraftAttachmentPhotos(draft)
+            const photoEntries = attachmentPhotos
+                .map((url, index) => ({ file: dataUrlToFile(url, index), url }))
+                .filter((entry): entry is { file: File; url: string } => Boolean(entry.file))
+            const resumedPhotos = photoEntries.map((entry) => entry.file)
+            const resumedPreviewUrls = photoEntries.map((entry) => entry.url)
+            const resumedTranscript = getCaptureResumeText(draft)
+
+            setEstimate(null)
+            setClientName(draftClientName)
+            setClientAddress(draftClientAddress)
+            setClientEmail(draftClientEmail)
+            setClientPhone(draftClientPhone)
+            setClientNotes(draftClientNotes)
+            setRevisionContext(null)
+            setIsClientContactEditorOpen(false)
+            setIsInputClientDetailsOpen(Boolean(draftClientName || draftClientAddress || draftClientEmail || draftClientPhone || draftClientNotes))
+            setIsResultContactEditorOpen(false)
+            setIsResultClientDetailsOpen(false)
+            setTaxRate(draftTaxRate)
+            setAudioBlob(null)
+            setImages(resumedPhotos)
+            setPreviewUrls(resumedPreviewUrls)
+            setTranscribedText(resumedTranscript)
+            setGenerateWorkflow(resumedPhotos.length > 0 ? "photo_estimate" : "standard")
+            setPhotoContext(getCaptureResumePhotoContext(draft))
+            setCaptureIntent(resumedPhotos.length > 0 && !resumedTranscript.trim() ? "photos" : "type")
+            setSourceLanguage("auto")
+            setProjectType("residential")
+            setScopeAssumptionsConfirmedAt(null)
+            setStep("input")
+            setShowDemoTutorial(false)
+
+            toast("Field capture loaded. Generate when ready.", "success")
+            return
+        }
+
+        const draftOriginalTranscript = getDraftOriginalTranscript(draft)
+
         setEstimate(normalizeEstimatePayload(draft))
-        setClientName(draft.clientName || "")
-        setClientAddress(draft.clientAddress || "")
-        setClientEmail(typeof draft.clientEmail === "string" ? draft.clientEmail : "")
-        setClientPhone(typeof draft.clientPhone === "string" ? draft.clientPhone : "")
-        setClientNotes(typeof draft.clientNotes === "string" ? draft.clientNotes : "")
+        setClientName(draftClientName)
+        setClientAddress(draftClientAddress)
+        setClientEmail(draftClientEmail)
+        setClientPhone(draftClientPhone)
+        setClientNotes(draftClientNotes)
+        setRevisionContext(getCustomerRevisionContextFromDraft(draft))
         setIsClientContactEditorOpen(false)
         setIsInputClientDetailsOpen(false)
         setIsResultContactEditorOpen(false)
         setIsResultClientDetailsOpen(false)
-        setTaxRate(typeof draft.taxRate === "number" ? draft.taxRate : 13)
+        setTaxRate(draftTaxRate)
         if (typeof draft.paymentLink === "string" && draft.paymentLink.trim()) {
             setIncludePaymentLink(true)
             setPaymentLink(draft.paymentLink)
@@ -578,24 +1155,27 @@ function NewEstimatePageContent() {
         setAudioBlob(null)
         setImages([])
         setPreviewUrls([])
-        setTranscribedText("")
+        setTranscribedText(draftOriginalTranscript)
         setGenerateWorkflow("standard")
-        setPhotoContext("")
+        setPhotoContext(getCaptureResumePhotoContext(draft))
+        setScopeAssumptionsConfirmedAt(getDraftScopeAssumptionsConfirmedAt(draft))
         setStep("result")
         setShowDemoTutorial(Boolean(options?.tutorial))
 
         if (options?.toastMessage) {
             toast(options.toastMessage, "success")
         }
-    }, [resetDraftMeta, resetPaymentLinkState])
+    }, [clearUnsentCaptureDraft, resetDraftMeta, resetPaymentLinkState])
 
     const applyTeamEstimateToComposer = useCallback((detail: TeamEstimateDetailResponse["estimate"]) => {
         draftMetaRef.current = {
             id: detail.estimateId,
             estimateNumber: detail.estimateNumber,
         }
+        clearUnsentCaptureDraft()
         resetPaymentLinkState()
         setTeamEstimateContext(detail)
+        setRevisionContext(null)
         setEstimate({
             items: detail.items as EstimateItem[],
             ...(detail.sections && detail.sections.length > 0 ? { sections: detail.sections as EstimateSection[] } : {}),
@@ -618,9 +1198,10 @@ function NewEstimatePageContent() {
         setTranscribedText("")
         setGenerateWorkflow("standard")
         setPhotoContext("")
+        setScopeAssumptionsConfirmedAt(null)
         setShowDemoTutorial(false)
         setStep("result")
-    }, [resetPaymentLinkState])
+    }, [clearUnsentCaptureDraft, resetPaymentLinkState])
 
     const refreshTeamEstimateSession = useCallback(async (estimateId: string) => {
         const session = await getTeamEstimateSession(estimateId)
@@ -672,6 +1253,7 @@ function NewEstimatePageContent() {
 
     const handleExitDemoTutorial = useCallback(() => {
         resetDraftMeta()
+        clearUnsentCaptureDraft()
         resetPaymentLinkState()
         setEstimate(null)
         setClientName("")
@@ -679,6 +1261,7 @@ function NewEstimatePageContent() {
         setClientEmail("")
         setClientPhone("")
         setClientNotes("")
+        setRevisionContext(null)
         setIsClientContactEditorOpen(false)
         setIsInputClientDetailsOpen(false)
         setIsResultContactEditorOpen(false)
@@ -691,7 +1274,7 @@ function NewEstimatePageContent() {
         setStep("input")
         setTaxRate(businessProfile?.tax_rate || 13)
         replaceComposerUrl("/new-estimate")
-    }, [businessProfile?.tax_rate, replaceComposerUrl, resetDraftMeta, resetPaymentLinkState])
+    }, [businessProfile?.tax_rate, clearUnsentCaptureDraft, replaceComposerUrl, resetDraftMeta, resetPaymentLinkState])
 
     const handleDismissDemoTutorial = useCallback(() => {
         setShowDemoTutorial(false)
@@ -722,6 +1305,10 @@ function NewEstimatePageContent() {
         const hasClientPrefill = searchParams.get("client") === "1"
         const hasReceiptPrefill = searchParams.get("receipt") === "1"
         const hasTimeEntryPrefill = searchParams.get("time") === "1"
+        const markUnsentCaptureRestoreHandled = (canPersist = true) => {
+            hasHandledUnsentCaptureRestoreRef.current = true
+            canPersistUnsentCaptureDraftRef.current = canPersist
+        }
         setShowDemoTutorial(tutorialMode)
         setCaptureIntent(manualMode ? "type" : requestedCaptureIntent)
 
@@ -745,6 +1332,7 @@ function NewEstimatePageContent() {
                 console.error('Failed to load duplicate data:', e)
                 localStorage.removeItem(DUPLICATE_ESTIMATE_KEY)
             }
+            markUnsentCaptureRestoreHandled()
             return
         }
 
@@ -752,10 +1340,12 @@ function NewEstimatePageContent() {
             loadDraftIntoComposer(createDemoEstimateDraft(), {
                 tutorial: true,
             })
+            markUnsentCaptureRestoreHandled()
             return
         }
 
         if (draftId) {
+            markUnsentCaptureRestoreHandled(false)
             void getEstimates().then((savedEstimates) => {
                 const savedDraft = savedEstimates.find((savedEstimate) => savedEstimate.id === draftId)
                 if (!savedDraft) {
@@ -770,6 +1360,8 @@ function NewEstimatePageContent() {
                     toastMessage: shouldSuppressDraftToast ? undefined : "Draft loaded. Edits will update the saved estimate.",
                 })
                 suppressPostAuthDraftToastRef.current = false
+            }).finally(() => {
+                canPersistUnsentCaptureDraftRef.current = true
             })
             return
         }
@@ -796,6 +1388,7 @@ function NewEstimatePageContent() {
                 replaceComposerUrl("/new-estimate?capture=type")
             }
 
+            markUnsentCaptureRestoreHandled()
             return
         }
 
@@ -814,6 +1407,7 @@ function NewEstimatePageContent() {
                 replaceComposerUrl("/new-estimate?capture=type")
             }
 
+            markUnsentCaptureRestoreHandled()
             return
         }
 
@@ -832,18 +1426,94 @@ function NewEstimatePageContent() {
                 replaceComposerUrl("/new-estimate?capture=type")
             }
 
+            markUnsentCaptureRestoreHandled()
             return
         }
 
         if (manualMode) {
             setStep("verifying")
+            markUnsentCaptureRestoreHandled()
             return
         }
 
         if (teamEstimateId) {
-            void loadTeamEstimate(teamEstimateId)
+            markUnsentCaptureRestoreHandled(false)
+            void loadTeamEstimate(teamEstimateId).finally(() => {
+                canPersistUnsentCaptureDraftRef.current = true
+            })
+            return
         }
-    }, [loadDraftIntoComposer, loadTeamEstimate, replaceComposerUrl, searchParams])
+
+        if (!hasHandledUnsentCaptureRestoreRef.current) {
+            restoreUnsentCaptureDraft({ requestedCaptureIntent })
+            hasHandledUnsentCaptureRestoreRef.current = true
+        }
+        canPersistUnsentCaptureDraftRef.current = true
+    }, [loadDraftIntoComposer, loadTeamEstimate, replaceComposerUrl, restoreUnsentCaptureDraft, searchParams])
+
+    useEffect(() => {
+        if (!canPersistUnsentCaptureDraftRef.current) return
+        if (estimate || (step !== "input" && step !== "verifying")) return
+
+        const draftPayload: UnsentCaptureDraft = {
+            version: 1,
+            updatedAt: new Date().toISOString(),
+            captureIntent: activeCaptureIntent,
+            transcribedText,
+            photoContext,
+            generateWorkflow,
+            sourceLanguage,
+            projectType,
+            clientName,
+            clientAddress,
+            clientEmail,
+            clientPhone,
+            clientNotes,
+            clientDetailsOpen: isInputClientDetailsOpen,
+        }
+        const hasDraftContent = Boolean(
+            transcribedText.trim()
+            || photoContext.trim()
+            || clientName.trim()
+            || clientAddress.trim()
+            || clientEmail.trim()
+            || clientPhone.trim()
+            || clientNotes.trim()
+        )
+
+        const saveTimer = window.setTimeout(() => {
+            try {
+                if (!hasDraftContent || inputCaptureDraftFingerprint === savedCaptureDraftFingerprint) {
+                    clearUnsentCaptureDraft()
+                    return
+                }
+
+                window.localStorage.setItem(UNSENT_CAPTURE_DRAFT_KEY, JSON.stringify(draftPayload))
+            } catch (error) {
+                console.error("Failed to save unsent capture draft:", error)
+            }
+        }, 250)
+
+        return () => window.clearTimeout(saveTimer)
+    }, [
+        activeCaptureIntent,
+        clearUnsentCaptureDraft,
+        clientAddress,
+        clientEmail,
+        clientName,
+        clientNotes,
+        clientPhone,
+        estimate,
+        generateWorkflow,
+        inputCaptureDraftFingerprint,
+        isInputClientDetailsOpen,
+        photoContext,
+        projectType,
+        savedCaptureDraftFingerprint,
+        sourceLanguage,
+        step,
+        transcribedText,
+    ])
 
     useEffect(() => {
         if (step !== "input" || activeCaptureIntent !== "type") return
@@ -909,12 +1579,15 @@ function NewEstimatePageContent() {
                             })
 
                             if (response.status === 402) {
-                                toast("Monthly voice quota reached. Upgrade flow will be enabled soon.", "warning")
+                                const issue = getQuotaIssue("transcribe")
+                                setQuotaIssue(issue)
+                                toast(issue.toastMessage, "warning")
                                 continue
                             }
 
                             if (response.ok) {
                                 const data = await response.json()
+                                setQuotaIssue(null)
                                 // If this page has the matching pending audio, update state
                                 if (audio.id === pendingAudioId) {
                                     setTranscribedText(data.text)
@@ -990,6 +1663,29 @@ function NewEstimatePageContent() {
     }, [removeIntentFromComposerUrl])
 
     useEffect(() => {
+        if (handledApprovalLinkIntentRef.current) return
+        if (typeof window === "undefined") return
+        const params = new URLSearchParams(window.location.search)
+        const intent = params.get("intent")
+        if (intent !== "approval-link") return
+        handledApprovalLinkIntentRef.current = true
+        const expectsDraft = Boolean(params.get("draftId"))
+
+        void (async () => {
+            const headers = await withAuthHeaders()
+            if (!headers.authorization) {
+                toast("Sign in to include customer approval links.", "warning")
+                return
+            }
+
+            setCanCreateCustomerPortalLinks(true)
+            setAuthenticatedResumeIntent({ intent: "approval-link", expectsDraft })
+        })()
+
+        removeIntentFromComposerUrl()
+    }, [removeIntentFromComposerUrl])
+
+    useEffect(() => {
         if (!authenticatedResumeIntent) return
 
         if (authenticatedResumeIntent.expectsDraft && (!estimate || step !== "result")) {
@@ -998,10 +1694,13 @@ function NewEstimatePageContent() {
 
         if (!estimate || step !== "result") {
             setCaptureIntent("type")
+            const resumeMessage = authenticatedResumeIntent.intent === "payment-link"
+                ? "Login confirmed. Add job details to continue payment setup."
+                : authenticatedResumeIntent.intent === "referral-invite"
+                    ? "Login confirmed. Add job details to create referral invites."
+                    : "Login confirmed. Add job details to include approval links."
             toast(
-                authenticatedResumeIntent.intent === "payment-link"
-                    ? "Login confirmed. Add job details to continue payment setup."
-                    : "Login confirmed. Add job details to create referral invites.",
+                resumeMessage,
                 "success"
             )
             setAuthenticatedResumeIntent(null)
@@ -1011,17 +1710,42 @@ function NewEstimatePageContent() {
         if (authenticatedResumeIntent.intent === "payment-link") {
             toast("Login confirmed. Continue payment link setup.", "success")
             setIsPaymentModalOpen(true)
-        } else {
+        } else if (authenticatedResumeIntent.intent === "referral-invite") {
             toast("Login confirmed. Referral invites are ready to copy.", "success")
             window.setTimeout(() => {
                 document
                     .querySelector('[data-testid="handoff-actions-card"]')
                     ?.scrollIntoView({ behavior: "smooth", block: "center" })
             }, 0)
+        } else {
+            setCanCreateCustomerPortalLinks(true)
+            toast("Login confirmed. Approval links will be included when you send.", "success")
+            window.setTimeout(() => {
+                document
+                    .querySelector('[data-testid="result-primary-actions"]')
+                    ?.scrollIntoView({ behavior: "smooth", block: "center" })
+            }, 0)
         }
 
         setAuthenticatedResumeIntent(null)
     }, [authenticatedResumeIntent, estimate, step])
+
+    useEffect(() => {
+        let active = true
+
+        const refreshCustomerPortalAuth = async () => {
+            const headers = await withAuthHeaders()
+            if (active) {
+                setCanCreateCustomerPortalLinks(Boolean(headers.authorization))
+            }
+        }
+
+        void refreshCustomerPortalAuth()
+
+        return () => {
+            active = false
+        }
+    }, [])
 
     useEffect(() => {
         let isCancelled = false
@@ -1135,6 +1859,7 @@ function NewEstimatePageContent() {
 
         // Online - process immediately
         setStep("transcribing")
+        setQuotaIssue(null)
 
         try {
             const formData = new FormData()
@@ -1149,12 +1874,15 @@ function NewEstimatePageContent() {
             })
 
             if (response.status === 402) {
-                throw new Error("Monthly voice quota reached. Upgrade flow will be enabled soon.")
+                const issue = getQuotaIssue("transcribe")
+                setQuotaIssue(issue)
+                throw new Error(issue.toastMessage)
             }
 
             if (!response.ok) throw new Error("Transcription failed")
 
             const data = await response.json()
+            setQuotaIssue(null)
             setTranscribedText(data.text)
             setStep("verifying")
         } catch (error) {
@@ -1170,6 +1898,7 @@ function NewEstimatePageContent() {
     async function handleGenerateEstimate() {
         // Check network first
         if (!navigator.onLine) {
+            setGenerationIssue(buildGenerationIssue("network"))
             toast("No internet connection. Please connect and try again.", "warning")
             return
         }
@@ -1179,7 +1908,11 @@ function NewEstimatePageContent() {
             return
         }
 
+        setScopeAssumptionsConfirmedAt(null)
+        setQuotaIssue(null)
+        setGenerationIssue(null)
         setStep("generating")
+        let generatedQuotaIssue: QuotaIssue | null = null
         try {
             const base64Images = await Promise.all(images.map(fileToDataUrl))
 
@@ -1192,7 +1925,7 @@ function NewEstimatePageContent() {
                 headers,
                 body: JSON.stringify({
                     images: base64Images,
-                    notes: transcribedText,
+                    notes: captureNarrative,
                     sourceLanguage,
                     projectType,
                     workflow: generateWorkflow,
@@ -1216,11 +1949,14 @@ function NewEstimatePageContent() {
                 if (status === 429) {
                     throw new Error("Too many requests. Please wait a moment and try again.")
                 } else if (status === 402) {
-                    throw new Error(
-                        generateWorkflow === "photo_estimate"
-                            ? "Photo Estimate requires a Pro or Team plan."
-                            : "Monthly AI generation quota reached. Upgrade flow will be enabled soon."
-                    )
+                    if (generateWorkflow === "photo_estimate") {
+                        throw new Error("Photo Estimate requires a Pro or Team plan.")
+                    }
+
+                    const issue = getQuotaIssue("generate")
+                    generatedQuotaIssue = issue
+                    setQuotaIssue(issue)
+                    throw new Error(issue.toastMessage)
                 } else if (status === 401 || status === 403) {
                     throw new Error(
                         generateWorkflow === "photo_estimate"
@@ -1235,6 +1971,10 @@ function NewEstimatePageContent() {
             }
 
             const data = await response.json()
+            clearUnsentCaptureDraft()
+            setQuotaIssue(null)
+            setGenerationIssue(null)
+            setPdfDeliveryIssue(null)
             setEstimate(normalizeEstimatePayload(data))
             setStep("result")
         } catch (error: unknown) {
@@ -1249,8 +1989,85 @@ function NewEstimatePageContent() {
                 ? "Network error. Check your connection and try again."
                 : generationErrorMessage
 
+            if (generatedQuotaIssue) {
+                setGenerationIssue(null)
+            } else {
+                setGenerationIssue(buildGenerationIssue(errorMessage))
+            }
             toast(errorMessage, "error")
             setStep("verifying")
+        }
+    }
+
+    async function handleSaveCaptureDraft() {
+        if (!hasInputCaptureDraftContent) {
+            toast("Add field notes, photos, or client details before saving.", "warning")
+            return
+        }
+
+        setIsSaving(true)
+        try {
+            const nowIso = new Date().toISOString()
+            const draftMeta = getOrCreateDraftMeta()
+            const attachmentPhotos = await Promise.all(images.map(fileToDataUrl))
+            const summaryParts = [
+                transcribedText.trim(),
+                photoContext.trim()
+                    ? `Photo context: ${photoContext.trim()}`
+                    : "",
+                !transcribedText.trim() && images.length > 0
+                    ? `${images.length} jobsite photo${images.length === 1 ? "" : "s"} captured before AI draft.`
+                    : "",
+            ].filter(Boolean)
+            const summaryNote = summaryParts.length > 0
+                ? summaryParts.join("\n\n")
+                : "Field notes captured before AI draft."
+            const captureDraft: LocalEstimate = {
+                id: draftMeta.id,
+                estimateNumber: draftMeta.estimateNumber,
+                type: "estimate",
+                items: [],
+                summary_note: summaryNote,
+                clientName: clientName.trim(),
+                clientEmail: trimmedClientEmail || undefined,
+                clientPhone: trimmedClientPhone || undefined,
+                clientAddress: clientAddress.trim(),
+                clientNotes: trimmedClientNotes || undefined,
+                taxRate,
+                taxAmount: 0,
+                totalAmount: 0,
+                createdAt: draftMeta.createdAt || nowIso,
+                status: "draft",
+                attachments: (attachmentPhotos.length > 0 || captureNarrative)
+                    ? {
+                        photos: attachmentPhotos,
+                        originalTranscript: captureNarrative || undefined,
+                    }
+                    : undefined,
+                updatedAt: nowIso,
+                synced: false,
+            }
+
+            await saveEstimate(captureDraft)
+            setSavedCaptureDraftFingerprint(inputCaptureDraftFingerprint)
+            clearUnsentCaptureDraft()
+            void trackAnalyticsEvent({
+                event: "draft_saved",
+                estimateId: captureDraft.id,
+                estimateNumber: captureDraft.estimateNumber,
+                metadata: {
+                    captureOnly: true,
+                    hasClient: Boolean(captureDraft.clientName),
+                    hasAttachments: Boolean(captureDraft.attachments),
+                    scopeDetailScore,
+                },
+            })
+            toast("Field capture saved to Drafts.", "success")
+        } catch (error) {
+            console.error("Failed to save field capture draft:", error)
+            toast("Failed to save. Storage might be full.", "error")
+        } finally {
+            setIsSaving(false)
         }
     }
 
@@ -1454,13 +2271,134 @@ function NewEstimatePageContent() {
         () => resultSubtotal * (1 + taxRate / 100),
         [resultSubtotal, taxRate]
     )
-    const handleReviewLineItems = useCallback(() => {
+    const hasClientDetails = Boolean(clientName.trim())
+    const lineReviewMetrics = useMemo(() => {
+        const missingDescriptionCount = resultItems.filter((item) => item.description.trim().length === 0).length
+        const missingPriceCount = resultItems.filter((item) => toSafeNumber(item.unit_price, 0) <= 0 || lineTotal(item) <= 0).length
+        const missingQuantityCount = resultItems.filter((item) => toSafeNumber(item.quantity, 0) <= 0).length
+        const emptyEstimateCount = resultItems.length === 0 ? 1 : 0
+        const issueCount = missingDescriptionCount + missingPriceCount + missingQuantityCount + emptyEstimateCount
+
+        return {
+            emptyEstimateCount,
+            issueCount,
+            missingDescriptionCount,
+            missingPriceCount,
+            missingQuantityCount,
+        }
+    }, [resultItems])
+    const hasLineReviewIssues = lineReviewMetrics.issueCount > 0
+    const resultLineReadinessLabel = hasLineReviewIssues
+        ? `${lineReviewMetrics.issueCount} line ${lineReviewMetrics.issueCount === 1 ? "fix" : "fixes"}`
+        : `${resultItems.length} ${resultItems.length === 1 ? "line" : "lines"} ready`
+    const resultLineReviewButtonLabel = lineReviewMetrics.emptyEstimateCount > 0
+        ? "Add line items"
+        : hasLineReviewIssues
+            ? `Fix ${lineReviewMetrics.issueCount} line ${lineReviewMetrics.issueCount === 1 ? "issue" : "issues"}`
+            : `Review ${resultItems.length} ${resultItems.length === 1 ? "line" : "lines"}`
+    const resultLineReviewButtonShortLabel = lineReviewMetrics.emptyEstimateCount > 0
+        ? "Lines"
+        : hasLineReviewIssues
+            ? "Fix lines"
+            : "Lines"
+    const shouldShowResultScopeConfidenceCard = Boolean(estimate) && canGenerateEstimate && scopeDetailScore < 3
+    const confirmedScopeAssumptions = Boolean(scopeAssumptionsConfirmedAt)
+    const hasConfirmedScopeAssumptions = shouldShowResultScopeConfidenceCard && confirmedScopeAssumptions
+    const hasUnconfirmedResultScopeAssumptions = shouldShowResultScopeConfidenceCard && !confirmedScopeAssumptions
+    const resultScopeConfidenceLabel = hasConfirmedScopeAssumptions
+        ? "Confirmed"
+        : scopeDetailScore >= 2
+            ? "Medium confidence"
+            : "Low confidence"
+    const resultScopeConfidenceClassName = hasConfirmedScopeAssumptions
+        ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100"
+        : scopeDetailScore >= 2
+            ? "border-blue-300/25 bg-blue-500/10 text-blue-100"
+            : "border-amber-300/25 bg-amber-400/10 text-amber-100"
+    const resultScopeConfidenceCardClassName = hasConfirmedScopeAssumptions
+        ? "rounded-lg border border-emerald-300/25 bg-emerald-500/10 p-3"
+        : "rounded-lg border border-amber-300/25 bg-amber-500/10 p-3"
+    const resultScopeConfidenceIconClassName = hasConfirmedScopeAssumptions
+        ? "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-300/25 bg-emerald-300/10 text-emerald-100"
+        : "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-amber-300/25 bg-amber-300/10 text-amber-100"
+    const resultScopeAssumptionActionLabel = hasConfirmedScopeAssumptions ? "Reviewed" : "Confirm"
+    const resultScopeConfidenceHelper = hasConfirmedScopeAssumptions
+        ? "Scope assumptions reviewed for customer delivery."
+        : scopeDetailScore >= 2
+            ? "AI had a usable scope, but one field detail is still worth confirming before sending."
+            : "AI had limited field detail. Treat line items and pricing as assumptions until reviewed."
+    const handleConfirmScopeAssumptions = useCallback(() => {
+        dismissToasts()
+        setScopeAssumptionsConfirmedAt(new Date().toISOString())
+        toast("Scope assumptions confirmed for customer delivery.", "success")
+    }, [])
+    const requestScopeAssumptionsConfirmation = useCallback((message: string) => {
+        if (!hasUnconfirmedResultScopeAssumptions) return false
+
+        dismissToasts()
+        toast(message, "warning")
+        scrollElementIntoBottomSafeView(
+            document.querySelector('[data-testid="result-scope-confidence-card"]'),
+            { block: "center" },
+        )
+        return true
+    }, [hasUnconfirmedResultScopeAssumptions])
+    const handleOpenEmailModal = useCallback(() => {
+        if (requestScopeAssumptionsConfirmation("Confirm scope assumptions before emailing this estimate.")) return
+
+        setIsEmailModalOpen(true)
+    }, [requestScopeAssumptionsConfirmation])
+    const handleOpenSmsModal = useCallback(() => {
+        if (requestScopeAssumptionsConfirmation("Confirm scope assumptions before texting this estimate.")) return
+
+        setIsSmsModalOpen(true)
+    }, [requestScopeAssumptionsConfirmation])
+    const handleReviewSourceNotes = useCallback(() => {
+        dismissToasts()
+        setScopeAssumptionsConfirmedAt(null)
+        setStep("input")
+        window.requestAnimationFrame(() => {
+            notesTextareaRef.current?.focus()
+        })
+    }, [])
+    const sendReadinessIssues = useMemo(() => {
+        const issues: string[] = []
+
+        if (!hasClientDetails) {
+            issues.push("customer")
+        }
+
+        if (!hasDeliveryContact) {
+            issues.push("delivery contact")
+        } else if (hasInvalidDeliveryContactValue) {
+            issues.push("valid contact")
+        }
+
+        if (hasLineReviewIssues) {
+            issues.push("line item review")
+        }
+
+        return issues
+    }, [hasClientDetails, hasDeliveryContact, hasInvalidDeliveryContactValue, hasLineReviewIssues])
+    const sendReadinessStatusLabel = sendReadinessIssues.length === 0
+        ? "Ready to send"
+        : `${sendReadinessIssues.length} ${sendReadinessIssues.length === 1 ? "fix" : "fixes"} before send`
+    const sendReadinessHelper = sendReadinessIssues.length === 0
+        ? "Customer, delivery contact, and line items are ready for the customer copy."
+        : `Next: ${sendReadinessIssues[0]}.`
+    const sendReadinessStatusClassName = sendReadinessIssues.length === 0
+        ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100"
+        : "border-amber-300/25 bg-amber-400/10 text-amber-100"
+    const handleReviewLineItems = useCallback((options: { focusGate?: boolean } = {}) => {
         dismissToasts()
         const lineEditingBlock = document.querySelector('[data-testid="line-items-editing-block"]')
         const flatLineItems = document.querySelector('[data-testid="flat-line-items-list"]')
         const firstLineItem = document.querySelector('[data-testid="line-item-row-0"]')
         const reviewSummary = document.querySelector('[data-testid="line-items-review-summary"]')
-        scrollElementIntoBottomSafeView(lineEditingBlock ?? flatLineItems ?? firstLineItem ?? reviewSummary, { block: "center" })
+        const target = options.focusGate
+            ? reviewSummary ?? lineEditingBlock ?? flatLineItems ?? firstLineItem
+            : lineEditingBlock ?? flatLineItems ?? firstLineItem ?? reviewSummary
+        scrollElementIntoBottomSafeView(target, { block: "center" })
     }, [])
     const handleClientDetailsQuickAction = useCallback(() => {
         dismissToasts()
@@ -1481,6 +2419,19 @@ function NewEstimatePageContent() {
         }, 0)
     }, [])
     const hasAttachedPaymentLink = includePaymentLink && Boolean(paymentLink)
+    const attachedPaymentLink = hasAttachedPaymentLink ? paymentLink : null
+    const effectiveCustomerPaymentLink = useMemo(
+        () => getEffectiveCustomerPaymentLink(attachedPaymentLink, businessProfile),
+        [attachedPaymentLink, businessProfile],
+    )
+    const hasApprovalPaymentFallback = Boolean(effectiveCustomerPaymentLink) && !hasAttachedPaymentLink
+    const customerApprovalLinkStatus: ApprovalLinkStatus = isPreparingAuthRedirect === "approval-link"
+        ? "saving"
+        : isOffline
+            ? "offline"
+            : canCreateCustomerPortalLinks
+                ? "included"
+                : "signin"
     const composerShellClassName = cn(
         "mx-auto space-y-5 px-4 pb-28 pt-4",
         step === "input" ? "max-w-4xl" : step === "result" ? "max-w-2xl" : "max-w-md",
@@ -1530,7 +2481,17 @@ function NewEstimatePageContent() {
                 : isGeneratingPaymentLink
                     ? "Creating link"
                     : "Add payment"
-    const hasClientDetails = Boolean(clientName.trim())
+    const paymentQuickActionShortLabel = isPreparingAuthRedirect === "payment-link"
+        ? "Saving"
+        : hasAttachedPaymentLink
+            ? "Attached"
+            : paymentLinkIssue
+                ? "Fix"
+                : isOffline
+                    ? "Offline"
+                    : isGeneratingPaymentLink
+                        ? "Creating"
+                        : "Payment"
     const shouldShowResultClientDetailsEditor = hasClientDetails || isResultClientDetailsOpen
     const resultClientStatusClassName = hasClientDetails
         ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-200"
@@ -1539,14 +2500,27 @@ function NewEstimatePageContent() {
         ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-200"
         : "border-amber-300/25 bg-amber-400/10 text-amber-200"
     const resultEmailActionLabel = trimmedClientEmail && !hasEmailDeliveryContact ? "Fix email" : "Add email"
+    const resultEmailActionShortLabel = trimmedClientEmail && !hasEmailDeliveryContact ? "Fix" : "Email"
     const resultPaymentStatusClassName = hasAttachedPaymentLink
         ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-200"
         : paymentLinkIssue || isOffline
             ? "border-amber-300/25 bg-amber-400/10 text-amber-200"
             : "border-white/10 bg-slate-950/60 text-slate-400"
-    const handoffHelper = hasAttachedPaymentLink
-        ? "PDF includes payment and final line items."
-        : "PDF is ready; payment and referral are optional."
+    const hasHandoffScopeAssumptions = hasUnconfirmedResultScopeAssumptions
+    const handoffHelper = pdfDeliveryIssue
+        ? pdfDeliveryIssue.message
+        : hasHandoffScopeAssumptions
+        ? "Confirm scope assumptions before sharing."
+        : hasAttachedPaymentLink
+            ? "PDF includes payment and final line items."
+            : "PDF is ready; payment and referral are optional."
+    const handoffStatusLabel = pdfDeliveryIssue
+        ? "Retry PDF"
+        : hasHandoffScopeAssumptions ? "Scope check" : "PDF ready"
+    const handoffStatusClassName = pdfDeliveryIssue || hasHandoffScopeAssumptions
+        ? "border-amber-300/25 bg-amber-400/10 text-amber-100"
+        : "border-emerald-300/25 bg-emerald-400/10 text-emerald-200"
+    const sharePdfHelper = hasHandoffScopeAssumptions ? "Review assumptions first" : "Customer-ready estimate"
     const handoffPaymentStatusLabel = hasAttachedPaymentLink
         ? (paymentLinkType === "deposit" ? "50%" : paymentLinkType === "custom" ? "Custom" : "Full")
         : paymentLinkIssue
@@ -1563,6 +2537,11 @@ function NewEstimatePageContent() {
         estimateNumber: draftMetaRef.current?.estimateNumber,
         clientName,
     })
+    const revisionRequestedLabel = formatRevisionRequestDate(revisionContext?.requestedAt)
+    const revisionOriginalLabel = revisionContext?.originalEstimateNumber
+        ? `Original #${revisionContext.originalEstimateNumber}`
+        : "Customer revision"
+    const revisionCustomerLabel = revisionContext?.customerName || clientName || "Customer"
 
     const createEstimatePdfDocument = useCallback(async (
         options: { includePhotos?: boolean; includeSignature?: boolean } = {}
@@ -1606,7 +2585,18 @@ function NewEstimatePageContent() {
 
     const buildLocalEstimatePayload = useCallback(async (
         status: 'draft' | 'sent',
-        overrides: { clientSignature?: string; signedAt?: string } = {}
+        overrides: {
+            clientSignature?: string
+            signedAt?: string
+            customerPortalUrl?: string
+            customerPortalStatus?: "shared" | "viewed" | "approved" | "change_requested"
+            customerViewedAt?: string
+            customerApprovedAt?: string
+            customerChangeRequestedAt?: string
+            customerPortalName?: string
+            customerPortalEmail?: string
+            customerPortalNote?: string
+        } = {}
     ) => {
         if (!estimate) {
             throw new Error("Estimate data is unavailable.")
@@ -1618,10 +2608,14 @@ function NewEstimatePageContent() {
         const totalAmount = subtotal + taxAmount
         const draftMeta = getOrCreateDraftMeta()
         const attachmentPhotos = images.length > 0 ? await Promise.all(images.map(fileToDataUrl)) : []
+        const scopeAssumptionsConfirmedAtForPayload = hasConfirmedScopeAssumptions
+            ? scopeAssumptionsConfirmedAt || new Date().toISOString()
+            : undefined
 
         const attachments = {
             photos: attachmentPhotos,
-            originalTranscript: transcribedText || undefined,
+            originalTranscript: captureNarrative || undefined,
+            scopeAssumptionsConfirmedAt: scopeAssumptionsConfirmedAtForPayload,
         }
 
         return {
@@ -1643,19 +2637,31 @@ function NewEstimatePageContent() {
             updatedAt: new Date().toISOString(),
             sentAt: status === "sent" ? (teamEstimateContext?.sentAt || new Date().toISOString()) : undefined,
             status,
+            paymentCompletedAt: teamEstimateContext?.paymentCompletedAt,
             paymentLink: includePaymentLink && paymentLink ? paymentLink : undefined,
             paymentLinkId: includePaymentLink && paymentLinkId ? paymentLinkId : undefined,
             paymentLinkType: includePaymentLink && paymentLinkType ? paymentLinkType : undefined,
+            customerPortalUrl: overrides.customerPortalUrl,
+            customerPortalStatus: overrides.customerPortalStatus,
+            customerViewedAt: overrides.customerViewedAt,
+            customerApprovedAt: overrides.customerApprovedAt,
+            customerChangeRequestedAt: overrides.customerChangeRequestedAt,
+            customerPortalName: overrides.customerPortalName,
+            customerPortalEmail: overrides.customerPortalEmail,
+            customerPortalNote: overrides.customerPortalNote,
+            revisionOfEstimateId: revisionContext?.originalEstimateId,
+            revisionOfEstimateNumber: revisionContext?.originalEstimateNumber,
+            revisionRequestedAt: revisionContext?.requestedAt,
             clientSignature: overrides.clientSignature ?? estimate.clientSignature,
             signedAt: overrides.signedAt ?? estimate.signedAt,
-            attachments: (attachmentPhotos.length > 0 || transcribedText) ? attachments : undefined,
+            attachments: (attachmentPhotos.length > 0 || captureNarrative || scopeAssumptionsConfirmedAtForPayload) ? attachments : undefined,
             synced: false,
         }
     }, [
         estimate,
         taxRate,
         images,
-        transcribedText,
+        captureNarrative,
         clientName,
         clientAddress,
         trimmedClientEmail,
@@ -1668,6 +2674,29 @@ function NewEstimatePageContent() {
         paymentLinkType,
         teamEstimateContext?.createdAt,
         teamEstimateContext?.sentAt,
+        teamEstimateContext?.paymentCompletedAt,
+        revisionContext,
+        hasConfirmedScopeAssumptions,
+        scopeAssumptionsConfirmedAt,
+    ])
+
+    const prepareCustomerPortalLinkForDelivery = useCallback(async (pendingSentEstimate: LocalEstimate) => {
+        const portalOptions = {
+            resetCustomerDecision: true,
+            paymentLinkOverride: effectiveCustomerPaymentLink,
+            paymentLinkTypeOverride: attachedPaymentLink?.trim() ? (paymentLinkType || "custom") : "custom",
+        } as const
+
+        if (canCreateCustomerPortalLinks) {
+            return createCustomerPortalLinkForEstimate(pendingSentEstimate, portalOptions)
+        }
+
+        return maybeCreateCustomerPortalLinkForEstimate(pendingSentEstimate, portalOptions)
+    }, [
+        attachedPaymentLink,
+        canCreateCustomerPortalLinks,
+        effectiveCustomerPaymentLink,
+        paymentLinkType,
     ])
 
     const buildLoginNextPathWithDraft = useCallback(async () => {
@@ -1678,7 +2707,7 @@ function NewEstimatePageContent() {
         return `/new-estimate?draftId=${encodeURIComponent(localEstimate.id)}`
     }, [buildLocalEstimatePayload, estimate])
 
-    const redirectToLoginForEstimateIntent = useCallback(async (intent: "payment-link" | "referral-invite") => {
+    const redirectToLoginForEstimateIntent = useCallback(async (intent: EstimateResumeIntent) => {
         setIsPreparingAuthRedirect(intent)
         let nextPath = "/new-estimate"
 
@@ -1694,6 +2723,24 @@ function NewEstimatePageContent() {
         })
         router.push(`/login?${params.toString()}`)
     }, [buildLoginNextPathWithDraft, router])
+
+    const handleApprovalLinkSetup = useCallback(async () => {
+        if (!navigator.onLine) {
+            toast("Customer approval links require internet connection.", "warning")
+            return
+        }
+
+        const headers = await withAuthHeaders()
+        if (headers.authorization) {
+            setCanCreateCustomerPortalLinks(true)
+            toast("Approval links will be included when you send.", "success")
+            return
+        }
+
+        setIsEmailModalOpen(false)
+        setIsSmsModalOpen(false)
+        await redirectToLoginForEstimateIntent("approval-link")
+    }, [redirectToLoginForEstimateIntent])
 
     const openPaymentLinkSetup = useCallback(async () => {
         if (!navigator.onLine) {
@@ -1793,12 +2840,13 @@ function NewEstimatePageContent() {
             createdAt: result.estimate.createdAt,
             updatedAt: result.estimate.updatedAt,
             sentAt: result.estimate.sentAt,
+            paymentCompletedAt: result.estimate.paymentCompletedAt || localEstimate.paymentCompletedAt,
             synced: true,
         }
     }, [teamEstimateContext])
 
     const persistCurrentEstimateAsSent = useCallback(async (
-        overrides: { clientSignature?: string; signedAt?: string } = {}
+        overrides: Parameters<typeof buildLocalEstimatePayload>[1] = {}
     ) => {
         if (isTeamEstimateMode && !canEditTeamEstimate) {
             throw new Error("Claim the Team editing session before sending.")
@@ -1810,20 +2858,36 @@ function NewEstimatePageContent() {
 
         if (!existing) {
             await saveEstimate(persistedEstimate)
+            if (revisionContext?.originalEstimateId && revisionContext.originalEstimateId !== persistedEstimate.id) {
+                await updateEstimate(revisionContext.originalEstimateId, {
+                    supersededByEstimateId: persistedEstimate.id,
+                    supersededAt: new Date().toISOString(),
+                    synced: false,
+                })
+            }
             return persistedEstimate
         }
 
         const sentAt = existing.sentAt || persistedEstimate.sentAt || new Date().toISOString()
-        await updateEstimate(existing.id, {
+        const nextPersistedEstimate = {
             ...persistedEstimate,
             createdAt: existing.createdAt,
             sentAt,
             status: "sent",
             synced: isTeamEstimateMode ? true : false,
-        })
+        } as const
+        await updateEstimate(existing.id, nextPersistedEstimate)
 
-        return { ...existing, ...persistedEstimate, createdAt: existing.createdAt, sentAt, status: "sent" as const }
-    }, [buildLocalEstimatePayload, canEditTeamEstimate, isTeamEstimateMode, persistTeamEstimateToCloud])
+        if (revisionContext?.originalEstimateId && revisionContext.originalEstimateId !== existing.id) {
+            await updateEstimate(revisionContext.originalEstimateId, {
+                supersededByEstimateId: existing.id,
+                supersededAt: new Date().toISOString(),
+                synced: false,
+            })
+        }
+
+        return { ...existing, ...nextPersistedEstimate }
+    }, [buildLocalEstimatePayload, canEditTeamEstimate, isTeamEstimateMode, persistTeamEstimateToCloud, revisionContext])
 
     const handleSave = async () => {
         if (!estimate) return
@@ -1864,8 +2928,10 @@ function NewEstimatePageContent() {
             toast("Claim the Team editing session before sharing.", "warning")
             return
         }
+        if (requestScopeAssumptionsConfirmation("Confirm scope assumptions before sharing this PDF.")) return
 
         setIsSharing(true)
+        setPdfDeliveryIssue(null)
         let deliveredPdf = false
         try {
             const allItems = getAllItemsFromEstimate(estimate)
@@ -1880,14 +2946,26 @@ function NewEstimatePageContent() {
             const pdfDoc = await createEstimatePdfDocument({ includePhotos: true, includeSignature: true })
             const blob = await pdf(pdfDoc).toBlob()
             const file = new File([blob], fileName, { type: "application/pdf" })
+            const pendingSentEstimate = await buildLocalEstimatePayload("sent")
+            const portalResult = await maybeCreateCustomerPortalLinkForEstimate(pendingSentEstimate, {
+                resetCustomerDecision: true,
+                paymentLinkOverride: effectiveCustomerPaymentLink,
+                paymentLinkTypeOverride: attachedPaymentLink?.trim() ? (paymentLinkType || "custom") : "custom",
+            })
+            const portalUpdates = portalResult ? getCustomerPortalEstimateUpdates(portalResult) : {}
+            const shareText = appendCustomerPortalLink(
+                `Estimate Total: $${total.toFixed(2)}`,
+                portalResult?.shareUrl,
+                "email",
+            )
             if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
                 await navigator.share({
                     title: `Estimate ${draftMeta.estimateNumber}`,
-                    text: `Estimate Total: $${total.toFixed(2)}`,
+                    text: shareText,
                     files: [file],
                 })
                 deliveredPdf = true
-                await persistCurrentEstimateAsSent()
+                await persistCurrentEstimateAsSent(portalUpdates)
                 void trackAnalyticsEvent({
                     event: "quote_sent",
                     estimateId: draftMeta.id,
@@ -1896,14 +2974,35 @@ function NewEstimatePageContent() {
                     metadata: {
                         fileName,
                         nativeShare: true,
-                        hasPaymentLink: includePaymentLink && Boolean(paymentLink),
+                        hasPaymentLink: Boolean(effectiveCustomerPaymentLink),
+                        hasCustomerPortalLink: Boolean(portalResult?.shareUrl),
                     },
                 })
-                toast("PDF shared. Estimate marked sent.", "success")
+                if (portalResult) {
+                    void trackAnalyticsEvent({
+                        event: "customer_portal_link_created",
+                        estimateId: draftMeta.id,
+                        estimateNumber: draftMeta.estimateNumber,
+                        channel: "share_pdf",
+                        metadata: {
+                            portalStatus: portalUpdates.customerPortalStatus,
+                        },
+                    })
+                }
+                toast(
+                    portalResult
+                        ? "PDF shared with approval link. Estimate marked sent."
+                        : "PDF shared. Estimate marked sent.",
+                    "success"
+                )
+                setPdfDeliveryIssue(null)
             } else {
                 downloadBlobAsFile(blob, fileName)
                 deliveredPdf = true
-                await persistCurrentEstimateAsSent()
+                if (portalResult?.shareUrl && navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(portalResult.shareUrl).catch(() => undefined)
+                }
+                await persistCurrentEstimateAsSent(portalUpdates)
                 void trackAnalyticsEvent({
                     event: "quote_sent",
                     estimateId: draftMeta.id,
@@ -1912,10 +3011,28 @@ function NewEstimatePageContent() {
                     metadata: {
                         fileName,
                         nativeShare: false,
-                        hasPaymentLink: includePaymentLink && Boolean(paymentLink),
+                        hasPaymentLink: Boolean(effectiveCustomerPaymentLink),
+                        hasCustomerPortalLink: Boolean(portalResult?.shareUrl),
                     },
                 })
-                toast("PDF downloaded for sharing. Estimate marked sent.", "success")
+                if (portalResult) {
+                    void trackAnalyticsEvent({
+                        event: "customer_portal_link_created",
+                        estimateId: draftMeta.id,
+                        estimateNumber: draftMeta.estimateNumber,
+                        channel: "share_pdf_download",
+                        metadata: {
+                            portalStatus: portalUpdates.customerPortalStatus,
+                        },
+                    })
+                }
+                toast(
+                    portalResult
+                        ? "PDF downloaded. Approval link copied and estimate marked sent."
+                        : "PDF downloaded for sharing. Estimate marked sent.",
+                    "success"
+                )
+                setPdfDeliveryIssue(null)
             }
         } catch (error) {
             if (isShareCanceledError(error)) {
@@ -1923,6 +3040,7 @@ function NewEstimatePageContent() {
                 return
             }
             console.error("Share failed:", error)
+            setPdfDeliveryIssue(buildPdfDeliveryIssue(deliveredPdf ? "sent_status" : "share"))
             toast(
                 deliveredPdf
                     ? "PDF was prepared, but saving sent status failed."
@@ -1936,7 +3054,9 @@ function NewEstimatePageContent() {
 
     const handleDownloadPdf = async () => {
         if (!estimate) return
+        if (requestScopeAssumptionsConfirmation("Confirm scope assumptions before creating the customer PDF.")) return
         setIsDownloadingPdf(true)
+        setPdfDeliveryIssue(null)
         try {
             const draftMeta = getOrCreateDraftMeta()
             const fileName = buildEstimatePdfFileName({
@@ -1948,9 +3068,11 @@ function NewEstimatePageContent() {
 
             const blob = await pdf(pdfDoc).toBlob()
             downloadBlobAsFile(blob, fileName)
+            setPdfDeliveryIssue(null)
             toast(`PDF downloaded as ${fileName}.`, "success")
         } catch (error) {
             console.error("Download PDF failed:", error)
+            setPdfDeliveryIssue(buildPdfDeliveryIssue("download"))
             toast("Failed to create PDF.", "error")
         } finally {
             setIsDownloadingPdf(false)
@@ -1988,6 +3110,7 @@ function NewEstimatePageContent() {
     }
 
     const handleSendEstimateEmail = useCallback(async (email: string, message: string) => {
+        setQuotaIssue(null)
         try {
             const { pdf } = await import("@react-pdf/renderer")
             const pdfDoc = await createEstimatePdfDocument({ includeSignature: true })
@@ -2004,6 +3127,9 @@ function NewEstimatePageContent() {
                 reader.readAsDataURL(blob)
             })
             const referralUrl = await getReferralShareUrl({ source: "estimate_email" })
+            const pendingSentEstimate = await buildLocalEstimatePayload("sent")
+            const portalResult = await prepareCustomerPortalLinkForDelivery(pendingSentEstimate)
+            const messageWithApprovalLink = appendCustomerPortalLink(message, portalResult?.shareUrl, "email")
             const headers = await withAuthHeaders({ "Content-Type": "application/json" })
 
             const response = await fetch("/api/send-email", {
@@ -2012,7 +3138,7 @@ function NewEstimatePageContent() {
                 body: JSON.stringify({
                     email,
                     subject: `Estimate from ${businessProfile?.business_name || "SnapQuote"}`,
-                    message,
+                    message: messageWithApprovalLink,
                     pdfBase64,
                     businessName: businessProfile?.business_name,
                     referralUrl: referralUrl || undefined,
@@ -2022,7 +3148,9 @@ function NewEstimatePageContent() {
             if (!response.ok) {
                 const errorData = await response.json().catch((): { error?: unknown } => ({}))
                 if (response.status === 402) {
-                    throw new Error("Monthly email quota reached. Upgrade flow will be enabled soon.")
+                    const issue = getQuotaIssue("send_email")
+                    setQuotaIssue(issue)
+                    throw new Error(issue.toastMessage)
                 }
                 throw new Error(typeof errorData.error === "string" ? errorData.error : "Failed to send email")
             }
@@ -2034,6 +3162,7 @@ function NewEstimatePageContent() {
                 toast("Email client opened. Please attach the PDF.", "warning")
             } else {
                 const draftMeta = getOrCreateDraftMeta()
+                const portalUpdates = portalResult ? getCustomerPortalEstimateUpdates(portalResult) : {}
                 void trackAnalyticsEvent({
                     event: "quote_sent",
                     estimateId: draftMeta.id,
@@ -2041,10 +3170,23 @@ function NewEstimatePageContent() {
                     channel: "email",
                     metadata: {
                         recipient: email,
-                        hasPaymentLink: includePaymentLink && Boolean(paymentLink),
+                        hasPaymentLink: Boolean(effectiveCustomerPaymentLink),
+                        hasCustomerPortalLink: Boolean(portalResult?.shareUrl),
                     },
                 })
-                await persistCurrentEstimateAsSent()
+                if (portalResult) {
+                    void trackAnalyticsEvent({
+                        event: "customer_portal_link_created",
+                        estimateId: draftMeta.id,
+                        estimateNumber: draftMeta.estimateNumber,
+                        channel: "estimate_email",
+                        metadata: {
+                            portalStatus: portalUpdates.customerPortalStatus,
+                        },
+                    })
+                }
+                await persistCurrentEstimateAsSent(portalUpdates)
+                setQuotaIssue(null)
                 toast("Email sent with PDF attached.", "success")
             }
         } catch (error: unknown) {
@@ -2052,12 +3194,13 @@ function NewEstimatePageContent() {
             throw new Error(message)
         }
     }, [
-        businessProfile?.business_name,
+        businessProfile,
+        buildLocalEstimatePayload,
         createEstimatePdfDocument,
+        effectiveCustomerPaymentLink,
         getOrCreateDraftMeta,
-        includePaymentLink,
-        paymentLink,
         persistCurrentEstimateAsSent,
+        prepareCustomerPortalLinkForDelivery,
     ])
 
     const handleExcelImport = useCallback((importedItems: EstimateItem[]) => {
@@ -2102,6 +3245,117 @@ function NewEstimatePageContent() {
                     limit={billingUsageSnapshot.limits.generate}
                     periodStart={billingUsageSnapshot.periodStart}
                 />
+            ) : null}
+
+            {quotaIssue ? (
+                <section
+                    className="rounded-lg border border-amber-300/25 bg-amber-400/10 p-4 text-amber-50"
+                    data-testid="quota-upgrade-prompt"
+                >
+                    <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-amber-300/30 bg-amber-300/10">
+                            <AlertTriangle className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <p className="font-semibold" data-testid="quota-upgrade-title">{quotaIssue.title}</p>
+                            <p className="mt-1 text-sm leading-6 text-amber-50/80" data-testid="quota-upgrade-message">
+                                {quotaIssue.message}
+                            </p>
+                            <div className="mt-3 grid gap-2 sm:flex sm:flex-wrap">
+                                <Button asChild size="sm" className="h-10 rounded-lg" data-testid="quota-upgrade-pricing-link">
+                                    <NextLink href={`/pricing?source=${quotaIssue.metric}_quota`}>
+                                        Open Pricing
+                                    </NextLink>
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-10 rounded-lg border-amber-200/25 bg-slate-950/50 text-amber-50 hover:bg-slate-900 hover:text-white"
+                                    onClick={() => setQuotaIssue(null)}
+                                    data-testid="quota-upgrade-dismiss"
+                                >
+                                    Keep editing
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            ) : null}
+
+            {generationIssue ? (
+                <section
+                    className="rounded-lg border border-blue-300/25 bg-blue-500/10 p-4 text-blue-50"
+                    data-testid="generation-recovery-prompt"
+                    role="alert"
+                >
+                    <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-blue-300/30 bg-blue-300/10">
+                            <AlertTriangle className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <p className="font-semibold" data-testid="generation-recovery-title">{generationIssue.title}</p>
+                            <p className="mt-1 text-sm leading-6 text-blue-50/80" data-testid="generation-recovery-message">
+                                {generationIssue.message}
+                            </p>
+                            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                {generationIssue.actionHref && generationIssue.actionLabel ? (
+                                    <Button asChild size="sm" className="h-11 rounded-lg" data-testid="generation-recovery-primary-link">
+                                        <NextLink href={generationIssue.actionHref}>
+                                            <Sparkles className="mr-2 h-4 w-4" />
+                                            {generationIssue.actionLabel}
+                                        </NextLink>
+                                    </Button>
+                                ) : null}
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    className="h-11 rounded-lg"
+                                    onClick={() => void handleGenerateEstimate()}
+                                    disabled={!canGenerateEstimate}
+                                    data-testid="generation-recovery-retry-action"
+                                >
+                                    <Sparkles className="mr-2 h-4 w-4" />
+                                    Try again
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-11 rounded-lg border-blue-200/25 bg-slate-950/50 text-blue-50 hover:bg-slate-900 hover:text-white"
+                                    onClick={() => void handleSaveCaptureDraft()}
+                                    disabled={!hasInputCaptureDraftContent || isSaving}
+                                    data-testid="generation-recovery-save-action"
+                                >
+                                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                                    Save capture
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-11 rounded-lg border-blue-200/25 bg-slate-950/50 text-blue-50 hover:bg-slate-900 hover:text-white"
+                                    onClick={openManualEntry}
+                                    data-testid="generation-recovery-manual-action"
+                                >
+                                    <FileText className="mr-2 h-4 w-4" />
+                                    Manual line entry
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-11 rounded-lg text-blue-50 hover:bg-blue-400/10 hover:text-white"
+                                    onClick={() => setGenerationIssue(null)}
+                                    data-testid="generation-recovery-dismiss-action"
+                                >
+                                    <X className="mr-2 h-4 w-4" />
+                                    Keep editing
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             ) : null}
 
             <TeamEstimateStatusCard
@@ -2237,7 +3491,7 @@ function NewEstimatePageContent() {
                                         {canGenerateEstimate ? (
                                             <div className="min-w-0">
                                                 <p className="text-xs font-semibold text-blue-100">Scope ready</p>
-                                                <p className="truncate text-[11px] text-slate-400">Generate a draft from this capture.</p>
+                                                <p className="truncate text-[11px] text-slate-400" data-testid="quick-generate-scope-helper">{scopeDetailQuickHelper}</p>
                                             </div>
                                         ) : (
                                             <div className="min-w-0">
@@ -2267,6 +3521,40 @@ function NewEstimatePageContent() {
                                                 Generate
                                             </Button>
                                         )}
+                                    </div>
+                                ) : null}
+                                {scopeGuidancePrompts.length > 0 ? (
+                                    <div className="rounded-lg border border-amber-300/20 bg-amber-500/10 p-3" data-testid="scope-guidance-card">
+                                        <div className="flex items-start gap-2">
+                                            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-amber-100" />
+                                            <div className="min-w-0">
+                                                <p className="text-xs font-semibold text-amber-50">Sharpen AI draft</p>
+                                                <p className="mt-1 text-[11px] leading-4 text-slate-300" data-testid="scope-guidance-summary">
+                                                    Add the missing detail now while you are still looking at the job.
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="mt-2 grid gap-2">
+                                            {scopeGuidancePrompts.map((prompt) => (
+                                                <button
+                                                    key={prompt.id}
+                                                    type="button"
+                                                    className="min-h-11 rounded-lg border border-white/10 bg-slate-950/55 px-3 py-2 text-left transition hover:border-amber-200/30 hover:bg-amber-400/10"
+                                                    onClick={() => handleAddScopeGuidancePrompt(prompt)}
+                                                    data-testid={`scope-guidance-prompt-${prompt.id}`}
+                                                >
+                                                    <span className="flex items-center justify-between gap-3">
+                                                        <span className="min-w-0">
+                                                            <span className="block text-xs font-semibold text-white">{prompt.title}</span>
+                                                            <span className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-slate-400">{prompt.helper}</span>
+                                                        </span>
+                                                        <span className="shrink-0 rounded-md bg-amber-300/10 px-2 py-1 text-[10px] font-semibold text-amber-100">
+                                                            {prompt.label}
+                                                        </span>
+                                                    </span>
+                                                </button>
+                                            ))}
+                                        </div>
                                     </div>
                                 ) : null}
                             </div>
@@ -2349,7 +3637,7 @@ function NewEstimatePageContent() {
                                                 setClientName(event.target.value)
                                                 setClientEmail("")
                                                 setClientPhone("")
-                                                setClientNotes("")
+                                                if (!revisionContext) setClientNotes("")
                                                 setIsClientContactEditorOpen(false)
                                                 setIsResultContactEditorOpen(false)
                                                 setIsResultClientDetailsOpen(false)
@@ -2492,6 +3780,18 @@ function NewEstimatePageContent() {
                                 </div>
                                 <div className="flex min-h-9 items-center justify-between gap-3 rounded-lg border border-white/10 bg-slate-950/55 px-2.5">
                                     <span className="inline-flex min-w-0 items-center gap-2 text-slate-400">
+                                        <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-blue-200" />
+                                        Details
+                                    </span>
+                                    <span className={cn("truncate", scopeDetailStatusClassName)} data-testid="input-scope-detail-status">
+                                        {scopeDetailStatusLabel}
+                                    </span>
+                                </div>
+                                <p className="rounded-lg border border-blue-300/15 bg-slate-950/45 px-2.5 py-2 text-xs leading-5 text-slate-300" data-testid="input-scope-next-detail">
+                                    {scopeDetailMessage}
+                                </p>
+                                <div className="flex min-h-9 items-center justify-between gap-3 rounded-lg border border-white/10 bg-slate-950/55 px-2.5">
+                                    <span className="inline-flex min-w-0 items-center gap-2 text-slate-400">
                                         <Users className="h-3.5 w-3.5 shrink-0 text-blue-200" />
                                         Client
                                     </span>
@@ -2546,6 +3846,7 @@ function NewEstimatePageContent() {
                                     onChange={(event) => setPhotoContext(event.target.value)}
                                     className="min-h-[88px] rounded-lg border-white/10 bg-slate-950/75 text-white placeholder:text-slate-500"
                                     placeholder="Room, finish level, access issues, customer expectations..."
+                                    data-testid="photo-context-input"
                                 />
                             </div>
 	                        ) : null}
@@ -2583,6 +3884,21 @@ function NewEstimatePageContent() {
 	                            </div>
 	                        ) : null}
 
+	                        <Button
+	                            type="button"
+	                            variant="outline"
+	                            className="mt-3 h-11 w-full justify-between rounded-lg border-white/10 bg-slate-950/55 px-3 text-sm font-semibold text-slate-200 hover:border-blue-300/25 hover:bg-blue-500/10 hover:text-white"
+	                            onClick={handleSaveCaptureDraft}
+	                            disabled={!hasInputCaptureDraftContent || isSaving}
+	                            data-testid="input-save-capture-draft-button"
+	                        >
+	                            <span className="inline-flex min-w-0 items-center gap-2">
+	                                {isSaving ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Save className="h-4 w-4 shrink-0" />}
+	                                <span className="truncate">{isSaving ? "Saving capture" : "Save capture"}</span>
+	                            </span>
+	                            <ArrowRight className="h-4 w-4 shrink-0 text-blue-200" />
+	                        </Button>
+
 	                    </section>
                 </div>
             )}
@@ -2604,12 +3920,59 @@ function NewEstimatePageContent() {
                             </span>
                         </div>
                         <Textarea
+                            ref={notesTextareaRef}
                             value={transcribedText}
                             onChange={(e) => setTranscribedText(e.target.value)}
                             className="min-h-[150px] text-lg p-4 leading-relaxed"
                             placeholder="Describe the job here..."
                             data-testid="job-description-input"
                         />
+                    </div>
+
+                    <div className="rounded-lg border border-blue-300/20 bg-blue-500/10 p-3" data-testid="verify-scope-readiness-card">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-100/80">Scope quality</p>
+                                <p className="mt-1 text-sm font-semibold leading-5 text-white">
+                                    {scopeDetailScore >= 3 ? "Ready to draft." : "Add one more detail before generating."}
+                                </p>
+                            </div>
+                            <span
+                                className={cn(
+                                    "shrink-0 rounded-lg border border-white/10 bg-slate-950/55 px-2 py-1 text-[11px] font-semibold",
+                                    scopeDetailStatusClassName
+                                )}
+                                data-testid="verify-scope-detail-status"
+                            >
+                                {scopeDetailStatusLabel}
+                            </span>
+                        </div>
+                        <p className="mt-3 rounded-lg border border-blue-300/15 bg-slate-950/45 px-2.5 py-2 text-xs leading-5 text-slate-300" data-testid="verify-scope-next-detail">
+                            {scopeDetailMessage}
+                        </p>
+                        {scopeGuidancePrompts.length > 0 ? (
+                            <div className="mt-3 grid gap-2" data-testid="verify-scope-guidance-card">
+                                {scopeGuidancePrompts.map((prompt) => (
+                                    <button
+                                        key={prompt.id}
+                                        type="button"
+                                        className="min-h-11 rounded-lg border border-white/10 bg-slate-950/55 px-3 py-2 text-left transition hover:border-blue-300/25 hover:bg-blue-500/10"
+                                        onClick={() => handleAddScopeGuidancePrompt(prompt)}
+                                        data-testid={`verify-scope-guidance-prompt-${prompt.id}`}
+                                    >
+                                        <span className="flex items-center justify-between gap-3">
+                                            <span className="min-w-0">
+                                                <span className="block text-xs font-semibold text-white">{prompt.title}</span>
+                                                <span className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-slate-400">{prompt.helper}</span>
+                                            </span>
+                                            <span className="shrink-0 rounded-md bg-blue-300/10 px-2 py-1 text-[10px] font-semibold text-blue-100">
+                                                {prompt.label}
+                                            </span>
+                                        </span>
+                                    </button>
+                                ))}
+                            </div>
+                        ) : null}
                     </div>
 
                     {previewUrls.length > 0 && (
@@ -2640,6 +4003,7 @@ function NewEstimatePageContent() {
                                     onChange={(e) => setPhotoContext(e.target.value)}
                                     className="min-h-[88px] border-white/10 bg-slate-950/70 text-white placeholder:text-slate-500"
                                     placeholder="Add room, finish level, trade, or customer expectations before generating"
+                                    data-testid="photo-context-input"
                                 />
                             </div>
                         </div>
@@ -2682,6 +4046,43 @@ function NewEstimatePageContent() {
                             onStartBlank={handleExitDemoTutorial}
                         />
                     ) : null}
+                    {revisionContext ? (
+                        <section
+                            className="field-card border-amber-300/25 bg-amber-500/10 p-3 sm:p-4"
+                            data-testid="customer-revision-context"
+                        >
+                            <div className="flex gap-3">
+                                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-amber-300/25 bg-amber-300/10 text-amber-100">
+                                    <MessageSquare className="h-4.5 w-4.5" />
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                        <div className="min-w-0">
+                                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-100/75">
+                                                Revision request
+                                            </p>
+                                            <p className="mt-1 truncate text-sm font-semibold text-white" data-testid="customer-revision-customer">
+                                                {revisionCustomerLabel}
+                                            </p>
+                                        </div>
+                                        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                                            <span className="rounded-md border border-amber-300/20 bg-slate-950/40 px-2 py-1 text-[10px] font-semibold text-amber-100">
+                                                {revisionOriginalLabel}
+                                            </span>
+                                            {revisionRequestedLabel ? (
+                                                <span className="rounded-md border border-amber-300/20 bg-slate-950/40 px-2 py-1 text-[10px] font-semibold text-amber-100">
+                                                    {revisionRequestedLabel}
+                                                </span>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                    <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-300" data-testid="customer-revision-note">
+                                        {revisionContext.note || "Customer asked for changes. Review the copied scope before sending this version."}
+                                    </p>
+                                </div>
+                            </div>
+                        </section>
+                    ) : null}
                     <section className="field-panel overflow-hidden" data-testid="estimate-result-panel">
                         <div className="border-b border-white/10 px-4 py-4">
                             <div className="flex items-start justify-between gap-3">
@@ -2723,22 +4124,54 @@ function NewEstimatePageContent() {
                                         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Finalize</p>
                                         <p className="mt-1 text-sm font-semibold leading-5 text-white">
                                             {hasClientDetails
-                                                ? "Review the essentials, then send the customer copy."
+                                                ? sendReadinessIssues.length === 0
+                                                    ? "Review the essentials, then send the customer copy."
+                                                    : "Clear the remaining send checks before delivery."
                                                 : "Add customer details, then send the quote."}
                                         </p>
+                                        <div
+                                            className={cn(
+                                                "mt-2 inline-flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-semibold",
+                                                sendReadinessStatusClassName
+                                            )}
+                                            data-testid="result-send-readiness-status"
+                                        >
+                                            {sendReadinessIssues.length === 0 ? (
+                                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                                            ) : (
+                                                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                            )}
+                                            <span className="min-w-0 truncate">{sendReadinessStatusLabel}</span>
+                                        </div>
+                                        <p className="mt-1 hidden truncate text-xs text-slate-400 sm:block" data-testid="result-send-readiness-helper">
+                                            {sendReadinessHelper}
+                                        </p>
                                     </div>
-                                    <div className="flex flex-wrap gap-1 text-[10px] font-semibold" data-testid="result-readiness-strip">
+                                    <div className="sr-only flex-wrap gap-1 text-[10px] font-semibold sm:not-sr-only sm:flex" data-testid="result-readiness-strip">
                                         <span className={cn("rounded-md border px-1.5 py-0.5", resultClientStatusClassName)}>
                                             {hasClientDetails ? "Client ready" : "Client needed"}
                                         </span>
-                                        <span className="rounded-md border border-blue-300/25 bg-blue-500/10 px-1.5 py-0.5 text-blue-200">
-                                            {resultItems.length} {resultItems.length === 1 ? "line" : "lines"}
+                                        <span className={cn(
+                                            "rounded-md border px-1.5 py-0.5",
+                                            hasLineReviewIssues
+                                                ? "border-amber-300/25 bg-amber-400/10 text-amber-200"
+                                                : "border-blue-300/25 bg-blue-500/10 text-blue-200"
+                                        )}>
+                                            {resultLineReadinessLabel}
                                         </span>
                                         <span className={cn("rounded-md border px-1.5 py-0.5", resultDeliveryStatusClassName)}>
                                             {hasDeliveryContact ? "Contact ready" : "Contact needed"}
                                         </span>
                                         <span className={cn("rounded-md border px-1.5 py-0.5", resultPaymentStatusClassName)}>
                                             {hasAttachedPaymentLink ? "Payment ready" : "Payment optional"}
+                                        </span>
+                                        <span className={cn(
+                                            "rounded-md border px-1.5 py-0.5",
+                                            scopeDetailScore >= 3
+                                                ? "border-emerald-300/25 bg-emerald-400/10 text-emerald-100"
+                                                : "border-amber-300/25 bg-amber-400/10 text-amber-100"
+                                        )}>
+                                            {scopeDetailScore >= 3 ? "Scope checked" : "Scope check"}
                                         </span>
                                     </div>
                                 </div>
@@ -2749,11 +4182,12 @@ function NewEstimatePageContent() {
                                         variant="outline"
                                         size="sm"
                                         className="h-11 justify-center rounded-lg border-blue-300/30 bg-blue-500/10 px-2 text-xs font-semibold text-blue-100 hover:bg-blue-500/20 hover:text-white sm:justify-start sm:px-3"
-                                        onClick={handleReviewLineItems}
+                                        onClick={() => handleReviewLineItems()}
                                         data-testid="result-review-lines-button"
                                     >
                                         <FileText className="mr-2 h-4 w-4" />
-                                        Review {resultItems.length} {resultItems.length === 1 ? "line" : "lines"}
+                                        <span className="min-w-0 truncate sm:hidden">{resultLineReviewButtonShortLabel}</span>
+                                        <span className="hidden min-w-0 truncate sm:inline">{resultLineReviewButtonLabel}</span>
                                     </Button>
                                     <Button
                                         type="button"
@@ -2769,24 +4203,39 @@ function NewEstimatePageContent() {
                                         ) : (
                                             <CreditCard className="mr-2 h-4 w-4" />
                                         )}
-                                        {paymentQuickActionLabel}
+                                        <span className="min-w-0 truncate sm:hidden">{paymentQuickActionShortLabel}</span>
+                                        <span className="hidden min-w-0 truncate sm:inline">{paymentQuickActionLabel}</span>
                                     </Button>
                                 </div>
                                 <div className="grid grid-cols-2 gap-2" data-testid="result-primary-actions">
                                     {hasClientDetails && hasEmailDeliveryContact ? (
                                         <>
-                                            <Button
-                                                size="sm"
-                                                className="h-10 min-w-0 justify-center overflow-hidden rounded-lg px-2 text-sm font-semibold sm:h-11 sm:justify-start"
-                                                onClick={() => setIsEmailModalOpen(true)}
-                                                disabled={isTeamEstimateMode && !canEditTeamEstimate}
-                                                aria-label="Send to Customer"
-                                                data-testid="result-quick-send-button"
-                                            >
-                                                <Mail className="mr-2 h-4 w-4 shrink-0" />
-                                                <span className="min-w-0 truncate sm:hidden">Email quote</span>
-                                                <span className="hidden min-w-0 truncate sm:inline">Send to Customer</span>
-                                            </Button>
+                                            {hasLineReviewIssues ? (
+                                                <Button
+                                                    size="sm"
+                                                    className="h-10 min-w-0 justify-center overflow-hidden rounded-lg px-2 text-sm font-semibold sm:h-11 sm:justify-start"
+                                                    onClick={() => handleReviewLineItems({ focusGate: true })}
+                                                    disabled={isTeamEstimateMode && !canEditTeamEstimate}
+                                                    aria-label="Fix line items before sending"
+                                                    data-testid="result-fix-lines-before-send-button"
+                                                >
+                                                    <FileText className="mr-2 h-4 w-4 shrink-0" />
+                                                    <span className="min-w-0 truncate">Fix lines</span>
+                                                </Button>
+                                            ) : (
+                                                <Button
+                                                    size="sm"
+                                                    className="h-10 min-w-0 justify-center overflow-hidden rounded-lg px-2 text-sm font-semibold sm:h-11 sm:justify-start"
+                                                    onClick={handleOpenEmailModal}
+                                                    disabled={isTeamEstimateMode && !canEditTeamEstimate}
+                                                    aria-label="Send to Customer"
+                                                    data-testid="result-quick-send-button"
+                                                >
+                                                    <Mail className="mr-2 h-4 w-4 shrink-0" />
+                                                    <span className="min-w-0 truncate sm:hidden">Email</span>
+                                                    <span className="hidden min-w-0 truncate sm:inline">Send to Customer</span>
+                                                </Button>
+                                            )}
                                             <Button
                                                 variant="outline"
                                                 size="sm"
@@ -2804,7 +4253,7 @@ function NewEstimatePageContent() {
                                                 ) : (
                                                     <>
                                                         <Save className="mr-2 h-4 w-4 shrink-0" />
-                                                        <span className="min-w-0 truncate sm:hidden" data-testid="result-quick-save-label">Save quote</span>
+                                                        <span className="min-w-0 truncate sm:hidden" data-testid="result-quick-save-label">Save</span>
                                                         <span className="hidden min-w-0 truncate sm:inline">Save Estimate</span>
                                                     </>
                                                 )}
@@ -2820,7 +4269,8 @@ function NewEstimatePageContent() {
                                                 data-testid="result-add-contact-button"
                                             >
                                                 <Mail className="mr-2 h-4 w-4 shrink-0" />
-                                                <span className="min-w-0 truncate">{resultEmailActionLabel}</span>
+                                                <span className="min-w-0 truncate sm:hidden">{resultEmailActionShortLabel}</span>
+                                                <span className="hidden min-w-0 truncate sm:inline">{resultEmailActionLabel}</span>
                                             </Button>
                                             <Button
                                                 variant="outline"
@@ -2839,7 +4289,7 @@ function NewEstimatePageContent() {
                                                 ) : (
                                                     <>
                                                         <Save className="mr-2 h-4 w-4 shrink-0" />
-                                                        <span className="min-w-0 truncate sm:hidden" data-testid="result-quick-save-label">Save quote</span>
+                                                        <span className="min-w-0 truncate sm:hidden" data-testid="result-quick-save-label">Save</span>
                                                         <span className="hidden min-w-0 truncate sm:inline">Save Estimate</span>
                                                     </>
                                                 )}
@@ -2863,7 +4313,7 @@ function NewEstimatePageContent() {
                                                 ) : (
                                                     <>
                                                         <Save className="mr-2 h-4 w-4" />
-                                                        <span className="min-w-0 truncate sm:hidden" data-testid="result-quick-save-label">Save quote</span>
+                                                        <span className="min-w-0 truncate sm:hidden" data-testid="result-quick-save-label">Save</span>
                                                         <span className="hidden min-w-0 truncate sm:inline">Save Estimate</span>
                                                     </>
                                                 )}
@@ -2887,14 +4337,15 @@ function NewEstimatePageContent() {
                                         variant="outline"
                                         size="sm"
                                         className="h-11 min-w-0 justify-start overflow-hidden rounded-lg border-white/10 bg-slate-950/70 px-3 text-sm text-white hover:bg-slate-900"
-                                        onClick={() => setIsSmsModalOpen(true)}
+                                        onClick={handleOpenSmsModal}
                                         disabled={isTeamEstimateMode && !canEditTeamEstimate}
                                         aria-label="Send via SMS"
                                         title="Send via SMS"
                                         data-testid="result-quick-sms-button"
                                     >
                                         <MessageSquare className="mr-2 h-4 w-4 shrink-0" />
-                                        <span className="min-w-0 truncate" data-testid="result-quick-sms-label">Text quote</span>
+                                        <span className="min-w-0 truncate sm:hidden" data-testid="result-quick-sms-label">Text</span>
+                                        <span className="hidden min-w-0 truncate sm:inline">Text quote</span>
                                     </Button>
                                     <Button
                                         variant="outline"
@@ -2906,7 +4357,8 @@ function NewEstimatePageContent() {
                                         data-testid="result-quick-preview-button"
                                     >
                                         <Eye className="mr-2 h-4 w-4 shrink-0" />
-                                        <span className="min-w-0 truncate" data-testid="result-quick-preview-label">Preview</span>
+                                        <span className="min-w-0 truncate sm:hidden" data-testid="result-quick-preview-label">View</span>
+                                        <span className="hidden min-w-0 truncate sm:inline">Preview</span>
                                     </Button>
                                     <Button
                                         variant="outline"
@@ -2921,12 +4373,13 @@ function NewEstimatePageContent() {
                                         {isDownloadingPdf ? (
                                             <>
                                                 <Loader2 className="mr-2 h-4 w-4 shrink-0 animate-spin" />
-                                                <span className="min-w-0 truncate" data-testid="result-quick-pdf-label">Creating</span>
+                                                <span className="min-w-0 truncate" data-testid="result-quick-pdf-label">PDF</span>
                                             </>
                                         ) : (
                                             <>
                                                 <Download className="mr-2 h-4 w-4 shrink-0" />
-                                                <span className="min-w-0 truncate" data-testid="result-quick-pdf-label">Download</span>
+                                                <span className="min-w-0 truncate sm:hidden" data-testid="result-quick-pdf-label">PDF</span>
+                                                <span className="hidden min-w-0 truncate sm:inline">Download</span>
                                             </>
                                         )}
                                     </Button>
@@ -2951,6 +4404,96 @@ function NewEstimatePageContent() {
                                     </Button>
                                 </div>
                             </div>
+
+                            {shouldShowResultScopeConfidenceCard ? (
+                                <div
+                                    className={resultScopeConfidenceCardClassName}
+                                    data-testid="result-scope-confidence-card"
+                                >
+                                    <div className="flex items-start gap-3">
+                                        <span className={resultScopeConfidenceIconClassName}>
+                                            {hasConfirmedScopeAssumptions ? (
+                                                <CheckCircle2 className="h-4 w-4" />
+                                            ) : (
+                                                <AlertTriangle className="h-4 w-4" />
+                                            )}
+                                        </span>
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex flex-wrap items-start justify-between gap-2">
+                                                <div className="min-w-0">
+                                                    <p className={cn(
+                                                        "text-xs font-semibold uppercase tracking-[0.16em]",
+                                                        hasConfirmedScopeAssumptions ? "text-emerald-100/75" : "text-amber-100/75"
+                                                    )}>
+                                                        Estimate assumptions
+                                                    </p>
+                                                    <p className="mt-1 text-sm font-semibold text-white">
+                                                        Verify before sending
+                                                    </p>
+                                                </div>
+                                                <span
+                                                    className={cn(
+                                                        "shrink-0 rounded-lg border px-2 py-1 text-[11px] font-semibold",
+                                                        resultScopeConfidenceClassName
+                                                    )}
+                                                    data-testid="result-scope-confidence-status"
+                                                >
+                                                    {resultScopeConfidenceLabel}
+                                                </span>
+                                            </div>
+                                            <p className="mt-2 text-xs leading-5 text-slate-300" data-testid="result-scope-confidence-helper">
+                                                {resultScopeConfidenceHelper}
+                                            </p>
+                                            <div className="mt-2 grid gap-1.5" data-testid="result-scope-assumption-list">
+                                                {scopeGuidancePrompts.map((prompt) => (
+                                                    <div
+                                                        key={prompt.id}
+                                                        className="flex min-h-8 items-center justify-between gap-3 rounded-lg border border-white/10 bg-slate-950/45 px-2.5 py-1.5 text-xs"
+                                                    >
+                                                        <span className="min-w-0 truncate text-slate-300">{prompt.title}</span>
+                                                        <span className={cn(
+                                                            "shrink-0 font-semibold",
+                                                            hasConfirmedScopeAssumptions ? "text-emerald-100" : "text-amber-100"
+                                                        )}>
+                                                            {resultScopeAssumptionActionLabel}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <div className="mt-3 grid gap-2 sm:flex sm:flex-wrap">
+                                                <Button
+                                                    type="button"
+                                                    variant={hasConfirmedScopeAssumptions ? "default" : "outline"}
+                                                    size="sm"
+                                                    className={cn(
+                                                        "h-10 w-full rounded-lg sm:w-auto",
+                                                        hasConfirmedScopeAssumptions
+                                                            ? "border-emerald-300/25 bg-emerald-500/20 text-emerald-50 hover:bg-emerald-500/25"
+                                                            : "border-amber-300/25 bg-amber-400/10 text-amber-100 hover:bg-amber-400/15 hover:text-white"
+                                                    )}
+                                                    onClick={handleConfirmScopeAssumptions}
+                                                    disabled={hasConfirmedScopeAssumptions}
+                                                    data-testid="result-confirm-scope-assumptions-button"
+                                                >
+                                                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                                                    {hasConfirmedScopeAssumptions ? "Scope reviewed" : "Confirm scope"}
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-10 w-full rounded-lg border-white/10 bg-slate-950/55 text-slate-100 hover:bg-slate-900 hover:text-white sm:w-auto"
+                                                    onClick={handleReviewSourceNotes}
+                                                    data-testid="result-edit-source-notes-button"
+                                                >
+                                                    <ClipboardList className="mr-2 h-4 w-4" />
+                                                    Edit source notes
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
 
                             {estimate.photoAnalysis ? (
                                 <PhotoEstimateAnalysisCard analysis={estimate.photoAnalysis} />
@@ -3041,7 +4584,7 @@ function NewEstimatePageContent() {
                                                     setClientName(e.target.value)
                                                     setClientEmail("")
                                                     setClientPhone("")
-                                                    setClientNotes("")
+                                                    if (!revisionContext) setClientNotes("")
                                                     setIsClientContactEditorOpen(false)
                                                     setIsResultContactEditorOpen(false)
                                                     setIsResultClientDetailsOpen(true)
@@ -3348,10 +4891,12 @@ function NewEstimatePageContent() {
                                         </div>
                                     </div>
                                     <span
-                                        className="shrink-0 rounded-lg border border-emerald-300/25 bg-emerald-400/10 px-2 py-1 text-[11px] font-semibold text-emerald-200"
+                                        className={cn("shrink-0 rounded-lg border px-2 py-1 text-[11px] font-semibold", handoffStatusClassName)}
                                         data-testid="handoff-actions-status"
                                     >
-                                        PDF ready
+                                        {hasHandoffScopeAssumptions ? (
+                                            <span data-testid="handoff-scope-assumptions-status">{handoffStatusLabel}</span>
+                                        ) : handoffStatusLabel}
                                     </span>
                                 </div>
                                 <div className="grid grid-cols-3 gap-1.5 text-xs font-semibold" data-testid="handoff-actions-summary">
@@ -3374,6 +4919,70 @@ function NewEstimatePageContent() {
                                         </p>
                                     </div>
                                 </div>
+                                {pdfDeliveryIssue ? (
+                                    <div
+                                        className="rounded-lg border border-amber-300/25 bg-amber-400/10 p-3 text-amber-50"
+                                        data-testid="pdf-delivery-issue"
+                                        role="alert"
+                                    >
+                                        <div className="flex items-start gap-2">
+                                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-100" />
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-semibold" data-testid="pdf-delivery-issue-title">{pdfDeliveryIssue.title}</p>
+                                                <p className="mt-1 text-xs leading-5 text-amber-50/80" data-testid="pdf-delivery-issue-message">
+                                                    {pdfDeliveryIssue.message}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                className="h-11 rounded-lg"
+                                                onClick={() => void handleShare()}
+                                                disabled={isSharing}
+                                                data-testid="pdf-delivery-retry-share-action"
+                                            >
+                                                {isSharing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                                                Retry share
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-11 rounded-lg border-amber-200/25 bg-slate-950/50 text-amber-50 hover:bg-slate-900 hover:text-white"
+                                                onClick={() => void handleDownloadPdf()}
+                                                disabled={isDownloadingPdf}
+                                                data-testid="pdf-delivery-download-action"
+                                            >
+                                                {isDownloadingPdf ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                                                Download PDF
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-11 rounded-lg border-amber-200/25 bg-slate-950/50 text-amber-50 hover:bg-slate-900 hover:text-white"
+                                                onClick={handleOpenPreview}
+                                                data-testid="pdf-delivery-preview-action"
+                                            >
+                                                <Eye className="mr-2 h-4 w-4" />
+                                                Preview PDF
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-11 rounded-lg text-amber-50 hover:bg-amber-400/10 hover:text-white"
+                                                onClick={() => setPdfDeliveryIssue(null)}
+                                                data-testid="pdf-delivery-dismiss-action"
+                                            >
+                                                <X className="mr-2 h-4 w-4" />
+                                                Keep editing
+                                            </Button>
+                                        </div>
+                                    </div>
+                                ) : null}
                                 {!subscription ? (
                                     <div
                                         className="flex min-h-10 items-center gap-2 rounded-lg border border-amber-300/20 bg-amber-400/10 px-2.5 py-1.5 sm:justify-between sm:py-2"
@@ -3427,7 +5036,7 @@ function NewEstimatePageContent() {
                                                 <span className="min-w-0">
                                                     <span className="block truncate text-sm font-semibold">Share PDF</span>
                                                     <span className="sr-only truncate text-xs font-normal text-blue-100/70 sm:not-sr-only sm:block">
-                                                        Customer-ready estimate
+                                                        {sharePdfHelper}
                                                     </span>
                                                 </span>
                                             </>
@@ -3498,6 +5107,9 @@ function NewEstimatePageContent() {
                     estimateTotal={resultTotal}
                     clientEmail={clientEmail}
                     paymentLink={includePaymentLink ? paymentLink : null}
+                    approvalPaymentAvailable={hasApprovalPaymentFallback}
+                    approvalLinkStatus={customerApprovalLinkStatus}
+                    onPrepareApprovalLink={handleApprovalLinkSetup}
                     onSend={handleSendEstimateEmail}
                 />
             )}
@@ -3511,14 +5123,21 @@ function NewEstimatePageContent() {
                     clientPhone={clientPhone}
                     paymentLink={includePaymentLink ? paymentLink : null}
                     businessName={businessProfile?.business_name}
+                    approvalPaymentAvailable={hasApprovalPaymentFallback}
+                    approvalLinkStatus={customerApprovalLinkStatus}
+                    onPrepareApprovalLink={handleApprovalLinkSetup}
                     onSend={async (toPhoneNumber, message) => {
                         try {
                             const draftMeta = getOrCreateDraftMeta()
+                            const pendingSentEstimate = await buildLocalEstimatePayload("sent")
+                            const portalResult = await prepareCustomerPortalLinkForDelivery(pendingSentEstimate)
+                            const messageWithApprovalLink = appendCustomerPortalLink(message, portalResult?.shareUrl, "sms")
                             const data = await sendEstimateSms({
                                 toPhoneNumber,
-                                message,
+                                message: messageWithApprovalLink,
                                 estimateId: draftMeta.id,
                             })
+                            const portalUpdates = portalResult ? getCustomerPortalEstimateUpdates(portalResult) : {}
                             void trackAnalyticsEvent({
                                 event: "quote_sent",
                                 estimateId: draftMeta.id,
@@ -3526,9 +5145,22 @@ function NewEstimatePageContent() {
                                 channel: "sms",
                                 metadata: {
                                     creditsRemaining: data.creditsRemaining,
+                                    hasPaymentLink: Boolean(effectiveCustomerPaymentLink),
+                                    hasCustomerPortalLink: Boolean(portalResult?.shareUrl),
                                 },
                             })
-                            await persistCurrentEstimateAsSent()
+                            if (portalResult) {
+                                void trackAnalyticsEvent({
+                                    event: "customer_portal_link_created",
+                                    estimateId: draftMeta.id,
+                                    estimateNumber: draftMeta.estimateNumber,
+                                    channel: "estimate_sms",
+                                    metadata: {
+                                        portalStatus: portalUpdates.customerPortalStatus,
+                                    },
+                                })
+                            }
+                            await persistCurrentEstimateAsSent(portalUpdates)
                             toast('SMS sent.', 'success')
                         } catch (error: unknown) {
                             const message = getErrorMessage(error, 'Failed to send. Try again.')
@@ -3550,6 +5182,7 @@ function NewEstimatePageContent() {
                 <ReceiptScanner
                     isOpen={isReceiptScannerOpen}
                     onClose={() => setIsReceiptScannerOpen(false)}
+                    onManualEntry={openManualEntry}
                     onSuccess={handleReceiptParsed}
                 />
             )}

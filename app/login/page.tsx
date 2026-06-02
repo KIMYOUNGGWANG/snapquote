@@ -56,6 +56,9 @@ function describeReturnTarget(nextPath: string, intent: string): string {
     if (normalizeIntent(intent) === "referral-invite") {
         return "After sign-in, you'll return to New Estimate with referral invites unlocked."
     }
+    if (normalizeIntent(intent) === "approval-link") {
+        return "After sign-in, you'll return to New Estimate with customer approval links ready."
+    }
 
     return `After sign-in, you'll return to ${describeNormalizedPath(nextPath)}.`
 }
@@ -129,12 +132,15 @@ function LoginPageContent() {
                 message: error.message,
             })
         } else {
+            const successMessage = intent === "payment-link"
+                ? "Check your email. After login, you'll return to payment link setup."
+                : intent === "approval-link"
+                    ? "Check your email. After login, customer approval links will be ready."
+                    : "Check your email for the login link."
             setNotice({
                 kind: "success",
                 title: "Magic link sent",
-                message: intent === "payment-link"
-                    ? "Check your email. After login, you'll return to payment link setup."
-                    : "Check your email for the login link.",
+                message: successMessage,
             })
         }
         setLoading(false)
@@ -231,6 +237,11 @@ function LoginPageContent() {
                     {intent === "referral-invite" && (
                         <p className="mb-3 rounded-lg border border-blue-400/20 bg-blue-500/10 px-3 py-2 text-sm text-blue-100" data-testid="login-referral-invite-copy">
                             Sign in to create and copy referral invites from your estimate workflow.
+                        </p>
+                    )}
+                    {intent === "approval-link" && (
+                        <p className="mb-3 rounded-lg border border-blue-400/20 bg-blue-500/10 px-3 py-2 text-sm text-blue-100" data-testid="login-approval-link-copy">
+                            Sign in to add customer approval links to email and SMS sends.
                         </p>
                     )}
                     <div className="mb-5 flex gap-3 rounded-lg border border-white/10 bg-slate-950/60 p-3">

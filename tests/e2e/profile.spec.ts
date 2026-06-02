@@ -39,6 +39,13 @@ async function mockProfileNetwork(
         logoUrl?: string
         estimateTemplateUrl?: string
         planTier?: "starter" | "pro" | "team"
+        stripeConnectStatus?: {
+            connected: boolean
+            accountId?: string
+            detailsSubmitted?: boolean
+            chargesEnabled?: boolean
+            payoutsEnabled?: boolean
+        }
     } = {}
 ) {
     await page.route("**/auth/v1/token**", async (route) => {
@@ -119,7 +126,7 @@ async function mockProfileNetwork(
         await route.fulfill({
             status: 200,
             contentType: "application/json",
-            body: JSON.stringify({ connected: false }),
+            body: JSON.stringify(options.stripeConnectStatus ?? { connected: false }),
         })
     })
 
@@ -318,6 +325,89 @@ test("profile desktop prioritizes business details in a two-column workbench", a
     expect(businessBox!.y).toBeLessThan(pdfBox!.y)
     expect(businessBox!.y).toBeLessThan(navBox!.y - 120)
     expect(stripeBox!.y).toBeLessThan(navBox!.y - 120)
+})
+
+test("profile keeps Stripe onboarding failures visible with retry and refresh", async ({ page, context }) => {
+    await seedAuthenticatedSupabaseSession(context)
+    await mockProfileNetwork(page)
+
+    let onboardAttempts = 0
+    await page.route("**/api/stripe/connect/onboard", async (route) => {
+        onboardAttempts += 1
+        await route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "Stripe onboarding temporarily unavailable." }),
+        })
+    })
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/profile#stripe-connect")
+
+    const stripeConnect = page.getByTestId("stripe-connect-card")
+    await expect(stripeConnect).toBeVisible()
+    await page.getByTestId("profile-stripe-connect-action").click()
+
+    const stripeIssue = page.getByTestId("profile-stripe-connect-issue")
+    await expect(stripeIssue).toBeVisible()
+    await expect(stripeIssue).toContainText("Stripe setup could not start")
+    await expect(stripeIssue).toContainText("Stripe onboarding temporarily unavailable.")
+    await expect(page.getByTestId("profile-stripe-connect-retry-action")).toContainText("Retry Stripe")
+    await expect(page.getByTestId("profile-stripe-connect-refresh-action")).toContainText("Refresh status")
+    expect(onboardAttempts).toBe(1)
+
+    await page.getByTestId("profile-stripe-connect-retry-action").click()
+    await expect(stripeIssue).toBeVisible()
+    await expect.poll(() => onboardAttempts).toBe(2)
+
+    await page.getByTestId("profile-stripe-connect-refresh-action").click()
+    await expect(stripeIssue).toHaveCount(0)
+})
+
+test("profile keeps Stripe dashboard failures visible with retry and refresh", async ({ page, context }) => {
+    await seedAuthenticatedSupabaseSession(context)
+    await mockProfileNetwork(page, {
+        stripeConnectStatus: {
+            connected: true,
+            accountId: "acct_profile_dashboard_failure",
+            detailsSubmitted: true,
+            chargesEnabled: true,
+            payoutsEnabled: true,
+        },
+    })
+
+    let dashboardAttempts = 0
+    await page.route("**/api/stripe/connect/dashboard-link", async (route) => {
+        dashboardAttempts += 1
+        await route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "Stripe dashboard links are temporarily unavailable." }),
+        })
+    })
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/profile#stripe-connect")
+
+    const stripeConnect = page.getByTestId("stripe-connect-card")
+    await expect(stripeConnect).toBeVisible()
+    await expect(stripeConnect).toContainText("Connected and ready to accept card payments.")
+    await page.getByTestId("profile-stripe-dashboard-action").click()
+
+    const stripeIssue = page.getByTestId("profile-stripe-connect-issue")
+    await expect(stripeIssue).toBeVisible()
+    await expect(stripeIssue).toContainText("Stripe dashboard could not open")
+    await expect(stripeIssue).toContainText("Stripe dashboard links are temporarily unavailable.")
+    await expect(page.getByTestId("profile-stripe-dashboard-retry-action")).toContainText("Retry dashboard")
+    await expect(page.getByTestId("profile-stripe-connect-refresh-action")).toContainText("Refresh status")
+    expect(dashboardAttempts).toBe(1)
+
+    await page.getByTestId("profile-stripe-dashboard-retry-action").click()
+    await expect(stripeIssue).toBeVisible()
+    await expect.poll(() => dashboardAttempts).toBe(2)
+
+    await page.getByTestId("profile-stripe-connect-refresh-action").click()
+    await expect(stripeIssue).toHaveCount(0)
 })
 
 test("profile price list and payment controls are reachable on mobile", async ({ page, context }) => {

@@ -7,6 +7,34 @@ import { Loader2, Gauge, Sparkles } from "lucide-react"
 import { getBillingUsageSnapshot, type BillingUsageSnapshot } from "@/lib/billing-usage"
 import { FREE_PLAN_MARKETING_QUOTE_LIMIT } from "@/lib/free-tier"
 
+type UsageMetric = "generate" | "transcribe" | "send_email"
+
+const USAGE_ALERT_CONTEXT: Record<UsageMetric, {
+    label: string
+    source: string
+    message: string
+    actionLabel: string
+}> = {
+    generate: {
+        label: "AI draft quota",
+        source: "generate_quota",
+        message: `Upgrade before you hit the ${FREE_PLAN_MARKETING_QUOTE_LIMIT}-quote monthly cap.`,
+        actionLabel: "See quote plans",
+    },
+    transcribe: {
+        label: "Voice capture minutes",
+        source: "transcribe_quota",
+        message: "Upgrade before on-site recordings stop processing this month.",
+        actionLabel: "See voice plans",
+    },
+    send_email: {
+        label: "Email send quota",
+        source: "send_email_quota",
+        message: "Upgrade before PDF delivery and quote follow-ups stop sending from SnapQuote.",
+        actionLabel: "See email plans",
+    },
+}
+
 function ProgressBar({ value }: { value: number }) {
     const clamped = Math.min(100, Math.max(0, value))
     const color = clamped >= 100 ? "bg-red-500" : clamped >= 80 ? "bg-amber-500" : "bg-emerald-500"
@@ -16,6 +44,19 @@ function ProgressBar({ value }: { value: number }) {
             <div className={`h-full transition-all ${color}`} style={{ width: `${clamped}%` }} />
         </div>
     )
+}
+
+function getHighestUsageMetric(snapshot: BillingUsageSnapshot): UsageMetric {
+    const metrics: UsageMetric[] = ["generate", "transcribe", "send_email"]
+
+    return metrics.reduce((current, metric) => (
+        snapshot.usageRatePct[metric] > snapshot.usageRatePct[current] ? metric : current
+    ), "generate")
+}
+
+function getUsagePricingHref(snapshot: BillingUsageSnapshot): string {
+    const metric = getHighestUsageMetric(snapshot)
+    return `/pricing?source=${USAGE_ALERT_CONTEXT[metric].source}`
 }
 
 export function UsagePlanCard() {
@@ -43,6 +84,15 @@ export function UsagePlanCard() {
     }, [loadSnapshot])
 
     if (!isAuthed) return null
+
+    const alertMetric = snapshot ? getHighestUsageMetric(snapshot) : null
+    const alertContext = alertMetric ? USAGE_ALERT_CONTEXT[alertMetric] : null
+    const hasUsageWarning = Boolean(
+        snapshot?.planTier === "free" &&
+        alertMetric &&
+        snapshot.usageRatePct[alertMetric] >= 80
+    )
+    const upgradeHref = snapshot && hasUsageWarning ? getUsagePricingHref(snapshot) : "/pricing"
 
     return (
         <div className="field-card">
@@ -80,7 +130,8 @@ export function UsagePlanCard() {
                                     size="sm"
                                     variant="outline"
                                     className="rounded-lg border-white/10 bg-slate-950/70 px-3 text-xs text-white hover:bg-slate-900"
-                                    onClick={() => router.push("/pricing")}
+                                    onClick={() => router.push(upgradeHref)}
+                                    data-testid="usage-plan-upgrade-action"
                                 >
                                     Upgrade
                                 </Button>
@@ -118,21 +169,21 @@ export function UsagePlanCard() {
                             <p className="font-semibold text-white">Total: ${snapshot.estimatedCosts.total.toFixed(4)}</p>
                         </div>
 
-                        {snapshot.planTier === "free" &&
-                            (snapshot.usageRatePct.generate >= 80 ||
-                                snapshot.usageRatePct.transcribe >= 80 ||
-                                snapshot.usageRatePct.send_email >= 80) && (
+                        {snapshot.planTier === "free" && hasUsageWarning && alertContext && (
                                 <div className="flex items-start gap-2 rounded-lg border border-amber-400/20 bg-amber-500/10 p-3 text-xs text-amber-100">
                                     <Sparkles className="mt-0.5 h-3.5 w-3.5" />
                                     <div className="flex-1">
-                                        <p>Free quota is almost used. Upgrade before you hit the {FREE_PLAN_MARKETING_QUOTE_LIMIT}-quote monthly cap.</p>
+                                        <p data-testid="usage-plan-warning-message">
+                                            {alertContext.label} is almost used. {alertContext.message}
+                                        </p>
                                         <Button
                                             type="button"
                                             size="sm"
                                             className="mt-2 rounded-lg bg-amber-500 text-xs text-slate-950 hover:bg-amber-400"
-                                            onClick={() => router.push("/pricing")}
+                                            onClick={() => router.push(`/pricing?source=${alertContext.source}`)}
+                                            data-testid="usage-plan-warning-action"
                                         >
-                                            See Pro options
+                                            {alertContext.actionLabel}
                                         </Button>
                                     </div>
                                 </div>

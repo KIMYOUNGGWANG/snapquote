@@ -5,6 +5,10 @@ import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 type AnalyticsEventName =
     | "draft_saved"
     | "quote_sent"
+    | "customer_portal_link_created"
+    | "quote_viewed"
+    | "quote_approved"
+    | "quote_change_requested"
     | "payment_link_created"
     | "payment_completed"
     | "referral_link_copied"
@@ -14,6 +18,10 @@ type AnalyticsEventName =
 const ALLOWED_EVENTS: Set<AnalyticsEventName> = new Set([
     "draft_saved",
     "quote_sent",
+    "customer_portal_link_created",
+    "quote_viewed",
+    "quote_approved",
+    "quote_change_requested",
     "payment_link_created",
     "payment_completed",
     "referral_link_copied",

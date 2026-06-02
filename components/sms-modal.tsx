@@ -7,8 +7,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { AlertTriangle, CheckCircle2, CreditCard, Loader2, MessageSquare, X, Info } from "lucide-react"
+import { AlertTriangle, CheckCircle2, CreditCard, Link as LinkIcon, Loader2, LogIn, MessageSquare, X, Info } from "lucide-react"
 import { buildDeliveryIssue, type DeliveryIssue } from "@/lib/delivery-issues"
+
+type ApprovalLinkStatus = "included" | "signin" | "offline" | "saving"
+type CustomerPortalSmsStatus = "shared" | "viewed" | "approved" | "change_requested"
 
 interface SmsModalProps {
     open: boolean
@@ -18,6 +21,11 @@ interface SmsModalProps {
     estimateTotal?: number
     paymentLink?: string | null
     businessName?: string
+    approvalPaymentAvailable?: boolean
+    approvalLinkStatus?: ApprovalLinkStatus
+    approvalLink?: string
+    customerPortalStatus?: CustomerPortalSmsStatus
+    onPrepareApprovalLink?: () => void | Promise<void>
 }
 
 function formatE164Hint(raw: string): string {
@@ -34,10 +42,30 @@ function getDefaultSmsMessage(input: {
     estimateTotal?: number
     paymentLink?: string | null
     businessName?: string
+    approvalLink?: string
+    customerPortalStatus?: CustomerPortalSmsStatus
 }) {
     const totalStr = input.estimateTotal != null ? ` Total: $${input.estimateTotal.toFixed(2)}.` : ""
-    const linkStr = input.paymentLink ? ` Pay online: ${input.paymentLink}` : ""
     const fromStr = input.businessName ? ` - ${input.businessName}` : ""
+
+    if (input.customerPortalStatus === "approved") {
+        const linkStr = input.paymentLink ? ` Pay online: ${input.paymentLink}` : " I'll follow up with the next steps."
+        return `Your estimate is approved.${linkStr}${fromStr}`
+    }
+
+    if (input.customerPortalStatus === "change_requested") {
+        return `Thanks, we received your requested changes for the estimate. We'll follow up with the revision.${fromStr}`
+    }
+
+    if (input.approvalLink && input.customerPortalStatus === "viewed") {
+        return `Your estimate is ready.${totalStr} If the scope looks good, approve or request changes: ${input.approvalLink}${fromStr}`
+    }
+
+    if (input.approvalLink) {
+        return `Your estimate is ready.${totalStr} Review or approve it here: ${input.approvalLink}${fromStr}`
+    }
+
+    const linkStr = input.paymentLink ? ` Pay online: ${input.paymentLink}` : ""
     return `Your estimate is ready.${totalStr}${linkStr}${fromStr}`
 }
 
@@ -49,13 +77,71 @@ export function SmsModal({
     estimateTotal,
     paymentLink,
     businessName,
+    approvalPaymentAvailable = false,
+    approvalLinkStatus = "signin",
+    approvalLink,
+    customerPortalStatus,
+    onPrepareApprovalLink,
 }: SmsModalProps) {
     const [phone, setPhone] = useState(clientPhone)
-    const [message, setMessage] = useState(() => getDefaultSmsMessage({ estimateTotal, paymentLink, businessName }))
+    const [message, setMessage] = useState(() => getDefaultSmsMessage({
+        estimateTotal,
+        paymentLink,
+        businessName,
+        approvalLink,
+        customerPortalStatus,
+    }))
     const [sending, setSending] = useState(false)
     const [deliveryIssue, setDeliveryIssue] = useState<DeliveryIssue | null>(null)
     const deliveryIssueRef = useRef<HTMLDivElement | null>(null)
     const hasPaymentLink = Boolean(paymentLink)
+    const hasApprovalPayment = approvalPaymentAvailable && !hasPaymentLink
+    const hasPaymentPath = hasPaymentLink || hasApprovalPayment
+    const paymentStatusLabel = hasPaymentLink ? "Included" : hasApprovalPayment ? "After approval" : "Not attached"
+    const approvalStatusLabel =
+        customerPortalStatus === "approved"
+            ? "Approved"
+            : customerPortalStatus === "change_requested"
+                ? "Changes"
+                : customerPortalStatus === "viewed"
+                    ? "Viewed"
+                    : customerPortalStatus === "shared"
+                        ? "Shared"
+                        : approvalLinkStatus === "included"
+            ? "Included"
+            : approvalLinkStatus === "offline"
+                ? "Offline"
+                : approvalLinkStatus === "saving"
+                    ? "Saving"
+                    : "Sign in"
+    const approvalStatusClassName =
+        customerPortalStatus === "approved"
+            ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-100"
+            : customerPortalStatus === "viewed" || customerPortalStatus === "shared"
+                ? "border-blue-300/20 bg-blue-500/10 text-blue-100"
+                : customerPortalStatus === "change_requested"
+                    ? "border-amber-300/20 bg-amber-400/10 text-amber-100"
+                    : approvalLinkStatus === "included"
+            ? "border-emerald-300/20 bg-emerald-400/10 text-emerald-100"
+            : approvalLinkStatus === "saving"
+                ? "border-blue-300/20 bg-blue-500/10 text-blue-100"
+                : "border-amber-300/20 bg-amber-400/10 text-amber-100"
+    const approvalHelper =
+        customerPortalStatus === "approved"
+            ? "Customer already approved this quote. Use SMS for payment, scheduling, or arrival updates."
+            : customerPortalStatus === "change_requested"
+                ? "Customer requested changes. Text a revision update instead of another approval prompt."
+                : customerPortalStatus === "viewed"
+                    ? "Customer opened the review link. SMS can point them back to approve or request changes."
+                    : customerPortalStatus === "shared"
+                        ? "The customer review link is already shared and can be included in this SMS."
+                        : approvalLinkStatus === "included"
+            ? "A review and approval link will be added when this SMS is sent."
+            : approvalLinkStatus === "offline"
+                ? "Go online to include a customer approval link."
+                : approvalLinkStatus === "saving"
+                    ? "Saving this quote before sign-in."
+                    : "Sign in to include a customer approval link before sending."
     const trimmedPhone = phone.trim()
     const isValidE164 = /^\+[1-9]\d{7,14}$/.test(trimmedPhone)
     const recipientStatusLabel = !trimmedPhone ? "Needed" : isValidE164 ? "Ready" : "Check"
@@ -68,10 +154,16 @@ export function SmsModal({
     useEffect(() => {
         if (!open) return
         setPhone(clientPhone)
-        setMessage(getDefaultSmsMessage({ estimateTotal, paymentLink, businessName }))
+        setMessage(getDefaultSmsMessage({
+            estimateTotal,
+            paymentLink,
+            businessName,
+            approvalLink,
+            customerPortalStatus,
+        }))
         setDeliveryIssue(null)
         setSending(false)
-    }, [businessName, clientPhone, estimateTotal, open, paymentLink])
+    }, [approvalLink, businessName, clientPhone, customerPortalStatus, estimateTotal, open, paymentLink])
 
     useEffect(() => {
         if (!deliveryIssue) return
@@ -141,7 +233,7 @@ export function SmsModal({
 
                 {/* Content */}
                 <div className="flex-1 space-y-4 overflow-y-auto p-4">
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" data-testid="sms-delivery-summary">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="sms-delivery-summary">
                         <div className={`min-w-0 rounded-lg border p-2 ${recipientStatusClassName}`}>
                             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] opacity-70">To</p>
                             <p className="mt-1 flex min-w-0 items-center gap-1 break-words text-sm font-semibold [overflow-wrap:anywhere]" data-testid="sms-recipient-status">
@@ -156,16 +248,48 @@ export function SmsModal({
                                 Ready
                             </p>
                         </div>
-                        <div className={`min-w-0 rounded-lg border p-2 ${hasPaymentLink ? "border-emerald-300/20 bg-emerald-400/10" : "border-white/10 bg-slate-950/55"}`}>
-                            <p className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${hasPaymentLink ? "text-emerald-200/70" : "text-slate-500"}`}>Pay</p>
+                        <div className={`min-w-0 rounded-lg border p-2 ${approvalStatusClassName}`}>
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] opacity-70">Approve</p>
                             <p
-                                className={`mt-1 flex min-w-0 items-center gap-1 break-words text-sm font-semibold [overflow-wrap:anywhere] ${hasPaymentLink ? "text-emerald-100" : "text-slate-300"}`}
+                                className="mt-1 flex min-w-0 items-center gap-1 break-words text-sm font-semibold [overflow-wrap:anywhere]"
+                                data-testid="sms-approval-link-status"
+                            >
+                                <LinkIcon className="h-3.5 w-3.5 shrink-0" />
+                                {approvalStatusLabel}
+                            </p>
+                        </div>
+                        <div className={`min-w-0 rounded-lg border p-2 ${hasPaymentPath ? "border-emerald-300/20 bg-emerald-400/10" : "border-white/10 bg-slate-950/55"}`}>
+                            <p className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${hasPaymentPath ? "text-emerald-200/70" : "text-slate-500"}`}>Pay</p>
+                            <p
+                                className={`mt-1 flex min-w-0 items-center gap-1 break-words text-sm font-semibold [overflow-wrap:anywhere] ${hasPaymentPath ? "text-emerald-100" : "text-slate-300"}`}
                                 data-testid="sms-payment-link-status"
                             >
                                 <CreditCard className="h-3.5 w-3.5 shrink-0" />
-                                {hasPaymentLink ? "Included" : "Not attached"}
+                                {paymentStatusLabel}
                             </p>
                         </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-slate-950/55 p-3 text-sm text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex min-w-0 items-start gap-2">
+                            <LinkIcon className="mt-0.5 h-4 w-4 shrink-0 text-blue-200" />
+                            <span className="min-w-0 break-words [overflow-wrap:anywhere]" data-testid="sms-approval-link-helper">
+                                {approvalHelper}
+                            </span>
+                        </div>
+                        {approvalLinkStatus === "signin" && onPrepareApprovalLink ? (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-10 shrink-0 rounded-lg border-blue-300/25 bg-blue-500/10 text-blue-100 hover:bg-blue-500/20 hover:text-white"
+                                onClick={() => void onPrepareApprovalLink()}
+                                data-testid="sms-approval-link-action"
+                            >
+                                <LogIn className="mr-2 h-4 w-4" />
+                                Sign in
+                            </Button>
+                        ) : null}
                     </div>
 
                     <div className="space-y-2">

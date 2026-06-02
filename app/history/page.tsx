@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSPr
 import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle, MessageSquare, RefreshCw, Link2, Clock3, CloudUpload, CircleDollarSign, Send, CheckCircle2, ReceiptText, Image as ImageIcon, Mic, LogIn, MoreHorizontal, ChevronDown, Search, X, ArrowRight } from "lucide-react"
+import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle, MessageSquare, RefreshCw, Link2, Clock3, CloudUpload, CircleDollarSign, Send, CheckCircle2, ReceiptText, Image as ImageIcon, Mic, LogIn, MoreHorizontal, ChevronDown, Search, X, ArrowRight, CreditCard, Sparkles } from "lucide-react"
 import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { getEstimates, deleteEstimate, getProfile, updateEstimateStatus, updateEstimate, type LocalEstimate, type EstimateItem, type BusinessInfo } from "@/lib/estimates-storage"
@@ -31,10 +31,29 @@ import {
 } from "@/lib/quickbooks"
 import { hasPdfBrandingAccess, hasPdfTemplateAccess } from "@/lib/pdf-branding"
 import { getAllItemsFromEstimate } from "@/lib/estimates/math"
+import { getDraftSendReadiness, hasScopeAssumptionsConfirmed, isCaptureOnlyDraft, isDraftEstimate, needsScopeAssumptionsReview } from "@/lib/estimates/draft-state"
 import { cn } from "@/lib/utils"
 import { buildEstimatePdfFileName, downloadBlobAsFile } from "@/lib/estimate-pdf-file"
+import {
+    buildPaymentLinkIssue,
+    PaymentLinkCreationError,
+    readPaymentLinkErrorPayload,
+    type PaymentLinkIssue,
+} from "@/lib/payment-link-errors"
+import {
+    appendCustomerPortalLink,
+    createCustomerPortalLinkForEstimate,
+    customerPortalEstimateUpdatesChanged,
+    fetchCustomerPortalLinkForEstimate,
+    getCustomerPortalEstimateUpdates,
+    maybeCreateCustomerPortalLinkForEstimate,
+} from "@/lib/customer-portal-client"
+import { isOpenCustomerChangeRequest, isSupersededCustomerChangeRequest } from "@/lib/customer-revisions"
+import { isEstimateReadyForFollowUp } from "@/lib/follow-up-service"
+import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
 
 type TabType = 'drafts' | 'sent' | 'paid'
+type HistoryDeepLinkAction = "follow-up" | "sms"
 
 type StripePaymentStatusResponse = {
     ok: boolean
@@ -43,20 +62,24 @@ type StripePaymentStatusResponse = {
     paidAt?: string
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
 type HistoryActionIssue = {
     estimateId: string
-    kind: "pdf" | "quickbooks"
+    kind: "pdf" | "quickbooks" | "payment_link"
     title: string
     message: string
+    paymentLinkIssue?: PaymentLinkIssue
 }
 
 type QuickBooksPanelIssue = {
+    action: "status" | "connect" | "upgrade"
     title: string
     message: string
 }
 
 type HistoryNextAction = {
-    kind: "new" | "edit_draft" | "focus_sent" | "focus_paid" | "sync_quickbooks"
+    kind: "new" | "edit_draft" | "review_scope" | "focus_sent" | "focus_paid" | "sync_quickbooks" | "revise_quote" | "send_follow_up"
     title: string
     description: string
     buttonLabel: string
@@ -85,12 +108,127 @@ function matchesPaymentReturnEstimate(estimate: LocalEstimate, estimateId: strin
     return idMatches || numberMatches
 }
 
+function isUuidLike(value: string): boolean {
+    return UUID_PATTERN.test(value)
+}
+
+function getTabForEstimate(estimate: LocalEstimate): TabType {
+    if (isEstimatePaidLike(estimate)) return "paid"
+    if (estimate.status === "sent") return "sent"
+    return "drafts"
+}
+
+function getTabFromQueryParam(value: string | null): TabType | null {
+    if (value === "drafts" || value === "sent" || value === "paid") return value
+    return null
+}
+
+function getHistoryActionFromQueryParam(value: string | null): HistoryDeepLinkAction | null {
+    if (value === "follow-up") return value
+    if (value === "sms") return value
+    return null
+}
+
 function getPriceTBDCount(estimate: LocalEstimate): number {
     return getAllItemsFromEstimate(estimate).filter((item) => item.unit_price === 0).length
 }
 
 function getEstimateDisplayName(estimate: LocalEstimate): string {
     return estimate.clientName || estimate.estimateNumber || "this quote"
+}
+
+function formatCustomerDate(value?: string): string {
+    if (!value) return ""
+
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return ""
+
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+}
+
+function getCustomerPortalSummary(estimate: LocalEstimate): { label: string; helper: string } {
+    if (estimate.customerPortalStatus === "approved") {
+        const dateLabel = formatCustomerDate(estimate.customerApprovedAt)
+        return {
+            label: "Approved",
+            helper: dateLabel ? `Approved ${dateLabel}` : "Ready to collect payment",
+        }
+    }
+
+    if (estimate.customerPortalStatus === "change_requested") {
+        if (isSupersededCustomerChangeRequest(estimate)) {
+            const dateLabel = formatCustomerDate(estimate.supersededAt)
+            return {
+                label: "Revision sent",
+                helper: dateLabel ? `Covered by a newer quote ${dateLabel}` : "Covered by a newer quote",
+            }
+        }
+
+        const dateLabel = formatCustomerDate(estimate.customerChangeRequestedAt)
+        return {
+            label: "Changes requested",
+            helper: estimate.customerPortalNote || (dateLabel ? `Requested ${dateLabel}` : "Start a revised quote"),
+        }
+    }
+
+    if (estimate.customerPortalStatus === "viewed") {
+        const dateLabel = formatCustomerDate(estimate.customerViewedAt)
+        return {
+            label: "Viewed",
+            helper: dateLabel ? `Viewed ${dateLabel}. Follow up while it is fresh` : "Customer opened the quote",
+        }
+    }
+
+    if (estimate.customerPortalUrl) {
+        return {
+            label: "Link shared",
+            helper: "Waiting for the customer to open it",
+        }
+    }
+
+    return {
+        label: "No approval link",
+        helper: "Send a customer link to track approval",
+    }
+}
+
+function getFollowUpBadgeLabel(estimate: LocalEstimate): string {
+    const dateLabel = formatCustomerDate(estimate.lastFollowedUpAt)
+    if (estimate.lastFollowUpChannel === "sms") {
+        return dateLabel ? `Texted ${dateLabel}` : "Texted"
+    }
+    if (estimate.lastFollowUpChannel === "automation") {
+        return dateLabel ? `Auto-followed ${dateLabel}` : "Auto-followed"
+    }
+
+    return dateLabel ? `Followed up ${dateLabel}` : "Followed up"
+}
+
+function canSendCustomerFollowUp(estimate: LocalEstimate): boolean {
+    return !isEstimatePaidLike(estimate)
+        && estimate.status === "sent"
+        && estimate.customerPortalStatus !== "approved"
+        && estimate.customerPortalStatus !== "change_requested"
+}
+
+async function markEstimateFollowedUp(
+    estimate: LocalEstimate,
+    channel: NonNullable<LocalEstimate["lastFollowUpChannel"]>,
+): Promise<LocalEstimate> {
+    const followedUpAt = new Date().toISOString()
+    const updates: Partial<LocalEstimate> = {
+        firstFollowedUpAt: estimate.firstFollowedUpAt || followedUpAt,
+        lastFollowedUpAt: followedUpAt,
+        lastFollowUpChannel: channel,
+        synced: false,
+    }
+    await updateEstimate(estimate.id, updates)
+
+    return { ...estimate, ...updates }
+}
+
+function getEffectivePaymentLink(estimate: LocalEstimate, businessProfile?: BusinessInfo): string {
+    return estimate.paymentLink?.trim() || businessProfile?.payment_link?.trim() || ""
 }
 
 function buildEstimateSearchText(estimate: LocalEstimate): string {
@@ -108,6 +246,8 @@ function buildEstimateSearchText(estimate: LocalEstimate): string {
         estimate.totalAmount,
         estimate.taxAmount,
         estimate.paymentLinkId,
+        estimate.customerPortalUrl,
+        estimate.customerPortalStatus,
         estimate.quickbooksDocNumber,
         estimate.quickbooksInvoiceStatus,
         estimate.createdAt,
@@ -115,6 +255,9 @@ function buildEstimateSearchText(estimate: LocalEstimate): string {
         estimate.sentAt,
         estimate.paymentCompletedAt,
         itemText,
+        estimate.customerPortalNote,
+        estimate.supersededByEstimateId,
+        estimate.supersededAt,
     ]
         .filter((value) => value !== undefined && value !== null)
         .join(" ")
@@ -129,6 +272,7 @@ const historyBadgeClass = "border-white/10 bg-slate-950/65 text-slate-300"
 const historyOutlineButtonClass = "border-white/10 bg-slate-950/60 text-slate-200 hover:bg-slate-900 hover:text-white"
 const historySecondaryButtonClass = "w-full shrink-0 border-white/10 bg-slate-950/60 text-slate-200 hover:bg-slate-900 hover:text-white sm:w-auto"
 const historyGhostButtonClass = "text-slate-300 hover:bg-white/10 hover:text-white"
+const quickBooksUpgradeHref = "/pricing?plan=pro&source=quickbooks_sync"
 
 function getLaneTabStyle(isActive: boolean): CSSProperties {
     return isActive
@@ -167,13 +311,20 @@ function HistoryPageContent() {
     const [quickBooksLoading, setQuickBooksLoading] = useState(true)
     const [quickBooksConnecting, setQuickBooksConnecting] = useState(false)
     const [syncingQuickBooksEstimateId, setSyncingQuickBooksEstimateId] = useState<string | null>(null)
+    const [creatingPortalLinkEstimateId, setCreatingPortalLinkEstimateId] = useState<string | null>(null)
+    const [creatingPaymentLinkEstimateId, setCreatingPaymentLinkEstimateId] = useState<string | null>(null)
     const paymentStatusSyncInFlightRef = useRef(false)
+    const handledDeepLinkActionRef = useRef<string | null>(null)
     const historySearch = searchParams.toString()
     const currentHistoryPath = historySearch ? `/history?${historySearch}` : "/history"
     const loginToHistoryHref = `/login?next=${encodeURIComponent(currentHistoryPath)}`
     const isPaymentSuccessReturn = searchParams.get("payment") === "success"
+    const requestedHistoryTab = getTabFromQueryParam(searchParams.get("tab"))
+    const requestedHistoryAction = getHistoryActionFromQueryParam(searchParams.get("action"))
     const returnEstimateId = searchParams.get("estimateId")?.trim() || ""
     const returnEstimateNumber = searchParams.get("estimateNumber")?.trim() || ""
+    const paymentReturnStatus = searchParams.get("paymentStatus")?.trim() || ""
+    const paymentReturnNeedsVerification = isPaymentSuccessReturn && paymentReturnStatus === "missing_session"
     const isLocalOnlyMode = authResolved && !isAuthenticated
 
     const loadQuickBooks = useCallback(async () => {
@@ -189,6 +340,7 @@ function HistoryPageContent() {
             const status = await getQuickBooksStatus()
             setQuickBooksStatus(status)
             setQuickBooksPanelIssue(status ? null : {
+                action: "status",
                 title: "QuickBooks status is unavailable",
                 message: "Retry the connection check or export CSV for manual import while QuickBooks is unreachable.",
             })
@@ -202,17 +354,30 @@ function HistoryPageContent() {
         if (paymentStatusSyncInFlightRef.current) return
 
         const estimatesForSync = sourceEstimates ?? await getEstimates()
+        const paidLikeSentEstimates = estimatesForSync.filter(
+            (estimate) => estimate.status === "sent" && isEstimatePaidLike(estimate)
+        )
         const sentWithPaymentLinks = estimatesForSync.filter(
-            (estimate) => estimate.status === "sent" && Boolean(estimate.paymentLinkId)
+            (estimate) => estimate.status === "sent" && !isEstimatePaidLike(estimate) && Boolean(estimate.paymentLinkId)
         )
 
-        if (sentWithPaymentLinks.length === 0) return
+        if (paidLikeSentEstimates.length === 0 && sentWithPaymentLinks.length === 0) return
 
         paymentStatusSyncInFlightRef.current = true
 
         try {
             let updatedCount = 0
+            let normalizedCount = 0
             const headers = await withAuthHeaders()
+
+            for (const estimate of paidLikeSentEstimates) {
+                await updateEstimate(estimate.id, {
+                    status: "paid",
+                    paymentCompletedAt: estimate.paymentCompletedAt,
+                    synced: false,
+                })
+                normalizedCount += 1
+            }
 
             for (const estimate of sentWithPaymentLinks) {
                 const paymentLinkId = estimate.paymentLinkId?.trim()
@@ -248,19 +413,52 @@ function HistoryPageContent() {
                     channel: "stripe_status_poll",
                     metadata: {
                         checkoutSessionId: result.checkoutSessionId,
+                        status_transitioned: true,
                     },
                 })
             }
 
-            if (updatedCount > 0) {
+            if (updatedCount > 0 || normalizedCount > 0) {
                 const refreshed = await getEstimates()
                 setEstimates(refreshed)
-                toast(`${updatedCount} payment${updatedCount > 1 ? "s" : ""} synced.`, "success")
+                if (updatedCount > 0) {
+                    toast(`${updatedCount} payment${updatedCount > 1 ? "s" : ""} synced.`, "success")
+                }
             }
         } catch (error) {
             console.error("Failed to sync sent estimate payment statuses:", error)
         } finally {
             paymentStatusSyncInFlightRef.current = false
+        }
+    }, [isAuthenticated])
+
+    const syncCustomerPortalStatuses = useCallback(async (sourceEstimates?: LocalEstimate[]) => {
+        if (!isAuthenticated) return
+
+        const estimatesForSync = sourceEstimates ?? await getEstimates()
+        const portalEstimates = estimatesForSync.filter((estimate) => Boolean(estimate.customerPortalUrl))
+        if (portalEstimates.length === 0) return
+
+        try {
+            let updatedCount = 0
+
+            for (const estimate of portalEstimates) {
+                const result = await fetchCustomerPortalLinkForEstimate(estimate.id)
+                if (!result) continue
+
+                const updates = getCustomerPortalEstimateUpdates(result)
+                if (!customerPortalEstimateUpdatesChanged(estimate, updates)) continue
+
+                await updateEstimate(estimate.id, updates)
+                updatedCount += 1
+            }
+
+            if (updatedCount > 0) {
+                setEstimates(await getEstimates())
+                toast(`${updatedCount} customer response${updatedCount > 1 ? "s" : ""} synced.`, "success")
+            }
+        } catch (error) {
+            console.error("Failed to sync customer quote portal statuses:", error)
         }
     }, [isAuthenticated])
 
@@ -276,6 +474,7 @@ function HistoryPageContent() {
         setEstimates(localEstimates)
         setQuickBooksStatus(status)
         setQuickBooksPanelIssue(isAuthenticated && !status ? {
+            action: "status",
             title: "QuickBooks status is unavailable",
             message: "Retry the connection check or export CSV for manual import while QuickBooks is unreachable.",
         } : null)
@@ -286,8 +485,9 @@ function HistoryPageContent() {
         setLoading(false)
         if (isAuthenticated) {
             void syncSentEstimatePaymentStatuses(localEstimates)
+            void syncCustomerPortalStatuses(localEstimates)
         }
-    }, [isAuthenticated, syncSentEstimatePaymentStatuses])
+    }, [isAuthenticated, syncCustomerPortalStatuses, syncSentEstimatePaymentStatuses])
 
     useEffect(() => {
         if (!authResolved) return
@@ -297,27 +497,56 @@ function HistoryPageContent() {
     useEffect(() => {
         if (!isPaymentSuccessReturn) return
 
-        setActiveTab("paid")
-
         const matchedEstimate = estimates.find((estimate) =>
             matchesPaymentReturnEstimate(estimate, returnEstimateId, returnEstimateNumber)
         )
 
+        setActiveTab(paymentReturnNeedsVerification && matchedEstimate
+            ? getTabForEstimate(matchedEstimate)
+            : "paid")
+
         if (matchedEstimate) {
             setExpandedId(matchedEstimate.id)
         }
-    }, [estimates, isPaymentSuccessReturn, returnEstimateId, returnEstimateNumber])
+    }, [estimates, isPaymentSuccessReturn, paymentReturnNeedsVerification, returnEstimateId, returnEstimateNumber])
+
+    useEffect(() => {
+        if (loading || isPaymentSuccessReturn) return
+        if (!requestedHistoryTab && !returnEstimateId) return
+
+        const matchedEstimate = returnEstimateId
+            ? estimates.find((estimate) => estimate.id === returnEstimateId)
+            : null
+        const targetTab = requestedHistoryTab || (matchedEstimate ? getTabForEstimate(matchedEstimate) : null)
+
+        if (!targetTab) return
+
+        setActiveTab(targetTab)
+        setSearchQuery("")
+        if (matchedEstimate) {
+            setExpandedId(matchedEstimate.id)
+        }
+
+        window.setTimeout(() => {
+            document.getElementById("history-estimate-lanes")?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+            })
+        }, 0)
+    }, [estimates, isPaymentSuccessReturn, loading, requestedHistoryTab, returnEstimateId])
 
     useEffect(() => {
         if (!authResolved || !isAuthenticated) return
 
         const intervalId = window.setInterval(() => {
             void syncSentEstimatePaymentStatuses()
+            void syncCustomerPortalStatuses()
         }, 20_000)
 
         const handleVisibilityChange = () => {
             if (document.visibilityState === "visible") {
                 void syncSentEstimatePaymentStatuses()
+                void syncCustomerPortalStatuses()
             }
         }
 
@@ -326,7 +555,7 @@ function HistoryPageContent() {
             window.clearInterval(intervalId)
             document.removeEventListener("visibilitychange", handleVisibilityChange)
         }
-    }, [authResolved, isAuthenticated, syncSentEstimatePaymentStatuses])
+    }, [authResolved, isAuthenticated, syncCustomerPortalStatuses, syncSentEstimatePaymentStatuses])
 
     const normalizedSearchQuery = searchQuery.trim().toLowerCase()
 
@@ -337,10 +566,10 @@ function HistoryPageContent() {
             }
 
             if (activeTab === "sent") {
-                return estimate.status === "sent"
+                return estimate.status === "sent" && !isEstimatePaidLike(estimate)
             }
 
-            return estimate.status === "paid"
+            return isEstimatePaidLike(estimate)
         })
     }, [activeTab, estimates])
 
@@ -352,8 +581,8 @@ function HistoryPageContent() {
 
     const historyMetrics = useMemo(() => {
         const drafts = estimates.filter((estimate) => estimate.status === "draft" || !estimate.status)
-        const sent = estimates.filter((estimate) => estimate.status === "sent")
-        const paid = estimates.filter((estimate) => estimate.status === "paid")
+        const sent = estimates.filter((estimate) => estimate.status === "sent" && !isEstimatePaidLike(estimate))
+        const paid = estimates.filter(isEstimatePaidLike)
 
         const draftValue = drafts.reduce((sum, estimate) => sum + estimate.totalAmount, 0)
         const sentValue = sent.reduce((sum, estimate) => sum + estimate.totalAmount, 0)
@@ -391,16 +620,60 @@ function HistoryPageContent() {
         ? estimates.find((estimate) => matchesPaymentReturnEstimate(estimate, returnEstimateId, returnEstimateNumber))
         : undefined
     const paymentReturnReference = returnEstimateNumber || paymentReturnEstimate?.estimateNumber || returnEstimateId
+    const paymentReturnMatchedAsPaid = Boolean(paymentReturnEstimate && (
+        !paymentReturnNeedsVerification || isEstimatePaidLike(paymentReturnEstimate)
+    ))
     const hasActiveSearch = normalizedSearchQuery.length > 0
 
     const historyNextAction = useMemo<HistoryNextAction>(() => {
-        const drafts = estimates.filter((estimate) => estimate.status === "draft" || !estimate.status)
-        const sent = estimates.filter((estimate) => estimate.status === "sent")
-        const paid = estimates.filter((estimate) => estimate.status === "paid")
+        const now = new Date()
+        const drafts = estimates.filter(isDraftEstimate)
+        const sent = estimates.filter((estimate) => estimate.status === "sent" && !isEstimatePaidLike(estimate))
+        const actionableSent = sent.filter((estimate) => !isSupersededCustomerChangeRequest(estimate))
+        const paid = estimates.filter(isEstimatePaidLike)
+        const sentWithChangeRequest = sent.find((estimate) => isOpenCustomerChangeRequest(estimate))
+        const sentNeedingScopeReview = actionableSent.find((estimate) => needsScopeAssumptionsReview(estimate))
+        const approvedOpenQuote = actionableSent.find((estimate) => estimate.customerPortalStatus === "approved")
+        const viewedOpenQuote = actionableSent.find((estimate) => (
+            estimate.customerPortalStatus === "viewed" && isEstimateReadyForFollowUp(estimate, now)
+        ))
+        const captureOnlyDraft = drafts.find(isCaptureOnlyDraft)
         const draftWithMissingPrice = drafts.find((estimate) => getPriceTBDCount(estimate) > 0)
         const latestDraft = drafts[0]
-        const latestSent = sent[0]
+        const latestSent = actionableSent[0]
         const paidPendingQuickBooks = paid.find((estimate) => !estimate.quickbooksInvoiceId)
+
+        if (sentWithChangeRequest) {
+            return {
+                kind: "revise_quote",
+                estimateId: sentWithChangeRequest.id,
+                title: "Revise requested changes",
+                description: sentWithChangeRequest.customerPortalNote
+                    ? `${getEstimateDisplayName(sentWithChangeRequest)} asked for: ${sentWithChangeRequest.customerPortalNote}`
+                    : `${getEstimateDisplayName(sentWithChangeRequest)} asked for changes. Start the revised quote while the context is fresh.`,
+                buttonLabel: "Start revision",
+            }
+        }
+
+        if (sentNeedingScopeReview) {
+            return {
+                kind: "review_scope",
+                estimateId: sentNeedingScopeReview.id,
+                title: "Review sent scope",
+                description: `${getEstimateDisplayName(sentNeedingScopeReview)} is sent, but the field notes need confirmation before follow-up, re-sharing, or collection.`,
+                buttonLabel: "Review scope",
+            }
+        }
+
+        if (captureOnlyDraft) {
+            return {
+                kind: "edit_draft",
+                estimateId: captureOnlyDraft.id,
+                title: "Turn capture into quote",
+                description: `${getEstimateDisplayName(captureOnlyDraft)} has field notes saved but no AI draft yet.`,
+                buttonLabel: "Resume capture",
+            }
+        }
 
         if (draftWithMissingPrice) {
             return {
@@ -419,6 +692,26 @@ function HistoryPageContent() {
                 title: "Finish the latest draft",
                 description: `${getEstimateDisplayName(latestDraft)} is ready to review, PDF, or send before leaving the jobsite.`,
                 buttonLabel: "Open draft",
+            }
+        }
+
+        if (approvedOpenQuote) {
+            return {
+                kind: "focus_sent",
+                estimateId: approvedOpenQuote.id,
+                title: "Collect approved quote",
+                description: `${getEstimateDisplayName(approvedOpenQuote)} approved ${formatAmount(approvedOpenQuote.totalAmount)}. Mark paid after collecting or confirming checkout.`,
+                buttonLabel: "Collect payment",
+            }
+        }
+
+        if (viewedOpenQuote) {
+            return {
+                kind: "send_follow_up",
+                estimateId: viewedOpenQuote.id,
+                title: "Follow up on viewed quote",
+                description: `${getEstimateDisplayName(viewedOpenQuote)} opened the quote but has not approved yet.`,
+                buttonLabel: "Send follow-up",
             }
         }
 
@@ -465,7 +758,10 @@ function HistoryPageContent() {
     const handleDuplicate = (estimate: LocalEstimate) => {
         const duplicateData = {
             items: estimate.items,
+            sections: estimate.sections,
             summary_note: estimate.summary_note,
+            payment_terms: estimate.payment_terms,
+            closing_note: estimate.closing_note,
             clientName: estimate.clientName,
             clientAddress: estimate.clientAddress,
             clientEmail: estimate.clientEmail,
@@ -477,13 +773,64 @@ function HistoryPageContent() {
         router.push('/new-estimate')
     }
 
-    const handleEditDraft = (estimate: LocalEstimate) => {
+    const handleStartCustomerRevision = useCallback((estimate: LocalEstimate) => {
+        const changeRequestedAt = formatCustomerDate(estimate.customerChangeRequestedAt)
+        const customerRequestNote = estimate.customerPortalNote?.trim()
+        const revisionNote = customerRequestNote
+            ? `Customer requested changes${changeRequestedAt ? ` on ${changeRequestedAt}` : ""}: ${customerRequestNote}`
+            : `Customer requested changes${changeRequestedAt ? ` on ${changeRequestedAt}` : ""}.`
+        const clientNotes = [estimate.clientNotes, revisionNote]
+            .filter((value) => typeof value === "string" && value.trim())
+            .join("\n\n")
+
+        localStorage.setItem('duplicate_estimate', JSON.stringify({
+            items: estimate.items,
+            sections: estimate.sections,
+            summary_note: estimate.summary_note,
+            payment_terms: estimate.payment_terms,
+            closing_note: estimate.closing_note,
+            clientName: estimate.clientName,
+            clientAddress: estimate.clientAddress,
+            clientEmail: estimate.clientEmail,
+            clientPhone: estimate.clientPhone,
+            clientNotes,
+            taxRate: estimate.taxRate,
+            revisionContext: {
+                originalEstimateId: estimate.id,
+                originalEstimateNumber: estimate.estimateNumber,
+                requestedAt: estimate.customerChangeRequestedAt,
+                customerName: estimate.customerPortalName || estimate.clientName,
+                customerEmail: estimate.customerPortalEmail || estimate.clientEmail,
+                note: customerRequestNote || undefined,
+            },
+        }))
+        router.push('/new-estimate?mode=manual')
+    }, [router])
+
+    const handleEditDraft = useCallback((estimate: LocalEstimate) => {
         const params = new URLSearchParams({ draftId: estimate.id })
         router.push(`/new-estimate?${params.toString()}`)
-    }
+    }, [router])
+
+    const requestDeliveryScopeReview = useCallback((estimate: LocalEstimate, message: string) => {
+        if (!needsScopeAssumptionsReview(estimate)) return false
+
+        toast(message, "warning")
+        handleEditDraft(estimate)
+        return true
+    }, [handleEditDraft])
 
     const handleMarkAsSent = async (estimateId: string) => {
         const targetEstimate = estimates.find(est => est.id === estimateId)
+        if (targetEstimate) {
+            const sendReadiness = getDraftSendReadiness(targetEstimate)
+            if (!sendReadiness.ready) {
+                toast(sendReadiness.message, "warning")
+                handleEditDraft(targetEstimate)
+                return
+            }
+        }
+
         await updateEstimateStatus(estimateId, 'sent')
         if (targetEstimate) {
             void trackAnalyticsEvent({
@@ -506,11 +853,184 @@ function HistoryPageContent() {
                 estimateId: targetEstimate.id,
                 estimateNumber: targetEstimate.estimateNumber,
                 channel: "manual_status",
+                metadata: {
+                    status_transitioned: !isEstimatePaidLike(targetEstimate),
+                },
             })
         }
         await loadData()
         toast("Marked as paid.", "success")
     }
+
+    const handleCopyPaymentLink = useCallback(async (paymentLinkInput: string) => {
+        const paymentLink = paymentLinkInput.trim()
+        if (!paymentLink) {
+            toast("No payment link is attached to this estimate.", "error")
+            return
+        }
+
+        try {
+            await navigator.clipboard.writeText(paymentLink)
+            toast("Payment link copied.", "success")
+        } catch (error) {
+            console.error("Failed to copy payment link:", error)
+            toast("Could not copy the payment link. Open preview and copy it manually.", "error")
+        }
+    }, [])
+
+    const handleCreateApprovedPaymentLink = useCallback(async (estimate: LocalEstimate) => {
+        setHistoryActionIssue(null)
+        const amount = Number(estimate.totalAmount)
+        if (!Number.isFinite(amount) || amount <= 0) {
+            const issue = buildPaymentLinkIssue({ message: "Add a positive estimate total before creating a payment link." })
+            setHistoryActionIssue({
+                estimateId: estimate.id,
+                kind: "payment_link",
+                title: issue.title,
+                message: issue.message,
+                paymentLinkIssue: issue,
+            })
+            return
+        }
+
+        if (isLocalOnlyMode) {
+            router.push(loginToHistoryHref)
+            return
+        }
+
+        if (typeof navigator !== "undefined" && !navigator.onLine) {
+            const issue = buildPaymentLinkIssue({ message: "Payment links require internet." })
+            setHistoryActionIssue({
+                estimateId: estimate.id,
+                kind: "payment_link",
+                title: issue.title,
+                message: issue.message,
+                paymentLinkIssue: issue,
+            })
+            return
+        }
+
+        setCreatingPaymentLinkEstimateId(estimate.id)
+        try {
+            const payload: {
+                amount: number
+                customerName: string
+                estimateNumber: string
+                estimateId?: string
+            } = {
+                amount,
+                customerName: estimate.clientName || "Customer",
+                estimateNumber: estimate.estimateNumber,
+            }
+            if (isUuidLike(estimate.id)) {
+                payload.estimateId = estimate.id
+            }
+
+            const headers = await withAuthHeaders({ "Content-Type": "application/json" })
+            const response = await fetch("/api/create-payment-link", {
+                method: "POST",
+                headers,
+                body: JSON.stringify(payload),
+            })
+            const data = await response.json().catch(() => ({}))
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    toast("Session expired. Please sign in again.", "warning")
+                    router.push(loginToHistoryHref)
+                    return
+                }
+
+                const errorDetails = readPaymentLinkErrorPayload(data)
+                throw new PaymentLinkCreationError(
+                    errorDetails.message,
+                    buildPaymentLinkIssue({
+                        message: errorDetails.message,
+                        code: errorDetails.code,
+                        status: response.status,
+                    })
+                )
+            }
+
+            const paymentLinkData = data as { url?: unknown; id?: unknown }
+            const paymentLink = typeof paymentLinkData.url === "string" ? paymentLinkData.url.trim() : ""
+            if (!paymentLink) {
+                throw new PaymentLinkCreationError(
+                    "Payment link response was missing a URL.",
+                    buildPaymentLinkIssue({ message: "Payment link response was missing a URL." })
+                )
+            }
+
+            const paymentLinkId = typeof paymentLinkData.id === "string" ? paymentLinkData.id.trim() : ""
+            const paymentLinkUpdates: Partial<LocalEstimate> = {
+                paymentLink,
+                paymentLinkId: paymentLinkId || undefined,
+                paymentLinkType: "full",
+                synced: false,
+            }
+            const estimateWithPaymentLink = {
+                ...estimate,
+                ...paymentLinkUpdates,
+            }
+            let portalUpdates: Partial<LocalEstimate> = {}
+
+            if (estimate.customerPortalUrl) {
+                try {
+                    const portalResult = await createCustomerPortalLinkForEstimate(estimateWithPaymentLink, {
+                        paymentLinkOverride: paymentLink,
+                        paymentLinkTypeOverride: "full",
+                    })
+                    portalUpdates = getCustomerPortalEstimateUpdates(portalResult)
+                } catch (portalError) {
+                    console.warn("Payment link created, but customer portal snapshot refresh failed:", portalError)
+                }
+            }
+
+            await updateEstimate(estimate.id, {
+                ...paymentLinkUpdates,
+                ...portalUpdates,
+                synced: false,
+            })
+            const refreshed = await getEstimates()
+            setEstimates(refreshed)
+
+            void trackAnalyticsEvent({
+                event: "payment_link_created",
+                estimateId: estimate.id,
+                estimateNumber: estimate.estimateNumber,
+                channel: "history_approved_quote",
+                metadata: {
+                    amount,
+                    type: "full",
+                },
+            })
+
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(paymentLink)
+                toast("Payment link created and copied.", "success")
+            } else {
+                toast("Payment link created.", "success")
+            }
+        } catch (error) {
+            if (!(error instanceof PaymentLinkCreationError)) {
+                console.error("Failed to create payment link from history:", error)
+            }
+            const message = error instanceof Error ? error.message : "Failed to create payment link."
+            const issue = error instanceof PaymentLinkCreationError
+                ? error.issue
+                : buildPaymentLinkIssue({ message })
+            setHistoryActionIssue({
+                estimateId: estimate.id,
+                kind: "payment_link",
+                title: issue.title,
+                message: issue.message,
+                paymentLinkIssue: issue,
+            })
+            toast(message, "error")
+        } finally {
+            setCreatingPaymentLinkEstimateId(null)
+        }
+    }, [isLocalOnlyMode, loginToHistoryHref, router])
 
     const handleConvertToInvoice = async (estimate: LocalEstimate) => {
         // Optimistic update
@@ -544,6 +1064,7 @@ function HistoryPageContent() {
 
         if (quickBooksStatus && !quickBooksStatus.eligible) {
             setQuickBooksPanelIssue({
+                action: "upgrade",
                 title: "Upgrade to sync QuickBooks",
                 message: "Direct QuickBooks invoice sync is available on Pro or Team. CSV export is still available for manual import.",
             })
@@ -555,6 +1076,7 @@ function HistoryPageContent() {
             const result = await startQuickBooksConnect("/history")
             if (!result?.url) {
                 setQuickBooksPanelIssue({
+                    action: "connect",
                     title: "QuickBooks connection did not start",
                     message: "Retry the connection or export CSV for manual import while we cannot open QuickBooks.",
                 })
@@ -654,14 +1176,37 @@ function HistoryPageContent() {
     }
 
     const handleSendSms = useCallback(async (estimate: LocalEstimate, toPhoneNumber: string, message: string) => {
+        if (requestDeliveryScopeReview(estimate, "Review scope assumptions before texting this estimate.")) {
+            throw new Error("Review scope assumptions before texting this estimate.")
+        }
+
+        const effectivePaymentLink = getEffectivePaymentLink(estimate, businessProfile)
+        const shouldAttachPortalLink = canSendCustomerFollowUp(estimate)
+        const portalResult = shouldAttachPortalLink
+            ? await maybeCreateCustomerPortalLinkForEstimate(estimate, {
+                paymentLinkOverride: effectivePaymentLink,
+                paymentLinkTypeOverride: estimate.paymentLink ? estimate.paymentLinkType : "custom",
+            })
+            : null
+        const messageWithApprovalLink = shouldAttachPortalLink
+            ? appendCustomerPortalLink(message, portalResult?.shareUrl, "sms")
+            : message
         const data = await sendEstimateSms({
             estimateId: estimate.id,
             toPhoneNumber,
-            message,
+            message: messageWithApprovalLink,
         })
 
         if (estimate.status !== "sent" && estimate.status !== "paid") {
             await updateEstimateStatus(estimate.id, "sent")
+        }
+
+        if (portalResult) {
+            await updateEstimate(estimate.id, getCustomerPortalEstimateUpdates(portalResult))
+        }
+
+        if (shouldAttachPortalLink) {
+            await markEstimateFollowedUp(estimate, "sms")
         }
 
         void trackAnalyticsEvent({
@@ -673,12 +1218,119 @@ function HistoryPageContent() {
                 creditsRemaining: data.creditsRemaining,
                 deduped: data.deduped ?? false,
                 source: "history",
+                hasCustomerPortalLink: Boolean(portalResult?.shareUrl),
             },
         })
 
         await loadData()
         toast("SMS sent.", "success")
+    }, [businessProfile, loadData, requestDeliveryScopeReview])
+
+    const handleFollowUpEmailSent = useCallback(async (estimate: LocalEstimate) => {
+        await markEstimateFollowedUp(estimate, "email")
+        await loadData()
     }, [loadData])
+
+    const handleCreateCustomerPortalLink = useCallback(async (estimate: LocalEstimate) => {
+        if (requestDeliveryScopeReview(estimate, "Review scope assumptions before creating a customer approval link.")) return
+
+        setCreatingPortalLinkEstimateId(estimate.id)
+        try {
+            const effectivePaymentLink = getEffectivePaymentLink(estimate, businessProfile)
+            const result = await createCustomerPortalLinkForEstimate(estimate, {
+                paymentLinkOverride: effectivePaymentLink,
+                paymentLinkTypeOverride: estimate.paymentLink ? estimate.paymentLinkType : "custom",
+            })
+            await updateEstimate(estimate.id, getCustomerPortalEstimateUpdates(result))
+
+            if (result.shareUrl) {
+                await navigator.clipboard.writeText(result.shareUrl)
+            }
+            const refreshed = await getEstimates()
+            setEstimates(refreshed)
+            void trackAnalyticsEvent({
+                event: "customer_portal_link_created",
+                estimateId: estimate.id,
+                estimateNumber: estimate.estimateNumber,
+                channel: "history_customer_portal",
+                metadata: {
+                    portalStatus: result.portal.status,
+                    hasPaymentLink: Boolean(effectivePaymentLink),
+                },
+            })
+            toast("Customer approval link copied.", "success")
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "Failed to create customer approval link."
+            toast(message, "error")
+        } finally {
+            setCreatingPortalLinkEstimateId(null)
+        }
+    }, [businessProfile, requestDeliveryScopeReview])
+
+    const handleOpenFollowUp = useCallback(async (estimate: LocalEstimate) => {
+        if (isEstimatePaidLike(estimate)) {
+            toast("This estimate is already paid. Follow-up is closed.", "info")
+            return
+        }
+        if (requestDeliveryScopeReview(estimate, "Review scope assumptions before sending a follow-up.")) return
+
+        if (estimate.customerPortalUrl || isLocalOnlyMode) {
+            setFollowUpEstimate(estimate)
+            return
+        }
+
+        setCreatingPortalLinkEstimateId(estimate.id)
+        try {
+            const effectivePaymentLink = getEffectivePaymentLink(estimate, businessProfile)
+            const result = await createCustomerPortalLinkForEstimate(estimate, {
+                paymentLinkOverride: effectivePaymentLink,
+                paymentLinkTypeOverride: estimate.paymentLink ? estimate.paymentLinkType : "custom",
+            })
+            const updates = getCustomerPortalEstimateUpdates(result)
+            await updateEstimate(estimate.id, updates)
+            const refreshed = await getEstimates()
+            setEstimates(refreshed)
+            setFollowUpEstimate({ ...estimate, ...updates })
+        } catch (error) {
+            console.error("Failed to prepare approval link for follow-up:", error)
+            setFollowUpEstimate(estimate)
+        } finally {
+            setCreatingPortalLinkEstimateId(null)
+        }
+    }, [businessProfile, isLocalOnlyMode, requestDeliveryScopeReview])
+
+    const handleOpenSms = useCallback((estimate: LocalEstimate) => {
+        if (isEstimatePaidLike(estimate)) {
+            toast("This estimate is already paid. Customer reminders are closed.", "info")
+            return
+        }
+        if (requestDeliveryScopeReview(estimate, "Review scope assumptions before texting this estimate.")) return
+
+        setSmsEstimate(estimate)
+    }, [requestDeliveryScopeReview])
+
+    useEffect(() => {
+        if (loading || isPaymentSuccessReturn || !requestedHistoryAction || !returnEstimateId || isLocalOnlyMode) return
+
+        const actionKey = `${requestedHistoryAction}:${returnEstimateId}`
+        if (handledDeepLinkActionRef.current === actionKey) return
+
+        const matchedEstimate = estimates.find((estimate) => estimate.id === returnEstimateId)
+        if (!matchedEstimate) return
+        if (requestedHistoryAction === "follow-up" && !canSendCustomerFollowUp(matchedEstimate)) return
+        if (requestedHistoryAction === "sms" && isEstimatePaidLike(matchedEstimate)) return
+
+        handledDeepLinkActionRef.current = actionKey
+        setActiveTab(getTabForEstimate(matchedEstimate))
+        setSearchQuery("")
+        setExpandedId(matchedEstimate.id)
+        if (requestedHistoryAction === "sms") {
+            handleOpenSms(matchedEstimate)
+            return
+        }
+
+        void handleOpenFollowUp(matchedEstimate)
+    }, [estimates, handleOpenFollowUp, handleOpenSms, isLocalOnlyMode, isPaymentSuccessReturn, loading, requestedHistoryAction, returnEstimateId])
 
     const createEstimatePdfDocument = useCallback(async (estimate: LocalEstimate) => {
         const { EstimatePDF } = await import("@/components/estimate-pdf")
@@ -710,6 +1362,8 @@ function HistoryPageContent() {
     }, [businessProfile, subscription?.planTier])
 
     const handleDownloadPdf = useCallback(async (estimate: LocalEstimate) => {
+        if (requestDeliveryScopeReview(estimate, "Review scope assumptions before downloading the customer PDF.")) return
+
         setDownloadingEstimateId(estimate.id)
         setHistoryActionIssue(null)
         try {
@@ -735,7 +1389,7 @@ function HistoryPageContent() {
         } finally {
             setDownloadingEstimateId(null)
         }
-    }, [createEstimatePdfDocument])
+    }, [createEstimatePdfDocument, requestDeliveryScopeReview])
 
     const focusEstimateLane = (tab: TabType, estimateId?: string) => {
         setActiveTab(tab)
@@ -763,8 +1417,18 @@ function HistoryPageContent() {
 
         if (!targetEstimate) return
 
-        if (historyNextAction.kind === "edit_draft") {
+        if (historyNextAction.kind === "edit_draft" || historyNextAction.kind === "review_scope") {
             handleEditDraft(targetEstimate)
+            return
+        }
+
+        if (historyNextAction.kind === "revise_quote") {
+            handleStartCustomerRevision(targetEstimate)
+            return
+        }
+
+        if (historyNextAction.kind === "send_follow_up") {
+            void handleOpenFollowUp(targetEstimate)
             return
         }
 
@@ -834,7 +1498,7 @@ function HistoryPageContent() {
                         className={cn(
                             "field-card",
                             isPaymentSuccessReturn && "order-first",
-                            paymentReturnEstimate
+                            paymentReturnMatchedAsPaid
                                 ? "border-emerald-400/30 bg-emerald-500/10 ring-1 ring-emerald-400/20"
                                 : "border-amber-300/25 bg-amber-400/10 ring-1 ring-amber-300/15"
                         )}
@@ -842,17 +1506,23 @@ function HistoryPageContent() {
                     >
                         <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
                             <div className="flex gap-3">
-                                {paymentReturnEstimate ? (
+                                {paymentReturnMatchedAsPaid ? (
                                     <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
                                 ) : (
                                     <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-200" />
                                 )}
                                 <div>
-                                    <p className={cn("text-sm font-semibold", paymentReturnEstimate ? "text-emerald-100" : "text-amber-100")}>
-                                        {paymentReturnEstimate ? "Payment matched in History" : "Payment received, local estimate not found"}
+                                    <p className={cn("text-sm font-semibold", paymentReturnMatchedAsPaid ? "text-emerald-100" : "text-amber-100")}>
+                                        {paymentReturnNeedsVerification && !paymentReturnMatchedAsPaid
+                                            ? "Payment confirmation needed"
+                                            : paymentReturnEstimate ? "Payment matched in History" : "Payment received, local estimate not found"}
                                     </p>
-                                    <p className={cn("mt-1 text-sm leading-6", paymentReturnEstimate ? "text-emerald-100/80" : "text-amber-100/80")}>
-                                        {paymentReturnEstimate
+                                    <p className={cn("mt-1 text-sm leading-6", paymentReturnMatchedAsPaid ? "text-emerald-100/80" : "text-amber-100/80")}>
+                                        {paymentReturnNeedsVerification && !paymentReturnMatchedAsPaid
+                                            ? paymentReturnReference
+                                                ? `${paymentReturnReference} opened without a Stripe checkout session id. Keep it in the current lane until Stripe webhook or History sync confirms the payment.`
+                                                : "This payment return did not include a Stripe checkout session id. Keep the estimate in its current lane until Stripe webhook or History sync confirms the payment."
+                                            : paymentReturnEstimate
                                             ? `${paymentReturnEstimate.estimateNumber || "This estimate"} is open in the Paid lane with the latest local payment state.`
                                             : paymentReturnReference
                                                 ? `${paymentReturnReference} is not saved on this device. If the customer paid from their own phone, open History on the contractor device or sign in so cloud payment sync can catch up.`
@@ -864,13 +1534,19 @@ function HistoryPageContent() {
                                 type="button"
                                 className="shrink-0 rounded-lg"
                                 onClick={() => {
-                                    setActiveTab("paid")
-                                    if (paymentReturnEstimate) setExpandedId(paymentReturnEstimate.id)
+                                    setActiveTab(paymentReturnNeedsVerification && paymentReturnEstimate
+                                        ? getTabForEstimate(paymentReturnEstimate)
+                                        : "paid")
+                                    if (paymentReturnEstimate) {
+                                        setExpandedId(paymentReturnEstimate.id)
+                                    }
                                     if (isAuthenticated) void syncSentEstimatePaymentStatuses()
                                 }}
                             >
                                 <CircleDollarSign className="mr-2 h-4 w-4" />
-                                {paymentReturnEstimate ? "Show paid estimate" : "Check paid lane"}
+                                {paymentReturnNeedsVerification
+                                    ? "Check status"
+                                    : paymentReturnEstimate ? "Show paid estimate" : "Check paid lane"}
                             </Button>
                         </CardContent>
                     </Card>
@@ -1141,18 +1817,28 @@ function HistoryPageContent() {
                                         </p>
                                     )}
                                     <div className="mt-4 flex flex-wrap gap-2">
-                                        <Button
-                                            type="button"
-                                            onClick={() => void handleConnectQuickBooks()}
-                                            disabled={quickBooksConnecting || !quickBooksStatus.eligible}
-                                        >
-                                            {quickBooksConnecting ? (
-                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                            ) : (
-                                                <Link2 className="mr-2 h-4 w-4" />
-                                            )}
-                                            {quickBooksStatus.connected ? "Reconnect QuickBooks" : "Connect QuickBooks"}
-                                        </Button>
+                                        {quickBooksStatus.eligible ? (
+                                            <Button
+                                                type="button"
+                                                onClick={() => void handleConnectQuickBooks()}
+                                                disabled={quickBooksConnecting}
+                                                data-testid="history-quickbooks-connect-primary"
+                                            >
+                                                {quickBooksConnecting ? (
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                ) : (
+                                                    <Link2 className="mr-2 h-4 w-4" />
+                                                )}
+                                                {quickBooksStatus.connected ? "Reconnect QuickBooks" : "Connect QuickBooks"}
+                                            </Button>
+                                        ) : (
+                                            <Button asChild data-testid="history-quickbooks-upgrade-action">
+                                                <Link href={quickBooksUpgradeHref}>
+                                                    <Sparkles className="mr-2 h-4 w-4" />
+                                                    See Pro plan
+                                                </Link>
+                                            </Button>
+                                        )}
                                         <Button variant="outline" type="button" className={historyOutlineButtonClass} onClick={handleExportCSV}>
                                             <Download className="mr-2 h-4 w-4" />
                                             Export CSV
@@ -1176,21 +1862,36 @@ function HistoryPageContent() {
                                     </div>
                                 </div>
                                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                                    <Button
-                                        type="button"
-                                        size="sm"
-                                        className="rounded-lg"
-                                        onClick={() => void handleConnectQuickBooks()}
-                                        disabled={quickBooksConnecting}
-                                        data-testid="history-quickbooks-connect-retry-action"
-                                    >
-                                        {quickBooksConnecting ? (
-                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        ) : (
-                                            <RefreshCw className="mr-2 h-4 w-4" />
-                                        )}
-                                        Retry Connect
-                                    </Button>
+                                    {quickBooksPanelIssue.action === "upgrade" ? (
+                                        <Button asChild size="sm" className="rounded-lg" data-testid="history-quickbooks-panel-upgrade-action">
+                                            <Link href={quickBooksUpgradeHref}>
+                                                <Sparkles className="mr-2 h-4 w-4" />
+                                                See Pro plan
+                                            </Link>
+                                        </Button>
+                                    ) : (
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            className="rounded-lg"
+                                            onClick={() => {
+                                                if (quickBooksPanelIssue.action === "status") {
+                                                    void loadQuickBooks()
+                                                    return
+                                                }
+                                                void handleConnectQuickBooks()
+                                            }}
+                                            disabled={quickBooksPanelIssue.action === "status" ? quickBooksLoading : quickBooksConnecting}
+                                            data-testid={quickBooksPanelIssue.action === "status" ? "history-quickbooks-status-retry-action" : "history-quickbooks-connect-retry-action"}
+                                        >
+                                            {(quickBooksPanelIssue.action === "status" ? quickBooksLoading : quickBooksConnecting) ? (
+                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            ) : (
+                                                <RefreshCw className="mr-2 h-4 w-4" />
+                                            )}
+                                            {quickBooksPanelIssue.action === "status" ? "Retry status" : "Retry Connect"}
+                                        </Button>
+                                    )}
                                     <Button
                                         type="button"
                                         variant="outline"
@@ -1355,8 +2056,41 @@ function HistoryPageContent() {
                     const isExpanded = expandedId === estimate.id
                     const items = getAllItemsFromEstimate(estimate)
                     const priceTBDCount = getPriceTBDCount(estimate)
+                    const isCaptureDraft = activeTab === "drafts" && isCaptureOnlyDraft(estimate)
+                    const isScopeReviewed = hasScopeAssumptionsConfirmed(estimate)
+                    const draftSendReadiness = activeTab === "drafts" ? getDraftSendReadiness(estimate) : null
+                    const deliveryScopeReviewNeeded = needsScopeAssumptionsReview(estimate)
                     const actionIssue = historyActionIssue?.estimateId === estimate.id ? historyActionIssue : null
                     const isPaymentReturnEstimate = isPaymentSuccessReturn && matchesPaymentReturnEstimate(estimate, returnEstimateId, returnEstimateNumber)
+                    const estimateIsPaidLike = isEstimatePaidLike(estimate)
+                    const customerPortalSummary = getCustomerPortalSummary(estimate)
+                    const effectivePaymentLink = getEffectivePaymentLink(estimate, businessProfile)
+                    const shouldShowFollowUpAction = canSendCustomerFollowUp(estimate)
+                    const isApprovedSentQuote = activeTab === "sent"
+                        && estimate.status === "sent"
+                        && !estimateIsPaidLike
+                        && estimate.customerPortalStatus === "approved"
+                    const shouldCopyPaymentLinkPrimary = isApprovedSentQuote
+                        && Boolean(effectivePaymentLink)
+                    const canCreatePaymentLinkPrimary = isApprovedSentQuote
+                        && !effectivePaymentLink
+                        && !isLocalOnlyMode
+                    const paymentStatusLabel = estimate.paymentLink?.trim()
+                        ? "Payment link attached"
+                        : businessProfile?.payment_link?.trim()
+                            ? "Profile payment link"
+                            : canCreatePaymentLinkPrimary
+                                ? "Ready for payment link"
+                                : "No payment link"
+                    const paymentHelperText = estimate.paymentCompletedAt
+                        ? `Completed ${new Date(estimate.paymentCompletedAt).toLocaleDateString()}`
+                        : estimate.paymentLinkId
+                            ? "Polling keeps sent quotes current"
+                            : effectivePaymentLink
+                                ? "Ready to copy for customer payment"
+                                : canCreatePaymentLinkPrimary
+                                    ? "Create a card link for this approved quote"
+                                    : "Add a payment link before sending"
 
                     return (
                         <Card
@@ -1379,10 +2113,10 @@ function HistoryPageContent() {
                                                     {estimate.estimateNumber}
                                                 </span>
                                             ) : null}
-                                            <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium uppercase", getEstimateStatusTone(estimate.status))}>
+                                            <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium uppercase", getEstimateStatusTone(estimateIsPaidLike ? "paid" : estimate.status))}>
                                                 {estimate.type === "invoice"
                                                     ? "Invoice"
-                                                    : estimate.status === "paid"
+                                                    : estimateIsPaidLike
                                                         ? "Paid"
                                                         : estimate.status === "sent"
                                                             ? "Sent"
@@ -1390,6 +2124,16 @@ function HistoryPageContent() {
                                             </span>
                                         </div>
                                         <div className="flex flex-wrap gap-2">
+                                            {isCaptureDraft ? (
+                                                <Badge
+                                                    variant="outline"
+                                                    className="border-blue-400/30 bg-blue-500/10 text-blue-200"
+                                                    data-testid="history-capture-draft-badge"
+                                                >
+                                                    <Sparkles className="mr-1 h-3 w-3" />
+                                                    Needs AI draft
+                                                </Badge>
+                                            ) : null}
                                             {priceTBDCount > 0 && activeTab === "drafts" ? (
                                                 <Badge variant="outline" className="border-amber-400/30 bg-amber-500/10 text-amber-200">
                                                     <AlertCircle className="mr-1 h-3 w-3" />
@@ -1401,9 +2145,36 @@ function HistoryPageContent() {
                                                     Pending sync
                                                 </Badge>
                                             ) : null}
+                                            {isScopeReviewed ? (
+                                                <Badge variant="outline" className="border-emerald-400/30 bg-emerald-500/10 text-emerald-200" data-testid="history-scope-reviewed-badge">
+                                                    <CheckCircle2 className="mr-1 h-3 w-3" />
+                                                    Scope reviewed
+                                                </Badge>
+                                            ) : null}
+                                            {deliveryScopeReviewNeeded ? (
+                                                <Badge variant="outline" className="border-amber-400/30 bg-amber-500/10 text-amber-200" data-testid="history-scope-review-needed-badge">
+                                                    <AlertCircle className="mr-1 h-3 w-3" />
+                                                    Scope review needed
+                                                </Badge>
+                                            ) : null}
                                             {estimate.quickbooksInvoiceId ? (
                                                 <Badge variant="outline" className="border-sky-400/30 bg-sky-500/10 text-sky-200">
                                                     QB {estimate.quickbooksInvoiceStatus || "linked"}
+                                                </Badge>
+                                            ) : null}
+                                            {estimate.customerPortalUrl ? (
+                                                <Badge variant="outline" className="border-emerald-400/30 bg-emerald-500/10 text-emerald-200">
+                                                    Customer {customerPortalSummary.label.toLowerCase()}
+                                                </Badge>
+                                            ) : null}
+                                            {estimate.lastFollowedUpAt ? (
+                                                <Badge
+                                                    variant="outline"
+                                                    className="border-amber-400/30 bg-amber-500/10 text-amber-200"
+                                                    data-testid="history-follow-up-recorded-badge"
+                                                >
+                                                    <Clock3 className="mr-1 h-3 w-3" />
+                                                    {getFollowUpBadgeLabel(estimate)}
                                                 </Badge>
                                             ) : null}
                                         </div>
@@ -1415,8 +2186,12 @@ function HistoryPageContent() {
                                     <div className="w-full rounded-lg border border-white/10 bg-slate-950/55 p-3 lg:max-w-xs">
                                         <div className="flex items-start justify-between gap-3">
                                             <div>
-                                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Estimate total</p>
-                                                <p className="mt-1 text-2xl font-semibold">{formatAmount(estimate.totalAmount)}</p>
+                                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                                    {isCaptureDraft ? "Capture status" : "Estimate total"}
+                                                </p>
+                                                <p className="mt-1 text-2xl font-semibold">
+                                                    {isCaptureDraft ? "Saved" : formatAmount(estimate.totalAmount)}
+                                                </p>
                                             </div>
                                             <div className="min-w-[8.5rem] text-right text-[11px] leading-5 text-slate-400">
                                                 <p>Created {new Date(estimate.createdAt).toLocaleDateString()}</p>
@@ -1441,18 +2216,31 @@ function HistoryPageContent() {
                                     </div>
                                     <div className={historyCompactBoxClass}>
                                         <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Line items</p>
-                                        <p className="mt-1 text-sm font-semibold">{items.length} item{items.length === 1 ? "" : "s"}</p>
+                                        <p className="mt-1 text-sm font-semibold">
+                                            {isCaptureDraft ? "Field capture saved" : `${items.length} item${items.length === 1 ? "" : "s"}`}
+                                        </p>
                                         <p className="mt-1 line-clamp-1 text-xs text-slate-400">
-                                            {priceTBDCount > 0 ? `${priceTBDCount} still missing pricing` : "Pricing is fully assigned"}
+                                            {isCaptureDraft
+                                                ? "Resume to generate the quote"
+                                                : priceTBDCount > 0
+                                                    ? `${priceTBDCount} still missing pricing`
+                                                    : "Pricing is fully assigned"}
                                         </p>
                                     </div>
                                     <div className={historyCompactBoxClass}>
                                         <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Payment</p>
                                         <p className="mt-1 text-sm font-semibold">
-                                            {estimate.paymentLinkId ? "Payment link attached" : "No payment link"}
+                                            {paymentStatusLabel}
                                         </p>
                                         <p className="mt-1 line-clamp-1 text-xs text-slate-400">
-                                            {estimate.paymentCompletedAt ? `Completed ${new Date(estimate.paymentCompletedAt).toLocaleDateString()}` : "Polling keeps sent quotes current"}
+                                            {paymentHelperText}
+                                        </p>
+                                    </div>
+                                    <div className={historyCompactBoxClass} data-testid="history-customer-portal-status">
+                                        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Customer</p>
+                                        <p className="mt-1 text-sm font-semibold">{customerPortalSummary.label}</p>
+                                        <p className="mt-1 line-clamp-1 text-xs text-slate-400">
+                                            {customerPortalSummary.helper}
                                         </p>
                                     </div>
                                     <div className={historyCompactBoxClass}>
@@ -1469,7 +2257,11 @@ function HistoryPageContent() {
                                 {actionIssue ? (
                                     <div
                                         className="rounded-lg border border-amber-300/20 bg-amber-400/10 p-3"
-                                        data-testid={actionIssue.kind === "pdf" ? "history-pdf-issue" : "history-quickbooks-issue"}
+                                        data-testid={actionIssue.kind === "pdf"
+                                            ? "history-pdf-issue"
+                                            : actionIssue.kind === "payment_link"
+                                                ? "history-payment-link-issue"
+                                                : "history-quickbooks-issue"}
                                         role="alert"
                                     >
                                         <div className="flex gap-2">
@@ -1511,6 +2303,43 @@ function HistoryPageContent() {
                                                     >
                                                         <FileText className="mr-2 h-4 w-4" />
                                                         Preview instead
+                                                    </Button>
+                                                </>
+                                            ) : actionIssue.kind === "payment_link" ? (
+                                                <>
+                                                    {actionIssue.paymentLinkIssue?.actionHref && actionIssue.paymentLinkIssue.actionLabel ? (
+                                                        <Button asChild size="sm" className="rounded-lg" data-testid="history-payment-link-profile-action">
+                                                            <Link href={actionIssue.paymentLinkIssue.actionHref}>
+                                                                <Sparkles className="mr-2 h-4 w-4" />
+                                                                {actionIssue.paymentLinkIssue.actionLabel}
+                                                            </Link>
+                                                        </Button>
+                                                    ) : null}
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        className="rounded-lg"
+                                                        onClick={() => void handleCreateApprovedPaymentLink(estimate)}
+                                                        disabled={creatingPaymentLinkEstimateId === estimate.id}
+                                                        data-testid="history-payment-link-retry-action"
+                                                    >
+                                                        {creatingPaymentLinkEstimateId === estimate.id ? (
+                                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                        ) : (
+                                                            <RefreshCw className="mr-2 h-4 w-4" />
+                                                        )}
+                                                        Retry pay link
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="rounded-lg border-amber-300/20 bg-slate-950/70 text-amber-100 hover:bg-amber-400/10"
+                                                        onClick={handleExportCSV}
+                                                        data-testid="history-payment-link-export-action"
+                                                    >
+                                                        <Download className="mr-2 h-4 w-4" />
+                                                        Export CSV
                                                     </Button>
                                                 </>
                                             ) : (
@@ -1682,27 +2511,96 @@ function HistoryPageContent() {
                                                 size="sm"
                                                 className="w-full sm:w-auto"
                                                 onClick={() => handleEditDraft(estimate)}
-                                                data-testid="history-edit-draft-button"
+                                                data-testid={isCaptureDraft ? "history-resume-capture-button" : "history-edit-draft-button"}
                                             >
-                                                {priceTBDCount > 0 ? (
+                                                {isCaptureDraft ? (
+                                                    <ArrowRight className="mr-1 h-3 w-3" />
+                                                ) : priceTBDCount > 0 ? (
                                                     <AlertCircle className="mr-1 h-3 w-3" />
                                                 ) : (
                                                     <FileText className="mr-1 h-3 w-3" />
                                                 )}
-                                                {priceTBDCount > 0 ? "Finish pricing" : "Review draft"}
+                                                {isCaptureDraft ? "Resume capture" : priceTBDCount > 0 ? "Finish pricing" : "Review draft"}
                                             </Button>
                                         )}
 
-                                        {activeTab === "sent" && estimate.status === "sent" && (
-                                            <Button
-                                                variant="default"
-                                                size="sm"
-                                                className="w-full sm:w-auto"
-                                                onClick={() => handleMarkAsPaid(estimate.id)}
-                                            >
-                                                <CircleDollarSign className="mr-1 h-3 w-3" />
-                                                Mark Paid
-                                            </Button>
+                                        {activeTab === "sent" && estimate.status === "sent" && !estimateIsPaidLike && (
+                                            deliveryScopeReviewNeeded ? (
+                                                <Button
+                                                    variant="default"
+                                                    size="sm"
+                                                    className="w-full sm:w-auto"
+                                                    onClick={() => requestDeliveryScopeReview(estimate, "Review scope assumptions before sharing this estimate.")}
+                                                    data-testid="history-review-scope-before-delivery-action"
+                                                >
+                                                    <AlertCircle className="mr-1 h-3 w-3" />
+                                                    Review scope
+                                                </Button>
+                                            ) : isOpenCustomerChangeRequest(estimate) ? (
+                                                <Button
+                                                    variant="default"
+                                                    size="sm"
+                                                    className="w-full sm:w-auto"
+                                                    onClick={() => handleStartCustomerRevision(estimate)}
+                                                    data-testid="history-customer-revision-action"
+                                                >
+                                                    <FileText className="mr-1 h-3 w-3" />
+                                                    Revise
+                                                </Button>
+                                            ) : estimate.customerPortalStatus === "viewed" ? (
+                                                <Button
+                                                    variant="default"
+                                                    size="sm"
+                                                    className="w-full sm:w-auto"
+                                                    onClick={() => void handleOpenFollowUp(estimate)}
+                                                    disabled={creatingPortalLinkEstimateId === estimate.id}
+                                                    data-testid="history-customer-follow-up-action"
+                                                >
+                                                    {creatingPortalLinkEstimateId === estimate.id ? (
+                                                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                                    ) : (
+                                                        <Mail className="mr-1 h-3 w-3" />
+                                                    )}
+                                                    Follow-up
+                                                </Button>
+                                            ) : shouldCopyPaymentLinkPrimary ? (
+                                                <Button
+                                                    variant="default"
+                                                    size="sm"
+                                                    className="w-full sm:w-auto"
+                                                    onClick={() => void handleCopyPaymentLink(effectivePaymentLink)}
+                                                    data-testid="history-copy-payment-link-action"
+                                                >
+                                                    <Copy className="mr-1 h-3 w-3" />
+                                                    Copy pay link
+                                                </Button>
+                                            ) : canCreatePaymentLinkPrimary ? (
+                                                <Button
+                                                    variant="default"
+                                                    size="sm"
+                                                    className="w-full sm:w-auto"
+                                                    onClick={() => void handleCreateApprovedPaymentLink(estimate)}
+                                                    disabled={creatingPaymentLinkEstimateId === estimate.id}
+                                                    data-testid="history-create-payment-link-action"
+                                                >
+                                                    {creatingPaymentLinkEstimateId === estimate.id ? (
+                                                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                                    ) : (
+                                                        <CreditCard className="mr-1 h-3 w-3" />
+                                                    )}
+                                                    Create pay link
+                                                </Button>
+                                            ) : (
+                                                <Button
+                                                    variant="default"
+                                                    size="sm"
+                                                    className="w-full sm:w-auto"
+                                                    onClick={() => handleMarkAsPaid(estimate.id)}
+                                                >
+                                                    <CircleDollarSign className="mr-1 h-3 w-3" />
+                                                    Mark Paid
+                                                </Button>
+                                            )
                                         )}
 
                                         <Button
@@ -1731,7 +2629,7 @@ function HistoryPageContent() {
                                             className="grid grid-cols-2 gap-2 border-t border-white/10 px-3 py-3 sm:flex sm:flex-wrap"
                                             data-testid="history-estimate-secondary-actions"
                                         >
-                                            {activeTab === "drafts" && (
+                                            {activeTab === "drafts" && draftSendReadiness?.ready ? (
                                                 <Button
                                                     variant="secondary"
                                                     size="sm"
@@ -1741,9 +2639,20 @@ function HistoryPageContent() {
                                                     <Send className="mr-1 h-3 w-3" />
                                                     Mark Sent
                                                 </Button>
-                                            )}
+                                            ) : activeTab === "drafts" ? (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="w-full shrink-0 border-amber-300/25 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15 hover:text-amber-50 sm:w-auto"
+                                                    onClick={() => handleEditDraft(estimate)}
+                                                    data-testid="history-review-before-sending-action"
+                                                >
+                                                    <AlertCircle className="mr-1 h-3 w-3" />
+                                                    {draftSendReadiness?.actionLabel || "Review draft"}
+                                                </Button>
+                                            ) : null}
 
-                                            {estimate.status === "sent" && estimate.type !== "invoice" && (
+                                            {estimate.status === "sent" && !estimateIsPaidLike && estimate.type !== "invoice" && (
                                                 <Button
                                                     variant="secondary"
                                                     size="sm"
@@ -1754,6 +2663,23 @@ function HistoryPageContent() {
                                                     To Invoice
                                                 </Button>
                                             )}
+
+                                            {activeTab === "sent" && estimate.status === "sent" && !estimateIsPaidLike && (
+                                                isOpenCustomerChangeRequest(estimate)
+                                                || estimate.customerPortalStatus === "viewed"
+                                                || shouldCopyPaymentLinkPrimary
+                                                || canCreatePaymentLinkPrimary
+                                            ) ? (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className={historySecondaryButtonClass}
+                                                    onClick={() => handleMarkAsPaid(estimate.id)}
+                                                >
+                                                    <CircleDollarSign className="mr-1 h-3 w-3" />
+                                                    Mark Paid
+                                                </Button>
+                                            ) : null}
 
                                             <Button
                                                 variant="outline"
@@ -1779,23 +2705,58 @@ function HistoryPageContent() {
                                                 </Button>
                                             ) : (
                                                 <>
-                                                    {estimate.status !== "paid" && (
+                                                    {deliveryScopeReviewNeeded && !estimateIsPaidLike ? (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="w-full shrink-0 border-amber-300/25 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15 hover:text-amber-50 sm:w-auto"
+                                                            onClick={() => requestDeliveryScopeReview(estimate, "Review scope assumptions before sharing this estimate.")}
+                                                            data-testid="history-secondary-review-scope-action"
+                                                        >
+                                                            <AlertCircle className="mr-1 h-3 w-3" />
+                                                            Review scope
+                                                        </Button>
+                                                    ) : null}
+                                                    {!deliveryScopeReviewNeeded && estimate.status !== "draft" && !estimateIsPaidLike ? (
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
                                                             className={historySecondaryButtonClass}
-                                                            onClick={() => setFollowUpEstimate(estimate)}
+                                                            onClick={() => void handleCreateCustomerPortalLink(estimate)}
+                                                            disabled={creatingPortalLinkEstimateId === estimate.id}
+                                                            data-testid="history-customer-portal-link-action"
                                                         >
-                                                            <Mail className="mr-1 h-3 w-3" />
+                                                            {creatingPortalLinkEstimateId === estimate.id ? (
+                                                                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                                            ) : (
+                                                                <Link2 className="mr-1 h-3 w-3" />
+                                                            )}
+                                                            {estimate.customerPortalUrl ? "Copy approval link" : "Customer link"}
+                                                        </Button>
+                                                    ) : null}
+                                                    {!deliveryScopeReviewNeeded && shouldShowFollowUpAction && (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className={historySecondaryButtonClass}
+                                                            onClick={() => void handleOpenFollowUp(estimate)}
+                                                            disabled={creatingPortalLinkEstimateId === estimate.id}
+                                                            data-testid="history-secondary-follow-up-action"
+                                                        >
+                                                            {creatingPortalLinkEstimateId === estimate.id ? (
+                                                                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                                            ) : (
+                                                                <Mail className="mr-1 h-3 w-3" />
+                                                            )}
                                                             Follow-up
                                                         </Button>
                                                     )}
-                                                    {estimate.status !== "paid" && (
+                                                    {!deliveryScopeReviewNeeded && !estimateIsPaidLike && (
                                                         <Button
                                                             variant="secondary"
                                                             size="sm"
                                                             className="w-full shrink-0 bg-slate-800 text-slate-100 hover:bg-slate-700 sm:w-auto"
-                                                            onClick={() => setSmsEstimate(estimate)}
+                                                            onClick={() => handleOpenSms(estimate)}
                                                         >
                                                             <MessageSquare className="mr-1 h-3 w-3" />
                                                             SMS
@@ -1879,6 +2840,12 @@ function HistoryPageContent() {
                         estimateNumber={followUpEstimate.estimateNumber}
                         totalAmount={followUpEstimate.totalAmount}
                         businessName={businessProfile?.business_name || ""}
+                        approvalLink={followUpEstimate.customerPortalUrl}
+                        customerPortalStatus={followUpEstimate.customerPortalStatus}
+                        customerViewedAt={followUpEstimate.customerViewedAt}
+                        lastFollowedUpAt={followUpEstimate.lastFollowedUpAt}
+                        lastFollowUpChannel={followUpEstimate.lastFollowUpChannel}
+                        onSent={() => handleFollowUpEmailSent(followUpEstimate)}
                     />
                 )
             }
@@ -1887,9 +2854,13 @@ function HistoryPageContent() {
                     <SmsModal
                         open={!!smsEstimate}
                         onClose={() => setSmsEstimate(null)}
+                        clientPhone={smsEstimate.clientPhone}
                         estimateTotal={smsEstimate.totalAmount}
                         paymentLink={smsEstimate.paymentLink || businessProfile?.payment_link || null}
                         businessName={businessProfile?.business_name}
+                        approvalLink={smsEstimate.customerPortalUrl}
+                        customerPortalStatus={smsEstimate.customerPortalStatus}
+                        approvalLinkStatus={canSendCustomerFollowUp(smsEstimate) ? "included" : "signin"}
                         onSend={(toPhoneNumber, message) => handleSendSms(smsEstimate, toPhoneNumber, message)}
                     />
                 )

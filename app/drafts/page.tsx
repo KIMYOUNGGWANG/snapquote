@@ -7,6 +7,7 @@ import dynamic from "next/dynamic"
 import {
     AlertCircle,
     ArrowRight,
+    CheckCircle2,
     Clock3,
     Edit3,
     FileText,
@@ -14,6 +15,7 @@ import {
     PlusCircle,
     Search,
     Send,
+    Sparkles,
     Trash2,
     X,
 } from "lucide-react"
@@ -28,6 +30,7 @@ import {
     updateEstimateStatus,
     type LocalEstimate,
 } from "@/lib/estimates-storage"
+import { getDraftSendReadiness, hasScopeAssumptionsConfirmed, isCaptureOnlyDraft } from "@/lib/estimates/draft-state"
 import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
 import { cn } from "@/lib/utils"
 
@@ -53,6 +56,14 @@ function getDraftDisplayName(estimate: LocalEstimate): string {
     return estimate.clientName || estimate.estimateNumber || "Untitled draft"
 }
 
+function formatScopeReviewedCount(count: number): string {
+    return count === 1 ? "1 scope reviewed" : `${count} scopes reviewed`
+}
+
+function formatScopeReviewNeededCount(count: number): string {
+    return count === 1 ? "1 scope review" : `${count} scope reviews`
+}
+
 function buildDraftSearchText(estimate: LocalEstimate): string {
     const itemText = getAllItemsFromEstimate(estimate)
         .map((item) => `${item.description} ${item.category} ${item.quantity} ${item.unit} ${item.unit_price} ${item.total}`)
@@ -63,6 +74,8 @@ function buildDraftSearchText(estimate: LocalEstimate): string {
         estimate.clientAddress,
         estimate.estimateNumber,
         estimate.summary_note,
+        estimate.attachments?.originalTranscript,
+        estimate.attachments?.photos?.length,
         estimate.totalAmount,
         estimate.createdAt,
         estimate.updatedAt,
@@ -97,12 +110,22 @@ export default function DraftsPage() {
     const draftStats = useMemo(() => {
         const draftValue = drafts.reduce((sum, draft) => sum + draft.totalAmount, 0)
         const pricedNeededCount = drafts.reduce((sum, draft) => sum + getPriceTBDCount(draft), 0)
+        const aiDraftNeededCount = drafts.filter(isCaptureOnlyDraft).length
+        const scopeReviewedCount = drafts.filter(hasScopeAssumptionsConfirmed).length
+        const scopeReviewNeededCount = drafts.filter((draft) => getDraftSendReadiness(draft).reason === "scope").length
         const pendingSyncCount = drafts.filter((draft) => draft.synced === false).length
-        const nextActionDraft = drafts.find((draft) => getPriceTBDCount(draft) > 0) || drafts[0] || null
+        const nextActionDraft = drafts.find(isCaptureOnlyDraft)
+            || drafts.find((draft) => getPriceTBDCount(draft) > 0)
+            || drafts.find((draft) => getDraftSendReadiness(draft).reason === "scope")
+            || drafts[0]
+            || null
 
         return {
             draftValue,
             pricedNeededCount,
+            aiDraftNeededCount,
+            scopeReviewedCount,
+            scopeReviewNeededCount,
             pendingSyncCount,
             nextActionDraft,
         }
@@ -118,13 +141,33 @@ export default function DraftsPage() {
     const nextActionPriceTBDCount = draftStats.nextActionDraft
         ? getPriceTBDCount(draftStats.nextActionDraft)
         : 0
-    const nextActionButtonLabel = nextActionPriceTBDCount > 0 ? "Finish pricing" : "Review draft"
+    const nextActionIsCaptureOnly = draftStats.nextActionDraft
+        ? isCaptureOnlyDraft(draftStats.nextActionDraft)
+        : false
+    const nextActionSendReadiness = draftStats.nextActionDraft
+        ? getDraftSendReadiness(draftStats.nextActionDraft)
+        : null
+    const nextActionNeedsScopeReview = nextActionSendReadiness?.reason === "scope"
+    const nextActionButtonLabel = nextActionIsCaptureOnly
+        ? "Resume capture"
+        : nextActionPriceTBDCount > 0
+            ? "Finish pricing"
+            : nextActionNeedsScopeReview
+                ? "Review scope"
+                : "Review draft"
 
     const handleEditDraft = (estimate: LocalEstimate) => {
         router.push(`/new-estimate?draftId=${encodeURIComponent(estimate.id)}`)
     }
 
     const handleMarkSent = async (estimate: LocalEstimate) => {
+        const sendReadiness = getDraftSendReadiness(estimate)
+        if (!sendReadiness.ready) {
+            toast(sendReadiness.message, "warning")
+            handleEditDraft(estimate)
+            return
+        }
+
         setSendingDraftId(estimate.id)
         try {
             await updateEstimateStatus(estimate.id, "sent")
@@ -217,7 +260,9 @@ export default function DraftsPage() {
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between lg:flex-col lg:items-stretch lg:justify-start">
                             <div className="flex min-w-0 gap-3">
                                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-amber-300/25 bg-amber-300/10 text-amber-100">
-                                    {nextActionPriceTBDCount > 0 ? (
+                                    {nextActionIsCaptureOnly ? (
+                                        <Sparkles className="h-5 w-5" />
+                                    ) : nextActionPriceTBDCount > 0 || nextActionNeedsScopeReview ? (
                                         <AlertCircle className="h-5 w-5" />
                                     ) : (
                                         <Clock3 className="h-5 w-5" />
@@ -225,15 +270,23 @@ export default function DraftsPage() {
                                 </div>
                                 <div className="min-w-0">
                                     <p className="text-sm font-semibold text-amber-50">
-                                        {nextActionPriceTBDCount > 0
-                                            ? "Next up: finish draft pricing"
-                                            : "Next up: open the latest draft"}
+                                        {nextActionIsCaptureOnly
+                                            ? "Next up: turn capture into quote"
+                                            : nextActionPriceTBDCount > 0
+                                                ? "Next up: finish draft pricing"
+                                                : nextActionNeedsScopeReview
+                                                    ? "Next up: review scope assumptions"
+                                                    : "Next up: open the latest draft"}
                                     </p>
                                     <p className="mt-1 line-clamp-2 break-words text-sm leading-6 text-amber-50/75 [overflow-wrap:anywhere]" data-testid="drafts-next-action-description">
                                         {getDraftDisplayName(draftStats.nextActionDraft)}
-                                        {nextActionPriceTBDCount > 0
-                                            ? ` has ${nextActionPriceTBDCount} line item${nextActionPriceTBDCount === 1 ? "" : "s"} without pricing.`
-                                            : " is ready for review before sending."}
+                                        {nextActionIsCaptureOnly
+                                            ? " has field notes saved but no AI draft yet."
+                                            : nextActionPriceTBDCount > 0
+                                                ? ` has ${nextActionPriceTBDCount} line item${nextActionPriceTBDCount === 1 ? "" : "s"} without pricing.`
+                                                : nextActionNeedsScopeReview
+                                                    ? " has field notes that need confirmation before sending."
+                                                    : " is ready for review before sending."}
                                     </p>
                                 </div>
                             </div>
@@ -263,6 +316,21 @@ export default function DraftsPage() {
                                     {draftStats.pendingSyncCount > 0 ? (
                                         <Badge variant="outline" className="border-amber-400/30 bg-amber-500/10 text-amber-200">
                                             {draftStats.pendingSyncCount} pending sync
+                                        </Badge>
+                                    ) : null}
+                                    {draftStats.aiDraftNeededCount > 0 ? (
+                                        <Badge variant="outline" className="border-blue-400/30 bg-blue-500/10 text-blue-200" data-testid="drafts-capture-needed-badge">
+                                            {draftStats.aiDraftNeededCount} needs AI draft
+                                        </Badge>
+                                    ) : null}
+                                    {draftStats.scopeReviewedCount > 0 ? (
+                                        <Badge variant="outline" className="border-emerald-400/30 bg-emerald-500/10 text-emerald-200" data-testid="drafts-scope-reviewed-count">
+                                            {formatScopeReviewedCount(draftStats.scopeReviewedCount)}
+                                        </Badge>
+                                    ) : null}
+                                    {draftStats.scopeReviewNeededCount > 0 ? (
+                                        <Badge variant="outline" className="border-amber-400/30 bg-amber-500/10 text-amber-200" data-testid="drafts-scope-review-needed-count">
+                                            {formatScopeReviewNeededCount(draftStats.scopeReviewNeededCount)}
                                         </Badge>
                                     ) : null}
                                 </div>
@@ -337,7 +405,10 @@ export default function DraftsPage() {
                                 const items = getAllItemsFromEstimate(draft)
                                 const previewItems = items.slice(0, 2)
                                 const priceTBDCount = getPriceTBDCount(draft)
-                                const primaryActionLabel = priceTBDCount > 0 ? "Finish pricing" : "Review draft"
+                                const isCaptureDraft = isCaptureOnlyDraft(draft)
+                                const isScopeReviewed = hasScopeAssumptionsConfirmed(draft)
+                                const sendReadiness = getDraftSendReadiness(draft)
+                                const primaryActionLabel = isCaptureDraft ? "Resume capture" : priceTBDCount > 0 ? "Finish pricing" : "Review draft"
 
                                 return (
                                     <article className="field-card p-4" key={draft.id} data-testid="drafts-card">
@@ -353,7 +424,12 @@ export default function DraftsPage() {
                                                     <span className="rounded-full border border-white/10 bg-slate-950/65 px-2.5 py-1 font-mono text-xs text-slate-300">
                                                         {draft.estimateNumber}
                                                     </span>
-                                                    {priceTBDCount > 0 ? (
+                                                    {isCaptureDraft ? (
+                                                        <Badge variant="outline" className="border-blue-400/30 bg-blue-500/10 text-blue-200" data-testid="drafts-capture-draft-badge">
+                                                            <Sparkles className="mr-1 h-3 w-3" />
+                                                            Needs AI draft
+                                                        </Badge>
+                                                    ) : priceTBDCount > 0 ? (
                                                         <Badge variant="outline" className="border-amber-400/30 bg-amber-500/10 text-amber-200">
                                                             <AlertCircle className="mr-1 h-3 w-3" />
                                                             {priceTBDCount} TBD
@@ -366,6 +442,18 @@ export default function DraftsPage() {
                                                     {draft.synced === false ? (
                                                         <Badge variant="outline" className="border-sky-400/30 bg-sky-500/10 text-sky-200">
                                                             Local changes
+                                                        </Badge>
+                                                    ) : null}
+                                                    {isScopeReviewed ? (
+                                                        <Badge variant="outline" className="border-emerald-400/30 bg-emerald-500/10 text-emerald-200" data-testid="drafts-scope-reviewed-badge">
+                                                            <CheckCircle2 className="mr-1 h-3 w-3" />
+                                                            Scope reviewed
+                                                        </Badge>
+                                                    ) : null}
+                                                    {sendReadiness.reason === "scope" ? (
+                                                        <Badge variant="outline" className="border-amber-400/30 bg-amber-500/10 text-amber-200" data-testid="drafts-scope-review-needed-badge">
+                                                            <AlertCircle className="mr-1 h-3 w-3" />
+                                                            Scope review needed
                                                         </Badge>
                                                     ) : null}
                                                 </div>
@@ -391,7 +479,9 @@ export default function DraftsPage() {
                                                     </div>
                                                     <div className="field-mini">
                                                         <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Line items</p>
-                                                        <p className="mt-1 text-sm font-semibold">{items.length} item{items.length === 1 ? "" : "s"}</p>
+                                                        <p className="mt-1 text-sm font-semibold" data-testid="drafts-line-item-status">
+                                                            {isCaptureDraft ? "Field capture saved" : `${items.length} item${items.length === 1 ? "" : "s"}`}
+                                                        </p>
                                                     </div>
                                                     <div className="field-mini">
                                                         <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Updated</p>
@@ -418,8 +508,12 @@ export default function DraftsPage() {
 
                                             <div className="grid gap-2 lg:w-48">
                                                 <div className="rounded-lg border border-white/10 bg-slate-950/60 p-3 lg:text-right">
-                                                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Draft total</p>
-                                                    <p className="mt-1 text-2xl font-semibold">{formatAmount(draft.totalAmount)}</p>
+                                                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                                        {isCaptureDraft ? "Capture status" : "Draft total"}
+                                                    </p>
+                                                    <p className="mt-1 text-2xl font-semibold">
+                                                        {isCaptureDraft ? "Saved" : formatAmount(draft.totalAmount)}
+                                                    </p>
                                                     <p className="mt-1 text-xs text-slate-500">Created {formatDate(draft.createdAt)}</p>
                                                 </div>
                                                 <Button
@@ -431,21 +525,34 @@ export default function DraftsPage() {
                                                     <Edit3 className="mr-2 h-4 w-4" />
                                                     {primaryActionLabel}
                                                 </Button>
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    className="h-11 rounded-lg border-white/10 bg-slate-950/60 text-slate-100 hover:bg-slate-900"
-                                                    onClick={() => void handleMarkSent(draft)}
-                                                    disabled={sendingDraftId === draft.id}
-                                                    data-testid="drafts-mark-sent-button"
-                                                >
-                                                    {sendingDraftId === draft.id ? (
-                                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                    ) : (
-                                                        <Send className="mr-2 h-4 w-4" />
-                                                    )}
-                                                    Mark sent
-                                                </Button>
+                                                {!isCaptureDraft && sendReadiness.ready ? (
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        className="h-11 rounded-lg border-white/10 bg-slate-950/60 text-slate-100 hover:bg-slate-900"
+                                                        onClick={() => void handleMarkSent(draft)}
+                                                        disabled={sendingDraftId === draft.id}
+                                                        data-testid="drafts-mark-sent-button"
+                                                    >
+                                                        {sendingDraftId === draft.id ? (
+                                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                        ) : (
+                                                            <Send className="mr-2 h-4 w-4" />
+                                                        )}
+                                                        Mark sent
+                                                    </Button>
+                                                ) : !isCaptureDraft ? (
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        className="h-11 rounded-lg border-amber-300/25 bg-amber-500/10 text-amber-100 hover:bg-amber-500/15 hover:text-amber-50"
+                                                        onClick={() => handleEditDraft(draft)}
+                                                        data-testid="drafts-review-before-send-button"
+                                                    >
+                                                        <AlertCircle className="mr-2 h-4 w-4" />
+                                                        {sendReadiness.actionLabel}
+                                                    </Button>
+                                                ) : null}
                                                 <Button
                                                     type="button"
                                                     variant="ghost"

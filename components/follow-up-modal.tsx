@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { AlertTriangle, CheckCircle2, DollarSign, Loader2, Mail, Send, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Clock, DollarSign, Eye, Link2, Loader2, Mail, Send, X } from "lucide-react"
 import { toast } from "@/components/toast"
 import { withAuthHeaders } from "@/lib/auth-headers"
 import { buildDeliveryIssue, type DeliveryIssue } from "@/lib/delivery-issues"
@@ -21,6 +21,29 @@ interface FollowUpModalProps {
     estimateNumber: string
     totalAmount: number
     businessName?: string
+    approvalLink?: string
+    customerPortalStatus?: CustomerPortalFollowUpStatus
+    customerViewedAt?: string
+    lastFollowedUpAt?: string
+    lastFollowUpChannel?: FollowUpChannel
+    onSent?: () => void | Promise<void>
+}
+
+type CustomerPortalFollowUpStatus = "shared" | "viewed" | "approved" | "change_requested"
+type FollowUpChannel = "email" | "sms" | "automation"
+type FollowUpRecencySummary = {
+    title: string
+    helper: string
+    isRecent: boolean
+}
+
+type FollowUpPortalSummary = {
+    label: string
+    helper: string
+    badge: string
+    icon: "eye" | "link" | "check" | "alert" | "clock"
+    className: string
+    iconClassName: string
 }
 
 type SendEmailResult = {
@@ -36,18 +59,176 @@ function getErrorMessage(error: unknown, fallback: string): string {
     return fallback
 }
 
+function formatFollowUpStatusDate(value?: string): string {
+    if (!value) return ""
+
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return ""
+
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+}
+
+function getFollowUpChannelLabel(channel?: FollowUpChannel): string {
+    if (channel === "email") return "Email follow-up"
+    if (channel === "sms") return "SMS follow-up"
+    if (channel === "automation") return "Automated follow-up"
+
+    return "Follow-up"
+}
+
+function getFollowUpRelativeLabel(value: string, now = new Date()): string {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return ""
+
+    const diffMs = Math.max(0, now.getTime() - date.getTime())
+    const diffMinutes = Math.floor(diffMs / (1000 * 60))
+    if (diffMinutes < 60) return diffMinutes <= 1 ? "just now" : `${diffMinutes}m ago`
+
+    const diffHours = Math.floor(diffMinutes / 60)
+    if (diffHours < 24) return `${diffHours}h ago`
+
+    const dateLabel = formatFollowUpStatusDate(value)
+    return dateLabel ? `on ${dateLabel}` : ""
+}
+
+function getFollowUpRecencySummary({
+    lastFollowedUpAt,
+    lastFollowUpChannel,
+}: {
+    lastFollowedUpAt?: string
+    lastFollowUpChannel?: FollowUpChannel
+}): FollowUpRecencySummary | null {
+    if (!lastFollowedUpAt) return null
+
+    const date = new Date(lastFollowedUpAt)
+    if (Number.isNaN(date.getTime())) return null
+
+    const hoursSinceFollowUp = (Date.now() - date.getTime()) / (1000 * 60 * 60)
+    const isRecent = hoursSinceFollowUp < 48
+    const relativeLabel = getFollowUpRelativeLabel(lastFollowedUpAt)
+    const channelLabel = getFollowUpChannelLabel(lastFollowUpChannel)
+
+    return {
+        title: isRecent ? "Followed up recently" : "Last follow-up recorded",
+        helper: `${channelLabel}${relativeLabel ? ` ${relativeLabel}` : ""}. ${isRecent
+            ? "Send again only if you have a new update for the customer."
+            : "Use this note to keep customer contact spaced out."}`,
+        isRecent,
+    }
+}
+
+function getFollowUpApprovalLine({
+    approvalLink,
+    customerPortalStatus,
+}: {
+    approvalLink?: string
+    customerPortalStatus?: CustomerPortalFollowUpStatus
+}): string {
+    if (!approvalLink) return ""
+
+    if (customerPortalStatus === "viewed") {
+        return `\n\nIf the scope looks good, you can approve it or request changes here: ${approvalLink}`
+    }
+
+    if (customerPortalStatus === "shared") {
+        return `\n\nThe review link is ready here: ${approvalLink}`
+    }
+
+    return `\n\nYou can review, approve, or request changes here: ${approvalLink}`
+}
+
+function getFollowUpPortalSummary({
+    approvalLink,
+    customerPortalStatus,
+    customerViewedAt,
+}: {
+    approvalLink?: string
+    customerPortalStatus?: CustomerPortalFollowUpStatus
+    customerViewedAt?: string
+}): FollowUpPortalSummary {
+    if (customerPortalStatus === "viewed") {
+        const viewedLabel = formatFollowUpStatusDate(customerViewedAt)
+        return {
+            label: "Quote viewed",
+            helper: viewedLabel
+                ? `Customer opened the approval link ${viewedLabel}. Follow up while it is fresh.`
+                : "Customer opened the approval link. Follow up while it is fresh.",
+            badge: "Warm lead",
+            icon: "eye",
+            className: "border-sky-300/25 bg-sky-500/10 text-sky-100",
+            iconClassName: "border-sky-300/25 bg-sky-300/10 text-sky-100",
+        }
+    }
+
+    if (customerPortalStatus === "approved") {
+        return {
+            label: "Approved",
+            helper: "Customer already approved this quote. Collect payment instead of sending a generic reminder.",
+            badge: "Approved",
+            icon: "check",
+            className: "border-emerald-300/25 bg-emerald-500/10 text-emerald-100",
+            iconClassName: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
+        }
+    }
+
+    if (customerPortalStatus === "change_requested") {
+        return {
+            label: "Changes requested",
+            helper: "Customer asked for changes. Start a revision instead of sending a generic reminder.",
+            badge: "Revise",
+            icon: "alert",
+            className: "border-amber-300/25 bg-amber-500/10 text-amber-100",
+            iconClassName: "border-amber-300/25 bg-amber-300/10 text-amber-100",
+        }
+    }
+
+    if (customerPortalStatus === "shared" || approvalLink) {
+        return {
+            label: "Link shared",
+            helper: "Approval link is ready, but the customer has not opened it yet.",
+            badge: "Waiting",
+            icon: "link",
+            className: "border-blue-300/20 bg-blue-500/10 text-blue-100",
+            iconClassName: "border-blue-300/25 bg-blue-300/10 text-blue-100",
+        }
+    }
+
+    return {
+        label: "No approval link",
+        helper: "This reminder will send without a customer approval link.",
+        badge: "Manual",
+        icon: "clock",
+        className: "border-slate-500/25 bg-slate-900/70 text-slate-200",
+        iconClassName: "border-slate-500/25 bg-slate-800 text-slate-200",
+    }
+}
+
+function FollowUpPortalSummaryIcon({ summary }: { summary: FollowUpPortalSummary }) {
+    if (summary.icon === "eye") return <Eye className="h-4 w-4" aria-hidden="true" />
+    if (summary.icon === "link") return <Link2 className="h-4 w-4" aria-hidden="true" />
+    if (summary.icon === "check") return <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+    if (summary.icon === "alert") return <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+
+    return <Clock className="h-4 w-4" aria-hidden="true" />
+}
+
 function getDefaultFollowUpMessage({
     clientName,
     estimateNumber,
     totalAmount,
     businessName,
+    approvalLink,
+    customerPortalStatus,
 }: {
     clientName: string
     estimateNumber: string
     totalAmount: number
     businessName: string
+    approvalLink?: string
+    customerPortalStatus?: CustomerPortalFollowUpStatus
 }) {
-    return `Hi ${clientName || "there"},\n\nI wanted to follow up on the estimate (${estimateNumber}) for $${totalAmount.toFixed(2)} that I sent you recently.\n\nPlease let me know if you have any questions or would like to proceed.\n\nBest regards,\n${businessName}`
+    const approvalLine = getFollowUpApprovalLine({ approvalLink, customerPortalStatus })
+    return `Hi ${clientName || "there"},\n\nI wanted to follow up on the estimate (${estimateNumber}) for $${totalAmount.toFixed(2)} that I sent you recently.${approvalLine}\n\nPlease let me know if you have any questions or would like to proceed.\n\nBest regards,\n${businessName}`
 }
 
 export function FollowUpModal({
@@ -57,19 +238,33 @@ export function FollowUpModal({
     clientEmail = "",
     estimateNumber,
     totalAmount,
-    businessName = "SnapQuote"
+    businessName = "SnapQuote",
+    approvalLink,
+    customerPortalStatus,
+    customerViewedAt,
+    lastFollowedUpAt,
+    lastFollowUpChannel,
+    onSent,
 }: FollowUpModalProps) {
     const followUpBusinessName = businessName.trim() || "SnapQuote"
+    const portalSummary = getFollowUpPortalSummary({
+        approvalLink,
+        customerPortalStatus,
+        customerViewedAt,
+    })
     const [email, setEmail] = useState(clientEmail)
     const [message, setMessage] = useState(() => getDefaultFollowUpMessage({
         clientName,
         estimateNumber,
         totalAmount,
         businessName: followUpBusinessName,
+        approvalLink,
+        customerPortalStatus,
     }))
     const [sending, setSending] = useState(false)
     const [deliveryIssue, setDeliveryIssue] = useState<DeliveryIssue | null>(null)
     const deliveryIssueRef = useRef<HTMLDivElement | null>(null)
+    const followUpRecency = getFollowUpRecencySummary({ lastFollowedUpAt, lastFollowUpChannel })
     const trimmedEmail = email.trim()
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)
     const canAttemptSend = Boolean(trimmedEmail && message.trim() && !sending)
@@ -89,10 +284,12 @@ export function FollowUpModal({
             estimateNumber,
             totalAmount,
             businessName: followUpBusinessName,
+            approvalLink,
+            customerPortalStatus,
         }))
         setDeliveryIssue(null)
         setSending(false)
-    }, [clientEmail, clientName, estimateNumber, followUpBusinessName, open, totalAmount])
+    }, [approvalLink, clientEmail, clientName, customerPortalStatus, estimateNumber, followUpBusinessName, open, totalAmount])
 
     useEffect(() => {
         if (!deliveryIssue) return
@@ -155,6 +352,7 @@ export function FollowUpModal({
                 }
                 toast("Email client opened. Please send manually.", "success")
             } else if (result.success) {
+                await onSent?.()
                 toast("Follow-up email sent.", "success")
             } else {
                 throw new Error(typeof result.error === "string" ? result.error : "Failed to send follow-up email.")
@@ -225,6 +423,48 @@ export function FollowUpModal({
                             </p>
                         </div>
                     </div>
+
+                    <div
+                        className={`flex min-w-0 gap-2 rounded-lg border p-3 ${portalSummary.className}`}
+                        data-testid="follow-up-portal-status"
+                    >
+                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${portalSummary.iconClassName}`}>
+                            <FollowUpPortalSummaryIcon summary={portalSummary} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                            <span className="flex items-start justify-between gap-2">
+                                <span className="text-sm font-semibold" data-testid="follow-up-portal-status-label">
+                                    {portalSummary.label}
+                                </span>
+                                <span className="shrink-0 rounded-md border border-white/10 bg-slate-950/35 px-2 py-0.5 text-[10px] font-semibold">
+                                    {portalSummary.badge}
+                                </span>
+                            </span>
+                            <span className="mt-1 block break-words text-xs leading-5 text-slate-300 [overflow-wrap:anywhere]" data-testid="follow-up-portal-status-helper">
+                                {portalSummary.helper}
+                            </span>
+                        </span>
+                    </div>
+
+                    {followUpRecency ? (
+                        <div
+                            className={followUpRecency.isRecent
+                                ? "rounded-lg border border-amber-300/25 bg-amber-400/10 p-3 text-amber-100"
+                                : "rounded-lg border border-white/10 bg-slate-950/55 p-3 text-slate-200"}
+                            data-testid="follow-up-recent-contact"
+                            role="status"
+                        >
+                            <div className="flex gap-2">
+                                <Clock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                                <div className="min-w-0">
+                                    <p className="text-sm font-semibold">{followUpRecency.title}</p>
+                                    <p className="mt-1 break-words text-xs leading-5 opacity-80 [overflow-wrap:anywhere]">
+                                        {followUpRecency.helper}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    ) : null}
 
                     <div className="space-y-2">
                         <Label htmlFor="follow-up-email" className="text-slate-300">Client Email *</Label>

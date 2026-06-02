@@ -16,7 +16,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { FeedbackModal } from "@/components/feedback-modal"
 import { supabase } from "@/lib/supabase"
-import { getDraftEstimates } from "@/lib/estimates-storage"
+import { getDraftEstimates, type LocalEstimate } from "@/lib/estimates-storage"
+import { isCaptureOnlyDraft } from "@/lib/estimates/draft-state"
 import { getAllItemsFromEstimate } from "@/lib/estimates/math"
 import { subscribeOfflineQueueChanged } from "@/lib/offline-events"
 import { useTheme } from "@/components/theme-provider"
@@ -32,12 +33,26 @@ export function MoreMenu({ children }: MoreMenuProps) {
     const [isFeedbackOpen, setIsFeedbackOpen] = useState(false)
     const [authLoading, setAuthLoading] = useState(true)
     const [userEmail, setUserEmail] = useState<string | null>(null)
-    const [draftSummary, setDraftSummary] = useState<{ count: number; needsPricing: number } | null>(null)
+    const [draftSummary, setDraftSummary] = useState<{ count: number; needsAiDraft: number; needsPricing: number } | null>(null)
+
+    const getDraftSummaryDescription = (summary: { count: number; needsAiDraft: number; needsPricing: number }) => {
+        if (summary.count === 0) return "Start or resume local quote drafts"
+
+        const openDrafts = `${summary.count} open draft${summary.count === 1 ? "" : "s"}`
+        if (summary.needsAiDraft > 0) {
+            const needsAiDraft = summary.needsAiDraft === 1 ? "1 needs AI draft" : `${summary.needsAiDraft} need AI drafts`
+            return `${openDrafts} · ${needsAiDraft}`
+        }
+        if (summary.needsPricing > 0) {
+            const needsPricing = summary.needsPricing === 1 ? "1 needs pricing" : `${summary.needsPricing} need pricing`
+            return `${openDrafts} · ${needsPricing}`
+        }
+
+        return openDrafts
+    }
 
     const draftDescription = draftSummary
-        ? draftSummary.count === 0
-            ? "Start or resume local quote drafts"
-            : `${draftSummary.count} open draft${draftSummary.count === 1 ? "" : "s"}${draftSummary.needsPricing > 0 ? ` · ${draftSummary.needsPricing} needs pricing` : ""}`
+        ? getDraftSummaryDescription(draftSummary)
         : "Resume open quotes"
 
     const draftItem = { href: "/drafts", label: "Draft Workbench", icon: FileText, description: draftDescription }
@@ -67,7 +82,10 @@ export function MoreMenu({ children }: MoreMenuProps) {
 
                 setDraftSummary({
                     count: drafts.length,
-                    needsPricing: drafts.reduce((sum, draft) => {
+                    needsAiDraft: drafts.filter(isCaptureOnlyDraft).length,
+                    needsPricing: drafts.reduce((sum, draft: LocalEstimate) => {
+                        if (isCaptureOnlyDraft(draft)) return sum
+
                         const missingPriceCount = getAllItemsFromEstimate(draft).filter((item) => item.unit_price === 0).length
                         return sum + missingPriceCount
                     }, 0),
