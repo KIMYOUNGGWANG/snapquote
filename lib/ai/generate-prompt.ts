@@ -123,7 +123,7 @@ CRITICAL INSTRUCTIONS
 
 3. 🌐 LANGUAGE PROCESSING (Spanish/Korean/English):
    - The user is a professional working in North America.
-   - **ASSUME ALL CURRENCY IS LOCAL (${currencyCode}).**
+   - **ASSUME ALL CURRENCY IS LOCAL (\${currencyCode}).**
    - ${getSourceLanguageGuidance(sourceLanguage)}
    - Translate Spanish or Korean trade terms into professional English.
    - Keep customer-facing output in English for all fields.
@@ -194,8 +194,8 @@ Response must be raw JSON. Use the new professional format:
     }
   ],
   "summary_note": "Concise scope summary.",
-  "payment_terms": "${country === "Canada" ? "Payment due upon completion. E-transfer or credit card accepted. HST applies." : "Payment due upon completion. Check, Zelle, or card accepted."}",
-  "closing_note": "Thank you for choosing ${businessName}. We stand behind our work with a 90-day guarantee.",
+  "payment_terms": "\${country === 'Canada' ? 'Payment due upon completion. E-transfer or credit card accepted. HST applies.' : 'Payment due upon completion. Check, Zelle, or card accepted.'}",
+  "closing_note": "Thank you for choosing \${businessName}. We stand behind our work with a 90-day guarantee.",
   "warnings": [],
   "upsellOptions": [
     {
