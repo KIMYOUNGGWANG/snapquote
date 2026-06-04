@@ -1,7 +1,6 @@
 import { needsScopeAssumptionsReview } from "@/lib/estimates/draft-state"
 import type {
     CandidateContact,
-    CandidateCustomerPortal,
     CandidateEstimate,
     CustomerPortalFollowupStatus,
     RecoveryPayload,
@@ -173,12 +172,4 @@ function extractCandidateScopeReviewState(estimate: CandidateEstimate) {
 
 export function candidateNeedsScopeReview(estimate: CandidateEstimate): boolean {
     return needsScopeAssumptionsReview(extractCandidateScopeReviewState(estimate))
-}
-
-export function readCustomerPortalFromRow(row: Record<string, unknown>): CandidateCustomerPortal {
-    return {
-        status: normalizeCustomerPortalStatus(row.status),
-        shareUrl: asOptionalHttpUrl(row.share_url),
-        customerNote: asTrimmedString(row.customer_note, 500),
-    }
 }
