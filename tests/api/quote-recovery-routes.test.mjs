@@ -84,6 +84,73 @@ describe("POST /api/quotes/recovery/trigger", () => {
     assert.match(data.error, /pro|team/i)
   })
 
+  test("returns 400 for malformed JSON before candidate lookup", async () => {
+    setServiceEnv()
+    const state = getTestState()
+    state.routeAuth.result = {
+      ok: true,
+      userId: "user-pro",
+    }
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === "profiles" && query.action === "select") {
+        return { data: { plan_tier: "pro" }, error: null }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = new Request("http://localhost/api/quotes/recovery/trigger", {
+      method: "POST",
+      headers: {
+        ...bearerHeader("token-pro"),
+        "content-type": "application/json",
+      },
+      body: "{not-json",
+    })
+
+    const res = await recoveryPost(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 400)
+    assert.equal(data.error, "Invalid JSON body")
+    assert.equal(
+      state.supabase.queryCalls.some((call) => call.table === "estimates" && call.action === "select"),
+      false
+    )
+  })
+
+  test("returns 400 for invalid estimateId payload before candidate lookup", async () => {
+    setServiceEnv()
+    const state = getTestState()
+    state.routeAuth.result = {
+      ok: true,
+      userId: "user-pro",
+    }
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === "profiles" && query.action === "select") {
+        return { data: { plan_tier: "pro" }, error: null }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = jsonRequest(
+      "http://localhost/api/quotes/recovery/trigger",
+      { estimateId: "../estimate-1" },
+      { headers: bearerHeader("token-pro") }
+    )
+
+    const res = await recoveryPost(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 400)
+    assert.equal(data.error, "Invalid recovery payload")
+    assert.equal(
+      state.supabase.queryCalls.some((call) => call.table === "estimates" && call.action === "select"),
+      false
+    )
+  })
+
   test("supports dryRun and returns planned follow-up actions", async () => {
     setServiceEnv()
     const state = getTestState()
@@ -602,6 +669,30 @@ describe("POST /api/quotes/recovery/trigger", () => {
     assert.match(state.resend.sendCalls[0].subject, /SQ-1002/)
     assert.match(state.resend.sendCalls[0].html, /review link is ready/i)
     assert.match(state.resend.sendCalls[0].html, /snapquote\.test\/q\/review-1002/)
+
+    const claimUpdate = state.supabase.queryCalls.find(
+      (call) => call.table === "estimates" && call.action === "update" && call.mode === "maybeSingle"
+    )
+    assert.ok(claimUpdate)
+    assert.equal(typeof claimUpdate.payload.first_followup_queued_at, "string")
+
+    const sentUpdate = state.supabase.queryCalls.find(
+      (call) =>
+        call.table === "estimates" &&
+        call.action === "update" &&
+        call.mode === "execute" &&
+        typeof call.payload.first_followed_up_at === "string"
+    )
+    assert.ok(sentUpdate)
+    assert.equal(sentUpdate.payload.first_followed_up_at, sentUpdate.payload.last_followed_up_at)
+
+    const releaseUpdate = state.supabase.queryCalls.find(
+      (call) =>
+        call.table === "estimates" &&
+        call.action === "update" &&
+        call.payload.first_followup_queued_at === null
+    )
+    assert.equal(releaseUpdate, undefined)
   })
 
   test("sends follow-up SMS and deducts one credit when phone exists", async () => {
@@ -701,6 +792,30 @@ describe("POST /api/quotes/recovery/trigger", () => {
       assert.ok(ledgerInsert)
       assert.equal(ledgerInsert.payload.delta_credits, -1)
       assert.equal(ledgerInsert.payload.reason, "quote_recovery_sms")
+
+      const claimUpdate = state.supabase.queryCalls.find(
+        (call) => call.table === "estimates" && call.action === "update" && call.mode === "maybeSingle"
+      )
+      assert.ok(claimUpdate)
+      assert.equal(typeof claimUpdate.payload.first_followup_queued_at, "string")
+
+      const sentUpdate = state.supabase.queryCalls.find(
+        (call) =>
+          call.table === "estimates" &&
+          call.action === "update" &&
+          call.mode === "execute" &&
+          typeof call.payload.first_followed_up_at === "string"
+      )
+      assert.ok(sentUpdate)
+      assert.equal(sentUpdate.payload.first_followed_up_at, sentUpdate.payload.last_followed_up_at)
+
+      const releaseUpdate = state.supabase.queryCalls.find(
+        (call) =>
+          call.table === "estimates" &&
+          call.action === "update" &&
+          call.payload.first_followup_queued_at === null
+      )
+      assert.equal(releaseUpdate, undefined)
     } finally {
       globalThis.fetch = originalFetch
     }
