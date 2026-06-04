@@ -5,145 +5,42 @@ import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 import { resolveEffectivePlanTier } from "@/lib/server/effective-plan"
-import { needsScopeAssumptionsReview } from "@/lib/estimates/draft-state"
 import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
+import {
+    appendCustomerPortalReviewLink,
+    buildCustomerDecisionSkipPreview,
+    buildPaidSkipPreview,
+    buildScopeReviewSkipPreview,
+    defaultRecoveryMessage,
+    getCustomerDecisionSkipAction,
+    isActionableRecoveryAction,
+    toMessagePreview,
+} from "@/lib/server/quote-recovery-messages"
+import {
+    asOptionalHttpUrl,
+    asPositiveNumber,
+    asTrimmedString,
+    candidateNeedsScopeReview,
+    customerPortalKey,
+    extractCandidateContact,
+    getErrorCode,
+    getErrorMessage,
+    isPlainObject,
+    normalizeCustomerPortalStatus,
+    normalizePayload,
+    shouldProcessEstimate,
+} from "@/lib/server/quote-recovery-normalization"
+import type {
+    CandidateCustomerPortal,
+    CandidateEstimate,
+    CustomerPortalFollowupStatus,
+    RecoveryAction,
+    RecoveryResult,
+} from "@/lib/server/quote-recovery-types"
 
 const PRO_TIERS = new Set(["pro", "team"])
-const RECOVERY_LOOKBACK_MS = 48 * 60 * 60 * 1000
 const MAX_CANDIDATES = 50
-const MAX_PREVIEW_LENGTH = 320
-const ESTIMATE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/
-const E164_PHONE_PATTERN = /^\+[1-9]\d{7,14}$/
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const GEMINI_RECOVERY_MODEL = process.env.GEMINI_RECOVERY_MODEL?.trim() || "gemini-2.5-flash"
-
-type RecoveryAction =
-    | "sent_sms"
-    | "sent_email"
-    | "skipped_no_contact"
-    | "skipped_scope_review_needed"
-    | "skipped_customer_paid"
-    | "skipped_customer_approved"
-    | "skipped_customer_change_requested"
-
-type RecoveryResult = {
-    estimateId: string
-    estimateNumber: string
-    action: RecoveryAction
-    messagePreview: string
-    customerPortalStatus?: CustomerPortalFollowupStatus
-}
-
-type RecoveryPayload = {
-    estimateId?: string
-    dryRun: boolean
-}
-
-type CustomerPortalFollowupStatus = "shared" | "viewed" | "approved" | "change_requested"
-
-type CandidateEstimate = {
-    id: string
-    user_id: string
-    estimate_number?: string | null
-    total_amount?: number | null
-    sent_at?: string | null
-    created_at?: string | null
-    first_followup_queued_at?: string | null
-    first_followed_up_at?: string | null
-    last_followed_up_at?: string | null
-    payment_completed_at?: string | null
-    clients?: unknown
-    profiles?: unknown
-    estimate_attachments?: unknown
-}
-
-type CandidateCustomerPortal = {
-    status: CustomerPortalFollowupStatus
-    shareUrl: string
-    customerNote: string
-}
-
-type CandidateContact = {
-    clientName: string
-    clientEmail: string
-    clientPhone: string
-    businessName: string
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === "object" && !Array.isArray(value)
-}
-
-function asTrimmedString(value: unknown, maxLength: number): string {
-    if (typeof value !== "string") return ""
-    return value.trim().slice(0, maxLength)
-}
-
-function asOptionalHttpUrl(value: unknown): string {
-    const url = asTrimmedString(value, 2048)
-    if (!url) return ""
-
-    try {
-        const parsed = new URL(url)
-        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return ""
-        return parsed.toString()
-    } catch {
-        return ""
-    }
-}
-
-function asPositiveNumber(value: unknown): number | null {
-    if (typeof value === "number" && Number.isFinite(value)) return value
-    if (typeof value === "string") {
-        const parsed = Number(value)
-        if (Number.isFinite(parsed)) return parsed
-    }
-    return null
-}
-
-function normalizePhone(value: unknown): string {
-    const phone = asTrimmedString(value, 32)
-    if (!phone) return ""
-    return E164_PHONE_PATTERN.test(phone) ? phone : ""
-}
-
-function normalizeEmail(value: unknown): string {
-    const email = asTrimmedString(value, 320).toLowerCase()
-    if (!email) return ""
-    return EMAIL_PATTERN.test(email) ? email : ""
-}
-
-function parseIsoMillis(value: unknown): number | null {
-    if (typeof value !== "string") return null
-    const parsed = Date.parse(value)
-    return Number.isFinite(parsed) ? parsed : null
-}
-
-function normalizeEstimateId(value: unknown): string | null {
-    if (typeof value !== "string") return null
-    const trimmed = value.trim()
-    if (!trimmed) return null
-    if (!ESTIMATE_ID_PATTERN.test(trimmed)) return null
-    return trimmed
-}
-
-function normalizePayload(input: unknown): RecoveryPayload | null {
-    if (input === null || input === undefined) {
-        return { dryRun: false }
-    }
-
-    if (!isPlainObject(input)) return null
-
-    const estimateId = normalizeEstimateId(input.estimateId)
-    if (input.estimateId !== undefined && !estimateId) return null
-
-    const dryRun = input.dryRun === true
-
-    return {
-        ...(estimateId ? { estimateId } : {}),
-        dryRun,
-    }
-}
 
 async function parseJsonBody(req: Request): Promise<unknown> {
     const raw = await req.text()
@@ -187,136 +84,6 @@ async function loadPlanTier(
         planTier: resolveEffectivePlanTier(data || {}),
         error: null,
     }
-}
-
-function extractRelationObject(value: unknown): Record<string, unknown> | null {
-    if (Array.isArray(value)) {
-        const first = value[0]
-        return isPlainObject(first) ? first : null
-    }
-    return isPlainObject(value) ? value : null
-}
-
-function extractCandidateContact(estimate: CandidateEstimate): CandidateContact {
-    const client = extractRelationObject(estimate.clients)
-    const profile = extractRelationObject(estimate.profiles)
-
-    const clientName = asTrimmedString(client?.name, 120) || "there"
-    const clientEmail = normalizeEmail(client?.email)
-    const clientPhone = normalizePhone(client?.phone)
-    const businessName = asTrimmedString(profile?.business_name, 120) || "your contractor"
-
-    return {
-        clientName,
-        clientEmail,
-        clientPhone,
-        businessName,
-    }
-}
-
-function shouldProcessEstimate(estimate: CandidateEstimate, nowMs: number): boolean {
-    const sentAt = parseIsoMillis(estimate.sent_at)
-    const createdAt = parseIsoMillis(estimate.created_at)
-    const reference = sentAt ?? createdAt
-
-    if (!reference) return false
-    if (reference > nowMs - RECOVERY_LOOKBACK_MS) return false
-    if (estimate.last_followed_up_at) return false
-    if (estimate.first_followed_up_at) return false
-
-    return true
-}
-
-function normalizeCustomerPortalStatus(value: unknown): CustomerPortalFollowupStatus {
-    if (
-        value === "shared" ||
-        value === "viewed" ||
-        value === "approved" ||
-        value === "change_requested"
-    ) {
-        return value
-    }
-
-    return "shared"
-}
-
-function getErrorCode(error: unknown): string {
-    if (!isPlainObject(error)) return ""
-    return asTrimmedString(error.code, 80)
-}
-
-function getErrorMessage(error: unknown): string {
-    if (!isPlainObject(error)) return ""
-    return asTrimmedString(error.message, 500)
-}
-
-function customerPortalKey(userId: unknown, estimateId: unknown): string {
-    return `${asTrimmedString(userId, 128)}:${asTrimmedString(estimateId, 128)}`
-}
-
-function getCustomerDecisionSkipAction(portal: CandidateCustomerPortal | undefined): RecoveryAction | null {
-    if (portal?.status === "approved") return "skipped_customer_approved"
-    if (portal?.status === "change_requested") return "skipped_customer_change_requested"
-    return null
-}
-
-function isActionableRecoveryAction(action: RecoveryAction): boolean {
-    return action === "sent_sms" || action === "sent_email"
-}
-
-function buildCustomerDecisionSkipPreview(portal: CandidateCustomerPortal, estimateNumber: string): string {
-    if (portal.status === "approved") {
-        return `Estimate ${estimateNumber} is already approved by the customer, so Quote Recovery will not send a reminder.`
-    }
-
-    const note = portal.customerNote
-        ? ` Customer note: ${portal.customerNote}`
-        : ""
-
-    return `Estimate ${estimateNumber} has a customer change request, so start a revision instead of sending a reminder.${note}`
-}
-
-function extractAttachmentObject(value: unknown): Record<string, unknown> | null {
-    if (Array.isArray(value)) {
-        const first = value.find((entry) => isPlainObject(entry))
-        return isPlainObject(first) ? first : null
-    }
-
-    return isPlainObject(value) ? value : null
-}
-
-function extractCandidateScopeReviewState(estimate: CandidateEstimate) {
-    const attachment = extractAttachmentObject(estimate.estimate_attachments)
-    const photos = Array.isArray(attachment?.photos)
-        ? attachment.photos.filter((photo): photo is string => typeof photo === "string" && photo.trim() !== "")
-        : []
-    const originalTranscript = asTrimmedString(attachment?.original_transcript, 20000)
-    const scopeAssumptionsConfirmedAt = asTrimmedString(attachment?.scope_assumptions_confirmed_at, 80)
-
-    return {
-        attachments: {
-            photos,
-            ...(originalTranscript ? { originalTranscript } : {}),
-            ...(scopeAssumptionsConfirmedAt ? { scopeAssumptionsConfirmedAt } : {}),
-        },
-    }
-}
-
-function candidateNeedsScopeReview(estimate: CandidateEstimate): boolean {
-    return needsScopeAssumptionsReview(extractCandidateScopeReviewState(estimate))
-}
-
-function buildScopeReviewSkipPreview(estimateNumber: string): string {
-    return `Estimate ${estimateNumber} has thin field scope notes that need review before Quote Recovery sends a reminder. Open the estimate and confirm the scope assumptions first.`
-}
-
-function buildPaidSkipPreview(estimateNumber: string): string {
-    return `Estimate ${estimateNumber} is already marked paid, so Quote Recovery will not send a reminder.`
-}
-
-function appendCustomerPortalReviewLink(message: string, shareUrl: string): string {
-    if (!shareUrl || message.includes(shareUrl)) return message
-    return `${message.trim()} Review or approve here: ${shareUrl}`
 }
 
 async function loadCustomerPortalLinks(
@@ -373,30 +140,6 @@ async function loadCustomerPortalLinks(
     }
 
     return links
-}
-
-function defaultRecoveryMessage(input: {
-    clientName: string
-    estimateNumber: string
-    totalAmount?: number | null
-    businessName: string
-    customerPortalStatus?: CustomerPortalFollowupStatus
-    customerPortalUrl?: string
-}): string {
-    const totalText =
-        typeof input.totalAmount === "number" && Number.isFinite(input.totalAmount)
-            ? ` regarding your ${Math.max(0, input.totalAmount).toFixed(2)} quote`
-            : ""
-
-    if (input.customerPortalUrl) {
-        if (input.customerPortalStatus === "viewed") {
-            return `Hi ${input.clientName}, just checking in on estimate ${input.estimateNumber}${totalText} from ${input.businessName}. If the scope looks good, you can approve it or request changes here: ${input.customerPortalUrl}`
-        }
-
-        return `Hi ${input.clientName}, following up on estimate ${input.estimateNumber}${totalText} from ${input.businessName}. The review link is ready here: ${input.customerPortalUrl} Let me know if you want to adjust anything or lock in a schedule.`
-    }
-
-    return `Hi ${input.clientName}, just checking in on estimate ${input.estimateNumber}${totalText} from ${input.businessName}. Let me know if you have any questions or want to lock in a schedule.`
 }
 
 async function generateRecoveryMessage(input: {
@@ -476,11 +219,6 @@ async function generateRecoveryMessage(input: {
         console.error("Quote recovery Gemini exception:", error)
         return fallback
     }
-}
-
-function toMessagePreview(message: string): string {
-    const singleLine = message.replace(/\s+/g, " ").trim()
-    return singleLine.slice(0, MAX_PREVIEW_LENGTH)
 }
 
 async function getSmsCreditsBalance(
