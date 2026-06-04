@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { OpenAI } from "openai"
+import { parsePotentialJsonContent } from "@/lib/ai/json"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 
 const openai = new OpenAI({
@@ -15,6 +16,10 @@ type ChatMessagePart =
     | { type: "text"; text: string }
     | { type: "image_url"; image_url: { url: string } }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object"
+}
+
 function toFiniteNumber(value: unknown, fallback = 0): number {
     if (typeof value === "number" && Number.isFinite(value)) return value
     if (typeof value === "string") {
@@ -27,21 +32,6 @@ function toFiniteNumber(value: unknown, fallback = 0): number {
 function toTrimmedString(value: unknown, maxLength: number): string {
     if (typeof value !== "string") return ""
     return value.trim().slice(0, maxLength)
-}
-
-function parsePotentialJsonContent(input: string): unknown {
-    const trimmed = input.trim()
-    if (!trimmed) throw new Error("Empty AI response")
-
-    try {
-        return JSON.parse(trimmed)
-    } catch {
-        const unwrapped = trimmed
-            .replace(/^```(?:json)?\s*/i, "")
-            .replace(/\s*```$/i, "")
-            .trim()
-        return JSON.parse(unwrapped)
-    }
 }
 
 function extractMessageContent(content: unknown): string {
@@ -160,7 +150,10 @@ export async function POST(request: Request) {
             )
         }
 
-        const parsed = parsePotentialJsonContent(rawContent) as Record<string, unknown>
+        const parsedContent = parsePotentialJsonContent(rawContent, {
+            emptyMessage: "Empty AI response",
+        })
+        const parsed = isRecord(parsedContent) ? parsedContent : {}
 
         // PUBLIC response: only totals, no item details
         const response = {

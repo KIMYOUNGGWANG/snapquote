@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { Resend } from "resend"
+import { extractGeminiText } from "@/lib/ai/gemini"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
@@ -396,18 +397,6 @@ function defaultRecoveryMessage(input: {
     }
 
     return `Hi ${input.clientName}, just checking in on estimate ${input.estimateNumber}${totalText} from ${input.businessName}. Let me know if you have any questions or want to lock in a schedule.`
-}
-
-function extractGeminiText(payload: any): string {
-    const candidates = Array.isArray(payload?.candidates) ? payload.candidates : []
-    const first = candidates[0]
-    const parts = Array.isArray(first?.content?.parts) ? first.content.parts : []
-
-    const text = parts
-        .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
-        .find((part: string) => part.trim().length > 0)
-
-    return text ? text.trim() : ""
 }
 
 async function generateRecoveryMessage(input: {

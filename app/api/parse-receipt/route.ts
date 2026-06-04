@@ -1,5 +1,6 @@
 import { OpenAI } from "openai"
 import { NextResponse } from "next/server"
+import { parsePotentialJsonContent } from "@/lib/ai/json"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { parseFormDataPayload } from "@/lib/server/request-validation"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
@@ -58,23 +59,6 @@ function clamp(value: number, min: number, max: number): number {
 function toTrimmedString(value: unknown, maxLength: number): string {
     if (typeof value !== "string") return ""
     return value.trim().slice(0, maxLength)
-}
-
-function parsePotentialJsonContent(input: string): any {
-    const trimmed = input.trim()
-    if (!trimmed) {
-        throw new Error("Parse provider returned empty content")
-    }
-
-    try {
-        return JSON.parse(trimmed)
-    } catch {
-        const unwrapped = trimmed
-            .replace(/^```(?:json)?\s*/i, "")
-            .replace(/\s*```$/i, "")
-            .trim()
-        return JSON.parse(unwrapped)
-    }
 }
 
 function extractMessageContent(content: unknown): string {
@@ -335,7 +319,9 @@ export async function POST(req: Request) {
             throw new Error("Parse provider returned empty message")
         }
 
-        const parsed = parsePotentialJsonContent(content)
+        const parsed = parsePotentialJsonContent(content, {
+            emptyMessage: "Parse provider returned empty content",
+        })
         const normalized = normalizeParsedReceipt(parsed)
 
         if (normalized.items.length === 0) {

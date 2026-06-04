@@ -1,5 +1,7 @@
 import { OpenAI } from "openai"
 import { NextResponse } from "next/server"
+import { requireGeminiText } from "@/lib/ai/gemini"
+import { parsePotentialJsonContent } from "@/lib/ai/json"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { parseJsonRequest } from "@/lib/server/request-validation"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
@@ -8,33 +10,15 @@ import { resolveEffectivePlanTier } from "@/lib/server/effective-plan"
 import { enforceUsageQuota, recordUsage } from "@/lib/server/usage-quota"
 import { generateRequestSchema } from "@/lib/validation/api-schemas"
 import { ANONYMOUS_GENERATE_LIMIT } from "@/lib/free-tier"
+import { normalizeEstimatePayload } from "@/lib/estimates/normalize"
 
 type UserMessageContentPart =
     | { type: "text"; text: string }
     | { type: "image_url"; image_url: { url: string } }
 
-type NormalizedUpsellOption = {
-    tier: "better" | "best"
-    title: string
-    description: string
-    addedItems: Array<ReturnType<typeof normalizeItem>>
-}
-
-type NormalizedEstimate = {
-    items: Array<ReturnType<typeof normalizeItem>>
-    sections?: Array<{
-        id: string
-        name: string
-        divisionCode?: string
-        items: Array<ReturnType<typeof normalizeItem>>
-    }>
-    summary_note: string
-    payment_terms: string
-    closing_note: string
-    warnings: string[]
-    upsellOptions?: NormalizedUpsellOption[]
-    photoAnalysis?: NormalizedPhotoEstimateAnalysis
-}
+type GeminiMessageContentPart =
+    | { text: string }
+    | { inlineData: { mimeType: string; data: string } }
 
 type ModelGenerationResult = {
     content: string
@@ -44,18 +28,6 @@ type ModelGenerationResult = {
 
 type SourceLanguage = "auto" | "en" | "es" | "ko"
 type GenerateWorkflow = "standard" | "photo_estimate"
-type PricingConfidence = "low" | "medium" | "high"
-type NormalizedPhotoEstimateAnalysis = {
-    observations: string[]
-    suggestedScope: string[]
-    materialSuggestions: Array<{
-        label: string
-        quantity: number
-        unit: string
-        reason: string
-    }>
-    pricingConfidence: PricingConfidence
-}
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -68,152 +40,6 @@ const GENERATE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000
 const GENERATE_RATE_LIMIT_MAX = 20
 const ANONYMOUS_GENERATE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 const PRO_TIERS = new Set(["pro", "team"])
-
-function toFiniteNumber(value: unknown, fallback = 0): number {
-    if (typeof value === "number" && Number.isFinite(value)) return value
-    if (typeof value === "string") {
-        const parsed = Number(value)
-        if (Number.isFinite(parsed)) return parsed
-    }
-    return fallback
-}
-
-function normalizeItem(item: any, index: number) {
-    const quantity = toFiniteNumber(item?.quantity, 1)
-    const unitPrice = toFiniteNumber(item?.unit_price, 0)
-    const total = toFiniteNumber(item?.total, quantity * unitPrice)
-
-    return {
-        id: typeof item?.id === "string" && item.id.trim() ? item.id : `item-${index + 1}`,
-        itemNumber: Math.max(1, Math.floor(toFiniteNumber(item?.itemNumber, index + 1))),
-        category: typeof item?.category === "string" && item.category.trim() ? item.category : "PARTS",
-        description: typeof item?.description === "string" ? item.description.trim() : "",
-        quantity,
-        unit: typeof item?.unit === "string" && item.unit.trim() ? item.unit : "ea",
-        unit_price: unitPrice,
-        total,
-    }
-}
-
-function normalizeUpsellTier(value: unknown, fallback: "better" | "best"): "better" | "best" {
-    if (typeof value !== "string") return fallback
-    const normalized = value.trim().toLowerCase()
-    if (normalized === "better" || normalized === "best") {
-        return normalized
-    }
-    return fallback
-}
-
-function normalizeUpsellOptions(rawOptions: unknown): NormalizedUpsellOption[] {
-    if (!Array.isArray(rawOptions)) return []
-
-    return rawOptions
-        .map((option: any, optionIndex: number) => {
-            const fallbackTier = optionIndex === 0 ? "better" : "best"
-            const tier = normalizeUpsellTier(option?.tier, fallbackTier)
-            const title =
-                typeof option?.title === "string" && option.title.trim()
-                    ? option.title.trim()
-                    : tier === "better"
-                        ? "Better Option"
-                        : "Best Option"
-            const description =
-                typeof option?.description === "string" ? option.description.trim() : ""
-
-            const addedItems = (Array.isArray(option?.addedItems) ? option.addedItems : [])
-                .map((item: any, itemIndex: number) => normalizeItem(item, itemIndex))
-                .filter((item: any) => item.description !== "")
-
-            if (addedItems.length === 0) {
-                return null
-            }
-
-            return {
-                tier,
-                title,
-                description,
-                addedItems,
-            }
-        })
-        .filter((option): option is NormalizedUpsellOption => option !== null)
-}
-
-function normalizePricingConfidence(value: unknown): PricingConfidence {
-    if (typeof value !== "string") return "medium"
-    const normalized = value.trim().toLowerCase()
-    if (normalized === "low" || normalized === "medium" || normalized === "high") {
-        return normalized
-    }
-    return "medium"
-}
-
-function normalizeStringList(input: unknown, maxItems: number, maxLength: number): string[] {
-    if (!Array.isArray(input)) return []
-
-    return input
-        .filter((value): value is string => typeof value === "string")
-        .map((value) => value.trim().slice(0, maxLength))
-        .filter(Boolean)
-        .slice(0, maxItems)
-}
-
-function normalizePhotoEstimateAnalysis(rawAnalysis: unknown): NormalizedPhotoEstimateAnalysis | undefined {
-    const analysis = rawAnalysis && typeof rawAnalysis === "object" ? rawAnalysis as Record<string, unknown> : null
-    if (!analysis) return undefined
-
-    const observations = normalizeStringList(analysis.observations, 6, 180)
-    const suggestedScope = normalizeStringList(analysis.suggestedScope, 6, 180)
-    const materialSuggestions = (Array.isArray(analysis.materialSuggestions) ? analysis.materialSuggestions : [])
-        .map((suggestion: any) => {
-            const label = typeof suggestion?.label === "string" ? suggestion.label.trim().slice(0, 120) : ""
-            if (!label) return null
-
-            const quantity = Math.max(0, toFiniteNumber(suggestion?.quantity, 1))
-            const unit =
-                typeof suggestion?.unit === "string" && suggestion.unit.trim()
-                    ? suggestion.unit.trim().slice(0, 30)
-                    : "ea"
-            const reason =
-                typeof suggestion?.reason === "string" && suggestion.reason.trim()
-                    ? suggestion.reason.trim().slice(0, 180)
-                    : "Visible condition from the jobsite photo."
-
-            return {
-                label,
-                quantity,
-                unit,
-                reason,
-            }
-        })
-        .filter((suggestion): suggestion is NonNullable<typeof suggestion> => suggestion !== null)
-        .slice(0, 8)
-
-    if (observations.length === 0 && suggestedScope.length === 0 && materialSuggestions.length === 0) {
-        return undefined
-    }
-
-    return {
-        observations,
-        suggestedScope,
-        materialSuggestions,
-        pricingConfidence: normalizePricingConfidence(analysis.pricingConfidence),
-    }
-}
-
-function parsePotentialJsonContent(input: string): any {
-    const trimmed = input.trim()
-    if (!trimmed) throw new Error("Model response is empty")
-
-    try {
-        return JSON.parse(trimmed)
-    } catch {
-        const unwrapped = trimmed
-            .replace(/^```(?:json)?\s*/i, "")
-            .replace(/\s*```$/i, "")
-            .trim()
-        return JSON.parse(unwrapped)
-    }
-}
 
 function parseBase64ImageDataUrl(raw: string): { mimeType: string; data: string } | null {
     const trimmed = raw.trim()
@@ -244,27 +70,6 @@ function resolveGenerateProvider(): "openai" | "gemini" {
     return process.env.GEMINI_API_KEY?.trim() ? "gemini" : "openai"
 }
 
-function extractGeminiText(responseBody: any): string {
-    const candidates = Array.isArray(responseBody?.candidates) ? responseBody.candidates : []
-    const firstCandidate = candidates[0]
-    const parts = Array.isArray(firstCandidate?.content?.parts) ? firstCandidate.content.parts : []
-
-    const text = parts
-        .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
-        .find((value: string) => value.trim().length > 0)
-
-    if (text && text.trim()) {
-        return text
-    }
-
-    const blockReason = responseBody?.promptFeedback?.blockReason
-    if (typeof blockReason === "string" && blockReason.trim()) {
-        throw new Error(`Gemini blocked the request: ${blockReason}`)
-    }
-
-    throw new Error("Gemini returned empty content")
-}
-
 async function generateWithGemini(params: {
     systemPrompt: string
     notes?: string
@@ -275,7 +80,7 @@ async function generateWithGemini(params: {
         throw new Error("Gemini is not configured. Please add GEMINI_API_KEY.")
     }
 
-    const parts: any[] = []
+    const parts: GeminiMessageContentPart[] = []
 
     if (params.notes?.trim()) {
         parts.push({ text: `Field Notes:\n${params.notes}` })
@@ -335,7 +140,7 @@ async function generateWithGemini(params: {
         throw new Error(providerMessage)
     }
 
-    const content = extractGeminiText(payload)
+    const content = requireGeminiText(payload)
     return {
         content,
         promptTokens: Number(payload?.usageMetadata?.promptTokenCount || 0),
@@ -390,55 +195,6 @@ async function generateWithOpenAI(params: {
         content,
         promptTokens: Number(response.usage?.prompt_tokens || 0),
         completionTokens: Number(response.usage?.completion_tokens || 0),
-    }
-}
-
-function normalizeEstimate(rawEstimate: any): NormalizedEstimate {
-    const normalizedItems = (Array.isArray(rawEstimate?.items) ? rawEstimate.items : [])
-        .map((item: any, index: number) => normalizeItem(item, index))
-        .filter((item: any) => item.description !== "")
-
-    const normalizedSections = (Array.isArray(rawEstimate?.sections) ? rawEstimate.sections : [])
-        .map((section: any, sectionIndex: number) => {
-            const sectionItems = (Array.isArray(section?.items) ? section.items : [])
-                .map((item: any, itemIndex: number) => normalizeItem(item, itemIndex))
-                .filter((item: any) => item.description !== "")
-
-            return {
-                id:
-                    typeof section?.id === "string" && section.id.trim()
-                        ? section.id
-                        : `section-${sectionIndex + 1}`,
-                name:
-                    typeof section?.name === "string" && section.name.trim()
-                        ? section.name.trim()
-                        : `Section ${sectionIndex + 1}`,
-                divisionCode:
-                    typeof section?.divisionCode === "string" && section.divisionCode.trim()
-                        ? section.divisionCode.trim()
-                        : undefined,
-                items: sectionItems,
-            }
-        })
-        .filter((section: any) => section.items.length > 0)
-
-    const warnings = Array.isArray(rawEstimate?.warnings)
-        ? rawEstimate.warnings
-            .filter((warning: any) => typeof warning === "string" && warning.trim())
-            .map((warning: string) => warning.trim())
-        : []
-    const upsellOptions = normalizeUpsellOptions(rawEstimate?.upsellOptions)
-    const photoAnalysis = normalizePhotoEstimateAnalysis(rawEstimate?.photoAnalysis)
-
-    return {
-        items: normalizedItems,
-        ...(normalizedSections.length > 0 ? { sections: normalizedSections } : {}),
-        summary_note: typeof rawEstimate?.summary_note === "string" ? rawEstimate.summary_note : "",
-        payment_terms: typeof rawEstimate?.payment_terms === "string" ? rawEstimate.payment_terms : "",
-        closing_note: typeof rawEstimate?.closing_note === "string" ? rawEstimate.closing_note : "",
-        warnings,
-        ...(upsellOptions.length > 0 ? { upsellOptions } : {}),
-        ...(photoAnalysis ? { photoAnalysis } : {}),
     }
 }
 
@@ -832,7 +588,7 @@ export async function POST(req: Request) {
                 : await generateWithOpenAI({ systemPrompt, notes, images })
 
         const rawEstimate = parsePotentialJsonContent(modelResult.content)
-        const estimate = normalizeEstimate(rawEstimate)
+        const estimate = normalizeEstimatePayload(rawEstimate)
 
         await recordUsage(quota.context, "generate", {
             promptTokens: modelResult.promptTokens,
