@@ -101,13 +101,13 @@ CRITICAL INSTRUCTIONS
 
 1. 📋 ITEMIZATION (Professional Format):
    ALWAYS output items with separate category and unit fields.
-   
+
    Categories:
    - "PARTS" - Physical materials/components
-   - "LABOR" - Work hours/installation time  
+   - "LABOR" - Work hours/installation time
    - "SERVICE" - Diagnostic, testing, permits, disposal
    - "OTHER" - Miscellaneous
-   
+
    Units (choose appropriate):
    - "ea" - Each (for parts)
    - "LS" - Lump Sum (fixed price work)
@@ -175,7 +175,7 @@ Response must be raw JSON. Use the new professional format:
       "unit_price": 180.00
     },
     {
-      "id": "item-2", 
+      "id": "item-2",
       "itemNumber": 2,
       "category": "LABOR",
       "description": "Faucet Installation & Testing",
