@@ -1,0 +1,91 @@
+-- Base schema: core tables that later migrations assume already exist.
+-- Restored from supabase_schema.sql @ 5de71ed (2026-02-12), before migrations were introduced.
+
+create extension if not exists "uuid-ossp";
+
+-- Users (Technician Profiles)
+create table profiles (
+  id uuid references auth.users on delete cascade not null primary key,
+  business_name text,
+  logo_url text,
+  phone text,
+  email text,
+  address text,
+  license_number text,
+  tax_rate float default 13
+);
+
+-- Clients
+create table clients (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references profiles(id) on delete cascade,
+  name text,
+  address text,
+  email text,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Estimates
+create table estimates (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references profiles(id) on delete cascade,
+  client_id uuid references clients(id),
+  estimate_number text,
+  status text check (status in ('draft', 'sent', 'paid')) default 'draft',
+  total_amount float,
+  tax_rate float default 13,
+  tax_amount float,
+  currency text default 'CAD',
+  ai_summary text,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Estimate Items
+create table estimate_items (
+  id uuid default gen_random_uuid() primary key,
+  estimate_id uuid references estimates(id) on delete cascade,
+  description text,
+  quantity int,
+  unit_price float,
+  total float
+);
+
+-- Feedback
+create table feedback (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users on delete set null,
+  rating int check (rating >= 1 and rating <= 5),
+  category text,
+  description text,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Enable RLS
+alter table profiles enable row level security;
+alter table clients enable row level security;
+alter table estimates enable row level security;
+alter table estimate_items enable row level security;
+alter table feedback enable row level security;
+
+-- Policies (Simple for now: users can see their own data)
+create policy "Users can view own profile" on profiles for select using (auth.uid() = id);
+create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
+
+create policy "Users can view own clients" on clients for select using (auth.uid() = user_id);
+create policy "Users can insert own clients" on clients for insert with check (auth.uid() = user_id);
+
+create policy "Users can view own estimates" on estimates for select using (auth.uid() = user_id);
+create policy "Users can insert own estimates" on estimates for insert with check (auth.uid() = user_id);
+
+create policy "Users can view own estimate items" on estimate_items for select using (
+  exists ( select 1 from estimates where id = estimate_items.estimate_id and user_id = auth.uid() )
+);
+create policy "Users can insert own estimate items" on estimate_items for insert with check (
+  exists ( select 1 from estimates where id = estimate_items.estimate_id and user_id = auth.uid() )
+);
+
+-- Tracking columns that existed on estimates before migrations were introduced
+alter table estimates add column if not exists sent_at timestamp with time zone;
+alter table estimates add column if not exists last_followed_up_at timestamp with time zone;
+alter table estimates add column if not exists review_requested_at timestamp with time zone;
