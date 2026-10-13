@@ -18,12 +18,12 @@ As of 2026-03-10, this repository is in "private beta ready" territory.
 
 Validated locally:
 
-- `npm run lint`
-- `npm test`
-- `npm run test:e2e`
-- `npm run build`
-- `npm start`
-- `npm run smoke:deploy -- --base-url=http://127.0.0.1:3000`
+- `pnpm lint`
+- `pnpm test`
+- `pnpm test:e2e`
+- `pnpm build`
+- `pnpm start`
+- `pnpm smoke:deploy --base-url=http://127.0.0.1:3000`
 
 Not yet proven enough for broad paid launch:
 
@@ -61,7 +61,7 @@ See:
 1. Install dependencies.
 
 ```bash
-npm install
+pnpm install
 ```
 
 2. Copy the example environment file and fill in the required values.
@@ -73,7 +73,7 @@ cp .env.example .env.local
 3. Start the app.
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 Open `http://localhost:3000`.
@@ -143,14 +143,14 @@ use `{{ .RedirectTo }}` rather than hard-coding `{{ .SiteURL }}` so the app's
 ## Useful commands
 
 ```bash
-npm run dev
-npm run lint
-npm test
-npm run test:e2e
-npm run build
-npm start
-npm run validate:env -- --preset=beta
-npm run smoke:deploy -- --base-url=http://127.0.0.1:3000
+pnpm dev
+pnpm lint
+pnpm test
+pnpm test:e2e
+pnpm build
+pnpm start
+pnpm validate:env --preset=beta
+pnpm smoke:deploy --base-url=http://127.0.0.1:3000
 ```
 
 ## Project structure
