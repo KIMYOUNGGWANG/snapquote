@@ -2,6 +2,8 @@ import { openDB, DBSchema } from 'idb';
 import type { PriceListItem, PriceCategory, PriceUnit } from '@/types';
 import { emitOfflineQueueChanged } from "@/lib/offline-events";
 import { normalizeEstimateForLocalSave, type LocalEstimateSaveInput } from "@/lib/estimate-local-save";
+import type { EstimateItem } from "@/lib/estimates-storage";
+import { formatPriceListForAI, learnPriceList } from "@/lib/price-memory";
 
 interface SnapQuoteDB extends DBSchema {
     estimates: {
@@ -328,14 +330,22 @@ export async function incrementPriceItemUsage(id: string): Promise<void> {
     }
 }
 
+// Learn prices from a sent estimate. Only changed items are written.
+export async function learnFromSentEstimate(items: readonly EstimateItem[]): Promise<number> {
+    const db = await initDB();
+    const existing = await db.getAll('priceList');
+    const changed = learnPriceList(existing, items, new Date().toISOString());
+    if (changed.length === 0) return 0;
+
+    const tx = db.transaction('priceList', 'readwrite');
+    await Promise.all([...changed.map((item) => tx.store.put(item)), tx.done]);
+    return changed.length;
+}
+
 // Get price list formatted for AI prompt
 export async function getPriceListForAI(): Promise<string> {
     const items = await getPriceList();
-    if (items.length === 0) return '';
-
-    return items.map(item =>
-        `- "${item.name}": $${item.price}/${item.unit} [${item.category}] (keywords: ${item.keywords.join(', ')})`
-    ).join('\n');
+    return formatPriceListForAI(items);
 }
 
 // ============ RECEIPTS ============
