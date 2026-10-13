@@ -65,3 +65,6 @@ inkdesk/
 # Local agent/browser artifacts
 .playwright-mcp/
 .omo/
+
+# Local quote benchmark outputs
+benchmark-results/

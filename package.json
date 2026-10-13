@@ -12,6 +12,7 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "smoke:deploy": "node ./scripts/deploy-smoke.mjs",
+    "benchmark:quotes": "node --loader ./tests/loader.mjs --env-file=.env.local scripts/quote-benchmark.mjs",
     "validate:env": "node ./scripts/validate-env.mjs"
   },
   "dependencies": {
