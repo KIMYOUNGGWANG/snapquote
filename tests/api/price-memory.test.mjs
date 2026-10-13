@@ -3,9 +3,12 @@ import { describe, test } from 'node:test'
 
 import {
   countEditedLines,
+  formatPriceListForAI,
   getLearnableItems,
   learnPriceList,
   normalizePriceKey,
+  PRICE_LIST_AI_LIMIT,
+  selectPriceListForAI,
 } from '../../lib/price-memory.ts'
 
 const NOW = '2026-10-13T00:00:00.000Z'
@@ -143,5 +146,27 @@ describe('edited line counting', () => {
 
   test('returns zero when nothing changed', () => {
     assert.equal(countEditedLines([item()], [item()]), 0)
+  })
+})
+
+describe('price list selection for AI', () => {
+  test('sorts by usage, then by most recent use, and caps the list', () => {
+    const items = Array.from({ length: PRICE_LIST_AI_LIMIT + 5 }, (_, index) =>
+      priceItem({ id: `p-${index}`, name: `Item ${index}`, usageCount: 1 }),
+    )
+    items.push(priceItem({ id: 'top', name: 'Top', usageCount: 50 }))
+    items.push(priceItem({ id: 'recent', name: 'Recent', usageCount: 1, lastUsedAt: '2026-10-12T00:00:00.000Z' }))
+
+    const selected = selectPriceListForAI(items)
+
+    assert.equal(selected.length, PRICE_LIST_AI_LIMIT)
+    assert.equal(selected[0].id, 'top')
+    assert.equal(selected[1].id, 'recent')
+  })
+
+  test('formats items in the existing prompt line format', () => {
+    const text = formatPriceListForAI([priceItem()])
+    assert.equal(text, '- "Toilet Installation": $180/LS [LABOR] (keywords: toilet)')
+    assert.equal(formatPriceListForAI([]), '')
   })
 })

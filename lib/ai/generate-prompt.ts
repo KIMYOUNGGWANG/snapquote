@@ -50,6 +50,7 @@ ${priceList}
 
 RULES:
 - If the user's input matches an item above (by name OR keywords), USE THAT EXACT PRICE.
+- When an item matches, use that item's exact name as the line description.
 - If no match is found, set unit_price = 0 and add "(Price TBD)" to description.
 - Match keywords in any language (English, Korean, Spanish, etc.).
 

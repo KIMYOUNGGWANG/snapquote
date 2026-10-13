@@ -4,6 +4,27 @@ import type { EstimateItem } from "@/lib/estimates-storage"
 const PRICE_TBD_MARKER = "(price tbd)"
 const LEARNABLE_CATEGORIES: ReadonlySet<string> = new Set<PriceCategory>(["PARTS", "LABOR", "SERVICE"])
 
+export const PRICE_LIST_AI_LIMIT = 100
+
+function lastActivity(item: PriceListItem): string {
+    return item.lastUsedAt ?? item.updatedAt
+}
+
+export function selectPriceListForAI(
+    items: readonly PriceListItem[],
+    limit = PRICE_LIST_AI_LIMIT,
+): PriceListItem[] {
+    return [...items]
+        .sort((a, b) => b.usageCount - a.usageCount || lastActivity(b).localeCompare(lastActivity(a)))
+        .slice(0, limit)
+}
+
+export function formatPriceListForAI(items: readonly PriceListItem[]): string {
+    return selectPriceListForAI(items)
+        .map((item) => `- "${item.name}": $${item.price}/${item.unit} [${item.category}] (keywords: ${item.keywords.join(', ')})`)
+        .join('\n')
+}
+
 function isPriceCategory(category: string): category is PriceCategory {
     return LEARNABLE_CATEGORIES.has(category)
 }

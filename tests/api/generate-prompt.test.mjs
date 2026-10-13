@@ -53,4 +53,14 @@ describe('generate system prompt', () => {
     assert.doesNotMatch(prompt, /\*\*ASSUME ALL CURRENCY IS LOCAL \(CAD\)\.\*\*/)
     assert.doesNotMatch(prompt, /Thank you for choosing SnapQuote Field/)
   })
+
+  test('tells the model to keep the price list item name as the line description', () => {
+    const prompt = buildGenerateSystemPrompt(
+      { country: 'USA', priceList: '- "Toilet Installation": $180/LS [LABOR] (keywords: toilet)' },
+      'residential',
+      'es'
+    )
+
+    assert.match(prompt, /use that item's exact name as the line description/)
+  })
 })
