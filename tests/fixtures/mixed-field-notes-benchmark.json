@@ -1,0 +1,72 @@
+[
+  {
+    "id": "es-plumbing-toilet-01",
+    "trade": "plumbing",
+    "sourceLanguage": "es",
+    "notes": "cambiar el wax ring del toilet del segundo piso, el flapper tambien gotea, poner shut off nuevo. cliente quiere todo hoy",
+    "englishTargets": [["wax ring"], ["flapper"], ["toilet"], ["shut off", "shutoff", "supply valve", "stop valve"]]
+  },
+  {
+    "id": "es-drywall-patch-02",
+    "trade": "drywall",
+    "sourceLanguage": "es",
+    "notes": "parchar el sheetrock en la sala, como 3 hoyos grandes de puerta, tapear, mudear y pintar dos manos mismo color",
+    "englishTargets": [["drywall", "sheetrock", "gypsum"], ["tape", "taping"], ["joint compound", "mud", "skim"], ["paint", "painting"]]
+  },
+  {
+    "id": "es-roofing-shingles-03",
+    "trade": "roofing",
+    "sourceLanguage": "es",
+    "notes": "se volaron shingles en la parte de atras, como 2 squares, revisar el flashing de la chimenea y poner felt nuevo donde se ve la madera",
+    "englishTargets": [["shingle"], ["flashing"], ["chimney"], ["felt", "underlayment"]]
+  },
+  {
+    "id": "es-electrical-breaker-04",
+    "trade": "electrical",
+    "sourceLanguage": "es",
+    "notes": "el breaker se bota cada rato, checar el GFCI del baño, cambiar el outlet quemado de la cocina, todo es 20 amp",
+    "englishTargets": [["breaker"], ["gfci"], ["outlet", "receptacle"], ["20 amp", "20a", "20 a"]]
+  },
+  {
+    "id": "es-hvac-capacitor-05",
+    "trade": "hvac",
+    "sourceLanguage": "es",
+    "notes": "la unidad de afuera no prende, el capacitor esta hinchado, limpiar el coil y checar el freon, sistema de 3 toneladas",
+    "englishTargets": [["condenser", "outdoor unit"], ["capacitor"], ["coil"], ["refrigerant", "freon"]]
+  },
+  {
+    "id": "ko-plumbing-ptrap-06",
+    "trade": "plumbing",
+    "sourceLanguage": "ko",
+    "notes": "주방 싱크 밑 트랩 누수, P트랩 교체하고 앵글밸브도 갈아야 됨. 디스포저 소음 심함, 교체 견적도 같이",
+    "englishTargets": [["p trap", "trap"], ["angle stop", "angle valve", "shut off valve", "shutoff valve", "supply valve"], ["disposal", "disposer"], ["sink"]]
+  },
+  {
+    "id": "ko-painting-ceiling-07",
+    "trade": "painting",
+    "sourceLanguage": "ko",
+    "notes": "안방 천장 물자국 있음, 스테인 블로킹 프라이머 한번 치고 페인트 두번. 몰딩 코킹 다시, 가구는 집주인이 치움",
+    "englishTargets": [["ceiling"], ["stain"], ["primer", "prime"], ["caulk"]]
+  },
+  {
+    "id": "ko-tile-shower-08",
+    "trade": "tile",
+    "sourceLanguage": "ko",
+    "notes": "욕실 샤워부스 벽 타일 3장 깨짐, 같은 타일 사장님이 갖고 있음. 그라우트 다시 하고 코너 실리콘 마감",
+    "englishTargets": [["tile"], ["grout"], ["silicone", "caulk"], ["shower"]]
+  },
+  {
+    "id": "mixed-water-heater-09",
+    "trade": "plumbing",
+    "sourceLanguage": "auto",
+    "notes": "boss 지하실 water heater 40 gal 교체, el venteo esta mal instalado, expansion tank 추가하고 permit 필요",
+    "englishTargets": [["water heater"], ["40 gal", "40 gallon", "40gal"], ["vent"], ["expansion tank"], ["permit"]]
+  },
+  {
+    "id": "es-fence-posts-10",
+    "trade": "fencing",
+    "sourceLanguage": "es",
+    "notes": "arreglar la cerca de madera del backyard, 4 postes podridos, concreto nuevo en cada hoyo, la cerca es de 6 pies",
+    "englishTargets": [["fence"], ["post"], ["concrete"], ["6 ft", "6 foot", "6 feet", "six foot"]]
+  }
+]
