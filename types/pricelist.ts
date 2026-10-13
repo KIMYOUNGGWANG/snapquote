@@ -14,6 +14,8 @@ export interface PriceListItem {
     createdAt: string
     updatedAt: string
     usageCount: number           // How often this item is used
+    source?: "manual" | "learned" // Missing means manual
+    lastUsedAt?: string          // Last time this item appeared in a sent estimate
 }
 
 // For creating new items (without system fields)
