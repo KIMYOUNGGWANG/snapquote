@@ -3,6 +3,16 @@
 import { DollarSign, TrendingUp } from "lucide-react"
 import { useEffect, useState } from "react"
 import { getEstimates } from "@/lib/estimates-storage"
+import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
+
+function isSameMonth(value: string | undefined, month: number, year: number): boolean {
+    if (!value) return false
+
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return false
+
+    return date.getMonth() === month && date.getFullYear() === year
+}
 
 export function RevenueChart() {
     const [monthlyRevenue, setMonthlyRevenue] = useState(0)
@@ -20,12 +30,18 @@ export function RevenueChart() {
             let count = 0
 
             estimates.forEach((estimate) => {
-                const date = new Date(estimate.createdAt)
-                if (date.getMonth() === currentMonth && date.getFullYear() === currentYear) {
-                    if (estimate.status === "paid") {
+                if (isEstimatePaidLike(estimate)) {
+                    const paidActivityDate = estimate.paymentCompletedAt || estimate.updatedAt || estimate.createdAt
+                    if (isSameMonth(paidActivityDate, currentMonth, currentYear)) {
                         won += estimate.totalAmount
                         count += 1
-                    } else if (estimate.status === "sent") {
+                    }
+                    return
+                }
+
+                if (estimate.status === "sent") {
+                    const sentActivityDate = estimate.sentAt || estimate.updatedAt || estimate.createdAt
+                    if (isSameMonth(sentActivityDate, currentMonth, currentYear)) {
                         pending += estimate.totalAmount
                     }
                 }
@@ -39,7 +55,7 @@ export function RevenueChart() {
     }, [])
 
     return (
-        <div className="field-card">
+        <div className="field-card" data-testid="home-revenue-chart">
             <div className="flex items-center justify-between border-b border-white/10 p-4 pb-3">
                 <h2 className="text-sm font-semibold text-white">
                     This Month&apos;s Activity
@@ -47,11 +63,11 @@ export function RevenueChart() {
                 <DollarSign className="h-4 w-4 text-blue-200" />
             </div>
             <div className="p-4">
-                <div className="text-2xl font-bold text-white">${monthlyRevenue.toLocaleString()}</div>
-                <p className="text-xs text-slate-400">
+                <div className="text-2xl font-bold text-white" data-testid="home-monthly-revenue">${monthlyRevenue.toLocaleString()}</div>
+                <p className="text-xs text-slate-400" data-testid="home-monthly-revenue-helper">
                     Collected this month ({paidCount} paid)
                 </p>
-                <p className="mt-1 text-xs text-slate-400">
+                <p className="mt-1 text-xs text-slate-400" data-testid="home-pending-revenue">
                     Pending sent quotes: ${pendingRevenue.toLocaleString()}
                 </p>
                 <div className="mt-4 flex h-20 items-end gap-2">

@@ -1,3 +1,4 @@
+import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 import { getWorkspaceMembershipByUser } from "@/lib/server/team-workspace"
 
@@ -41,6 +42,7 @@ export type TeamEstimateDetail = {
     createdAt: string
     updatedAt: string
     sentAt?: string
+    paymentCompletedAt?: string
     items: TeamEstimateItem[]
     sections?: TeamEstimateSection[]
 }
@@ -90,6 +92,11 @@ function toSafeString(value: unknown): string {
 
 function normalizeStatus(value: unknown): "draft" | "sent" | "paid" {
     return value === "sent" || value === "paid" ? value : "draft"
+}
+
+function normalizePaidLikeStatus(input: { status?: unknown; paymentCompletedAt?: unknown; payment_completed_at?: unknown }): "draft" | "sent" | "paid" {
+    if (isEstimatePaidLike(input)) return "paid"
+    return normalizeStatus(input.status)
 }
 
 function getClientContactPatch(input: {
@@ -152,6 +159,7 @@ function mapEstimateSection(input: Record<string, unknown>, index: number): Team
 function mapCloudEstimateToDetail(estimate: Record<string, any>): TeamEstimateDetail {
     const rawFlatItems = Array.isArray(estimate.estimate_items) ? estimate.estimate_items : []
     const rawSections = Array.isArray(estimate.estimate_sections) ? estimate.estimate_sections : []
+    const paymentCompletedAt = toSafeString(estimate.payment_completed_at).trim()
 
     const items = rawFlatItems.map((item, index) =>
         mapEstimateItem({
@@ -199,13 +207,14 @@ function mapCloudEstimateToDetail(estimate: Record<string, any>): TeamEstimateDe
         ...(toSafeString(estimate?.clients?.phone).trim() ? { clientPhone: toSafeString(estimate.clients.phone).trim() } : {}),
         ...(toSafeString(estimate?.clients?.notes).trim() ? { clientNotes: toSafeString(estimate.clients.notes).trim() } : {}),
         summary_note: toSafeString(estimate.ai_summary),
-        status: normalizeStatus(estimate.status),
+        status: normalizePaidLikeStatus({ status: estimate.status, paymentCompletedAt }),
         taxRate: toMoney(estimate.tax_rate),
         taxAmount: toMoney(estimate.tax_amount),
         totalAmount: toMoney(estimate.total_amount),
         createdAt: toSafeString(estimate.created_at),
         updatedAt: toSafeString(estimate.updated_at) || toSafeString(estimate.created_at),
         ...(toSafeString(estimate.sent_at) ? { sentAt: toSafeString(estimate.sent_at) } : {}),
+        ...(paymentCompletedAt ? { paymentCompletedAt } : {}),
         items,
         ...(sections.length > 0 ? { sections } : {}),
     }
@@ -326,6 +335,7 @@ export async function resolveTeamEstimateAccess(
             created_at,
             updated_at,
             sent_at,
+            payment_completed_at,
             status,
             estimate_items (
                 id,
@@ -611,6 +621,7 @@ export async function saveTeamEstimateFromPayload(
             taxAmount: number
             totalAmount: number
             sentAt?: string
+            paymentCompletedAt?: string
             items: TeamEstimateItem[]
             sections?: TeamEstimateSection[]
         }
@@ -646,18 +657,24 @@ export async function saveTeamEstimateFromPayload(
     }
 
     const now = new Date().toISOString()
+    const paymentCompletedAt = input.payload.paymentCompletedAt?.trim() || toSafeString(access.estimate.payment_completed_at).trim()
+    const status = normalizePaidLikeStatus({
+        status: input.payload.status,
+        paymentCompletedAt,
+    })
     const updateResult = await supabase
         .from("estimates")
         .update({
             client_id: clientResolution.clientId,
             ai_summary: input.payload.summary_note,
-            status: input.payload.status,
+            status,
             tax_rate: input.payload.taxRate,
             tax_amount: input.payload.taxAmount,
             total_amount: input.payload.totalAmount,
-            sent_at: input.payload.status === "sent" || input.payload.status === "paid"
+            sent_at: status === "sent" || status === "paid"
                 ? (input.payload.sentAt || access.estimate.sent_at || now)
                 : null,
+            payment_completed_at: paymentCompletedAt || null,
             updated_at: now,
         })
         .eq("id", input.estimateId)

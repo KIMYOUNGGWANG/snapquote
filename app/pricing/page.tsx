@@ -24,26 +24,106 @@ import { FREE_PLAN_MARKETING_QUOTE_LIMIT } from "@/lib/free-tier"
 import { cn } from "@/lib/utils"
 
 type BillingInterval = "monthly" | "annual"
+type PricingSource = "generate_quota" | "transcribe_quota" | "send_email_quota" | "sms_credits" | "quickbooks_sync"
 
 const pricingBoxClass = "rounded-lg border border-white/10 bg-slate-950/55 p-4"
 const pricingBoxSoftClass = "rounded-lg border border-white/10 bg-slate-900/55 p-4"
 const pricingOutlineButtonClass = "border-white/10 bg-slate-950/60 text-slate-200 hover:bg-slate-900 hover:text-white"
+const PRICING_SOURCE_CONTEXT: Record<PricingSource, {
+    eyebrow: string
+    title: string
+    description: string
+    recommendedPlanTier: BillingPaidPlanTier
+    details: string[]
+}> = {
+    generate_quota: {
+        eyebrow: "Quote generation limit",
+        title: "Your field capture is saved.",
+        description: "Upgrade to keep generating customer-ready estimates this month without rebuilding the job notes.",
+        recommendedPlanTier: "starter",
+        details: [
+            "Starter unlocks 80 field estimates per month.",
+            "Pro gives more room for heavier service-call weeks.",
+        ],
+    },
+    transcribe_quota: {
+        eyebrow: "Voice capture limit",
+        title: "Keep turning recordings into quote-ready scope.",
+        description: "Upgrade to keep processing jobsite voice notes when the crew is still moving between calls.",
+        recommendedPlanTier: "starter",
+        details: [
+            "Starter includes 60 transcription minutes for multilingual on-site notes.",
+            "Pro raises that to 180 minutes for busier service-call volume.",
+        ],
+    },
+    send_email_quota: {
+        eyebrow: "Email delivery quota",
+        title: "Keep sending PDFs from the jobsite.",
+        description: "Your estimate is still intact. Pick the email volume that matches how many customer-ready quotes you send.",
+        recommendedPlanTier: "starter",
+        details: [
+            "Starter includes 60 sent estimate emails per month.",
+            "Pro raises that to 200 when follow-ups get busy.",
+        ],
+    },
+    sms_credits: {
+        eyebrow: "SMS credits",
+        title: "Add sending room for text follow-ups.",
+        description: "SMS credits are tracked separately from quote generation. Choose a paid workflow when texts are part of closing the job.",
+        recommendedPlanTier: "pro",
+        details: [
+            "Pro is preselected for contractors using SMS follow-ups regularly.",
+            "Team keeps higher-volume delivery workflows in one shared account.",
+        ],
+    },
+    quickbooks_sync: {
+        eyebrow: "QuickBooks sync",
+        title: "Push won estimates into accounting.",
+        description: "Direct QuickBooks invoice sync is available on Pro and Team. CSV export stays available while you choose a plan.",
+        recommendedPlanTier: "pro",
+        details: [
+            "Pro unlocks direct QuickBooks invoice sync from History.",
+            "Team adds shared quoting when multiple techs need the same workflow.",
+        ],
+    },
+}
 
 function getErrorMessage(error: unknown, fallback: string): string {
     if (error instanceof Error && error.message) return error.message
     return fallback
 }
 
+function getPricingSource(value: string | null): PricingSource | null {
+    if (value === "generate_quota") return value
+    if (value === "transcribe_quota") return value
+    if (value === "send_email_quota") return value
+    if (value === "sms_credits") return value
+    if (value === "quickbooks_sync") return value
+    return null
+}
+
+function getPricingPath(planTier: BillingPaidPlanTier, source: PricingSource | null, checkout?: "success" | "cancel") {
+    const params = new URLSearchParams({ plan: planTier })
+    if (source) params.set("source", source)
+    if (checkout) params.set("checkout", checkout)
+    return `/pricing?${params.toString()}`
+}
+
 function PricingPageContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
-    const initialPlanTier = getMarketingPlan(searchParams.get("plan")).tier as BillingPaidPlanTier
+    const pricingSource = getPricingSource(searchParams.get("source"))
+    const sourceContext = pricingSource ? PRICING_SOURCE_CONTEXT[pricingSource] : null
+    const pricingSourceKey = pricingSource || "direct"
+    const sourceTitle = sourceContext?.title || null
+    const initialPlanTier = getMarketingPlan(searchParams.get("plan") || sourceContext?.recommendedPlanTier).tier as BillingPaidPlanTier
     const [loading, setLoading] = useState(true)
     const [offer, setOffer] = useState<PricingOfferResponse | null>(null)
     const [subscription, setSubscription] = useState<BillingSubscriptionStatusResponse | null>(null)
     const [usageSnapshot, setUsageSnapshot] = useState<BillingUsageSnapshot | null>(null)
     const [checkoutLoading, setCheckoutLoading] = useState(false)
     const [portalLoading, setPortalLoading] = useState(false)
+    const [portalIssue, setPortalIssue] = useState<string | null>(null)
     const [selectedPlanTier, setSelectedPlanTier] = useState<BillingPaidPlanTier>(initialPlanTier)
     const [billingInterval, setBillingInterval] = useState<BillingInterval>("monthly")
     const [isAuthed, setIsAuthed] = useState(false)
@@ -100,15 +180,20 @@ function PricingPageContent() {
 
     useEffect(() => {
         const today = new Date().toISOString().slice(0, 10)
-        const key = `snapquote_pricing_viewed:${today}`
+        const key = `snapquote_pricing_viewed:${today}:${pricingSourceKey}`
         if (sessionStorage.getItem(key)) return
         sessionStorage.setItem(key, "1")
 
         void trackPricingEvent({
             event: "pricing_viewed",
-            metadata: { path: "/pricing" },
+            metadata: {
+                path: "/pricing",
+                source: pricingSourceKey,
+                selectedPlanTier: initialPlanTier,
+                sourceTitle,
+            },
         })
-    }, [])
+    }, [initialPlanTier, pricingSourceKey, sourceTitle])
 
     const variant = offer?.ok && offer.variant ? offer.variant : null
     const selectedPlan = getMarketingPlan(selectedPlanTier)
@@ -153,7 +238,7 @@ function PricingPageContent() {
     const handleUpgradeClick = async () => {
         if (!isAuthed) {
             toast("Please log in to start your subscription.", "info")
-            const params = new URLSearchParams({ next: `/pricing?plan=${selectedPlanTier}` })
+            const params = new URLSearchParams({ next: getPricingPath(selectedPlanTier, pricingSource) })
             router.push(`/login?${params.toString()}`)
             return
         }
@@ -166,11 +251,14 @@ function PricingPageContent() {
                     variant: variant?.name || null,
                     selectedPlanTier,
                     billingInterval,
+                    source: pricingSourceKey,
                 },
             })
 
             const checkout = await createBillingCheckoutSession({
                 planTier: selectedPlanTier,
+                successPath: getPricingPath(selectedPlanTier, pricingSource, "success"),
+                cancelPath: getPricingPath(selectedPlanTier, pricingSource, "cancel"),
                 ...(billingInterval === "annual" && billingConfig?.annualPriceId
                     ? { priceId: billingConfig.annualPriceId }
                     : {}),
@@ -190,13 +278,37 @@ function PricingPageContent() {
         router.replace(`/pricing?${params.toString()}`, { scroll: false })
     }
 
+    const handleRefreshBillingStatus = async () => {
+        setLoading(true)
+        try {
+            const [subscriptionData, usageData] = await Promise.all([
+                getBillingSubscriptionStatus(),
+                getBillingUsageSnapshot(),
+            ])
+            setSubscription(subscriptionData)
+            setUsageSnapshot(usageData.authorized ? usageData.snapshot : null)
+
+            const { data: authData } = await supabase.auth.getSession()
+            setIsAuthed(Boolean(authData.session?.user))
+            setPortalIssue(null)
+            toast("Billing status refreshed.", "success")
+        } catch (error: unknown) {
+            toast(getErrorMessage(error, "Failed to refresh billing status."), "error")
+        } finally {
+            setLoading(false)
+        }
+    }
+
     const handleManageBillingClick = async () => {
         setPortalLoading(true)
+        setPortalIssue(null)
         try {
             const portal = await createBillingPortalSession()
             window.location.href = portal.url
         } catch (error: unknown) {
-            toast(getErrorMessage(error, "Failed to open billing portal."), "error")
+            const message = getErrorMessage(error, "Failed to open billing portal.")
+            setPortalIssue(message)
+            toast(message, "error")
         } finally {
             setPortalLoading(false)
         }
@@ -269,6 +381,35 @@ function PricingPageContent() {
                             </div>
                         </div>
                     </div>
+
+                    {sourceContext && (
+                        <div className="mt-3 rounded-lg border border-amber-400/20 bg-amber-500/10 p-3" data-testid="pricing-source-context">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0">
+                                    <p className="text-xs uppercase tracking-[0.2em] text-amber-200/80" data-testid="pricing-source-eyebrow">
+                                        {sourceContext.eyebrow}
+                                    </p>
+                                    <p className="mt-1 text-sm font-semibold text-white" data-testid="pricing-source-title">
+                                        {sourceContext.title}
+                                    </p>
+                                    <p className="mt-1 text-xs leading-5 text-amber-50/80" data-testid="pricing-source-description">
+                                        {sourceContext.description}
+                                    </p>
+                                </div>
+                                <div className="shrink-0 rounded-lg border border-white/10 bg-slate-950/45 px-3 py-2 text-xs text-slate-300" data-testid="pricing-source-recommended-plan">
+                                    Recommended: <span className="font-semibold text-white">{getMarketingPlan(sourceContext.recommendedPlanTier).label}</span>
+                                </div>
+                            </div>
+                            <ul className="mt-3 grid gap-2 text-xs leading-5 text-amber-50/80 sm:grid-cols-2" data-testid="pricing-source-details">
+                                {sourceContext.details.map((detail) => (
+                                    <li key={detail} className="flex gap-2">
+                                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-200" />
+                                        <span>{detail}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
                 </section>
 
                 <section className="space-y-4">
@@ -449,6 +590,42 @@ function PricingPageContent() {
                                 </div>
                             )}
 
+                            {portalIssue ? (
+                                <div
+                                    role="alert"
+                                    className="rounded-lg border border-amber-300/20 bg-amber-400/10 p-3"
+                                    data-testid="pricing-billing-portal-issue"
+                                >
+                                    <p className="text-sm font-semibold text-amber-100">Billing portal could not open</p>
+                                    <p className="mt-1 break-words text-xs leading-5 text-amber-100/75 [overflow-wrap:anywhere]">
+                                        {portalIssue}
+                                    </p>
+                                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            className="h-11 rounded-lg"
+                                            onClick={handleManageBillingClick}
+                                            disabled={portalLoading}
+                                            data-testid="pricing-billing-portal-retry-action"
+                                        >
+                                            Retry portal
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            className={cn("h-11 rounded-lg", pricingOutlineButtonClass)}
+                                            onClick={handleRefreshBillingStatus}
+                                            disabled={loading}
+                                            data-testid="pricing-billing-status-refresh-action"
+                                        >
+                                            Refresh billing status
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : null}
+
                             <div className="grid grid-cols-1 gap-2">
                                 <Button
                                     onClick={handleUpgradeClick}
@@ -473,6 +650,7 @@ function PricingPageContent() {
                                         onClick={handleManageBillingClick}
                                         disabled={loading || portalLoading || !subscription?.customerId}
                                         className={cn("h-12 w-full rounded-lg", pricingOutlineButtonClass)}
+                                        data-testid="pricing-manage-billing-action"
                                     >
                                         {portalLoading ? "Opening portal..." : "Manage billing in Stripe"}
                                     </Button>

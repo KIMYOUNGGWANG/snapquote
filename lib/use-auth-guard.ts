@@ -11,6 +11,24 @@ type AuthGuardState = {
     email: string | null
 }
 
+const AUTH_GUARD_TIMEOUT_MS = 2500
+
+const unauthenticatedState: AuthGuardState = {
+    authResolved: true,
+    isAuthenticated: false,
+    userId: null,
+    email: null,
+}
+
+function getAuthenticatedState(session: Session): AuthGuardState {
+    return {
+        authResolved: true,
+        isAuthenticated: true,
+        userId: session.user.id,
+        email: session.user.email ?? null,
+    }
+}
+
 export function useAuthGuard(nextPath: string): AuthGuardState {
     const [state, setState] = useState<AuthGuardState>({
         authResolved: false,
@@ -22,55 +40,22 @@ export function useAuthGuard(nextPath: string): AuthGuardState {
     useEffect(() => {
         let active = true
 
-        const fallbackTimer = window.setTimeout(() => {
+        const timeout = new Promise<null>((resolve) => {
+            window.setTimeout(() => resolve(null), AUTH_GUARD_TIMEOUT_MS)
+        })
+
+        const session = Promise.resolve()
+            .then(() => supabase.auth.getSession())
+            .then(({ data }) => data.session)
+            .catch(() => null)
+
+        void Promise.race([session, timeout]).then((resolvedSession) => {
             if (!active) return
-            setState({
-                authResolved: true,
-                isAuthenticated: false,
-                userId: null,
-                email: null,
-            })
-        }, 2500)
-
-        const syncState = (session: Session | null) => {
-            if (!active) return
-            window.clearTimeout(fallbackTimer)
-
-            if (!session?.user) {
-                setState({
-                    authResolved: true,
-                    isAuthenticated: false,
-                    userId: null,
-                    email: null,
-                })
-                return
-            }
-
-            setState({
-                authResolved: true,
-                isAuthenticated: true,
-                userId: session.user.id,
-                email: session.user.email ?? null,
-            })
-        }
-
-        void supabase.auth
-            .getSession()
-            .then(({ data }) => syncState(data.session))
-            .catch(() => {
-                if (!active) return
-                window.clearTimeout(fallbackTimer)
-                setState({
-                    authResolved: true,
-                isAuthenticated: false,
-                userId: null,
-                email: null,
-            })
+            setState(resolvedSession?.user ? getAuthenticatedState(resolvedSession) : unauthenticatedState)
         })
 
         return () => {
             active = false
-            window.clearTimeout(fallbackTimer)
         }
     }, [nextPath])
 

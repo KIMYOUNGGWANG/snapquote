@@ -1,17 +1,29 @@
 import { withAuthHeaders } from "@/lib/auth-headers"
 
-export type QuoteRecoveryAction = "sent_sms" | "sent_email" | "skipped_no_contact"
+export type QuoteRecoveryAction =
+    | "sent_sms"
+    | "sent_email"
+    | "skipped_no_contact"
+    | "skipped_scope_review_needed"
+    | "skipped_customer_paid"
+    | "skipped_customer_approved"
+    | "skipped_customer_change_requested"
+
+export type QuoteRecoveryCustomerPortalStatus = "shared" | "viewed" | "approved" | "change_requested"
 
 export interface QuoteRecoveryResult {
     estimateId: string
     estimateNumber: string
     action: QuoteRecoveryAction
     messagePreview: string
+    customerPortalStatus?: QuoteRecoveryCustomerPortalStatus
 }
 
 export interface QuoteRecoveryResponse {
     ok: true
     processedCount: number
+    actionableCount?: number
+    skippedCount?: number
     results: QuoteRecoveryResult[]
 }
 

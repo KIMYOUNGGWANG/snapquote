@@ -10,7 +10,7 @@ create table profiles (
   address text,
   license_number text,
   tax_rate float default 13,
-  plan_tier text check (plan_tier in ('free', 'pro')) default 'free'
+  plan_tier text check (plan_tier in ('free', 'starter', 'pro', 'team')) default 'free'
 );
 
 -- Clients
@@ -38,10 +38,22 @@ create table estimates (
   currency text default 'CAD',
   ai_summary text,
   sent_at timestamp with time zone,
+  payment_link text,
+  payment_link_id text,
+  payment_link_type text check (payment_link_type is null or payment_link_type in ('full', 'deposit', 'custom')),
+  payment_completed_at timestamp with time zone,
+  last_payment_session_id text,
+  first_followup_queued_at timestamp with time zone,
+  second_followup_queued_at timestamp with time zone,
   first_followed_up_at timestamp with time zone,
   second_followed_up_at timestamp with time zone,
   last_followed_up_at timestamp with time zone,
   review_requested_at timestamp with time zone,
+  revision_of_estimate_id text,
+  revision_of_estimate_number text,
+  revision_requested_at timestamp with time zone,
+  superseded_by_estimate_id text,
+  superseded_at timestamp with time zone,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -99,6 +111,7 @@ create table estimate_attachments (
   photos jsonb default '[]'::jsonb not null,
   audio_url text,
   original_transcript text,
+  scope_assumptions_confirmed_at timestamp with time zone,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
   unique(estimate_id)
@@ -125,6 +138,53 @@ create table analytics_events (
   external_id text,
   metadata jsonb default '{}'::jsonb not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- QuickBooks Integration
+create table quickbooks_connections (
+  user_id uuid primary key references profiles(id) on delete cascade,
+  realm_id text not null,
+  access_token text not null,
+  refresh_token text not null,
+  token_expires_at timestamp with time zone not null,
+  refresh_token_expires_at timestamp with time zone,
+  connected_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create table quickbooks_invoice_links (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references profiles(id) on delete cascade not null,
+  estimate_id text not null,
+  estimate_number text not null,
+  quickbooks_invoice_id text not null,
+  quickbooks_customer_id text,
+  quickbooks_invoice_doc_number text,
+  quickbooks_invoice_status text check (quickbooks_invoice_status in ('open', 'paid', 'unknown')) default 'unknown' not null,
+  payload_snapshot jsonb default '{}'::jsonb not null,
+  synced_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  unique(user_id, estimate_id)
+);
+
+-- Customer Quote Share Links (public approval portal)
+create table estimate_share_links (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references profiles(id) on delete cascade not null,
+  estimate_id text not null,
+  token_hash text not null unique,
+  share_url text,
+  estimate_snapshot jsonb not null,
+  status text check (status in ('shared', 'viewed', 'approved', 'change_requested')) default 'shared' not null,
+  viewed_at timestamp with time zone,
+  approved_at timestamp with time zone,
+  change_requested_at timestamp with time zone,
+  customer_name text,
+  customer_email text,
+  customer_note text,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  unique(user_id, estimate_id)
 );
 
 -- Ops Alerts (webhook/reconcile failure monitoring)
@@ -167,7 +227,7 @@ create table usage_counters_monthly (
   id uuid default uuid_generate_v4() primary key,
   user_id uuid references profiles(id) on delete cascade not null,
   period_start date not null,
-  plan_tier text check (plan_tier in ('free', 'pro')) default 'free' not null,
+  plan_tier text check (plan_tier in ('free', 'starter', 'pro', 'team')) default 'free' not null,
   generate_count int default 0 not null,
   transcribe_count int default 0 not null,
   send_email_count int default 0 not null,
@@ -249,6 +309,9 @@ alter table estimate_section_items enable row level security;
 alter table estimate_attachments enable row level security;
 alter table feedback enable row level security;
 alter table analytics_events enable row level security;
+alter table quickbooks_connections enable row level security;
+alter table quickbooks_invoice_links enable row level security;
+alter table estimate_share_links enable row level security;
 alter table ops_alerts enable row level security;
 alter table referral_tokens enable row level security;
 alter table referral_events enable row level security;
@@ -340,6 +403,19 @@ create policy "Users can view own feedback" on feedback for select using (auth.u
 create policy "Users can view own analytics events" on analytics_events for select using (auth.uid() = user_id);
 create policy "Users can insert own analytics events" on analytics_events for insert with check (auth.uid() = user_id);
 
+-- QuickBooks policies
+create policy "Users can view own quickbooks connection" on quickbooks_connections
+  for select using (auth.uid() = user_id);
+create policy "Users can view own quickbooks invoice links" on quickbooks_invoice_links
+  for select using (auth.uid() = user_id);
+
+-- Estimate Share Link policies
+create policy "Users can view own estimate share links" on estimate_share_links for select using (auth.uid() = user_id);
+create policy "Users can insert own estimate share links" on estimate_share_links for insert with check (auth.uid() = user_id);
+create policy "Users can update own estimate share links" on estimate_share_links for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "Users can delete own estimate share links" on estimate_share_links for delete using (auth.uid() = user_id);
+-- Public customer access is intentionally routed through server endpoints using Service Role.
+
 -- Referral Token/Event policies
 create policy "Users can view own referral tokens" on referral_tokens for select using (auth.uid() = user_id);
 create policy "Users can insert own referral tokens" on referral_tokens for insert with check (auth.uid() = user_id);
@@ -390,7 +466,14 @@ create index idx_job_queue_status_scheduled on job_queue (status, scheduled_for)
 create index idx_estimates_followup on estimates (status, last_followed_up_at, created_at) where status = 'sent';
 create index idx_estimates_followup_stage1 on estimates (status, first_followed_up_at, created_at) where status = 'sent';
 create index idx_estimates_followup_stage2 on estimates (status, second_followed_up_at, created_at) where status = 'sent';
+create index idx_estimates_quote_chaser_stage1_candidates on estimates (user_id, sent_at) where status = 'sent' and first_followup_queued_at is null;
+create index idx_estimates_quote_chaser_stage2_candidates on estimates (user_id, sent_at) where status = 'sent' and first_followed_up_at is not null and second_followup_queued_at is null;
+create index idx_estimates_quote_recovery_ready on estimates (user_id, sent_at) where status = 'sent' and first_followup_queued_at is null and first_followed_up_at is null and last_followed_up_at is null;
 create index idx_estimates_review on estimates (status, review_requested_at, updated_at) where status = 'paid';
+create index idx_estimates_payment_link_id on estimates (user_id, payment_link_id) where payment_link_id is not null;
+create index idx_estimates_payment_completed on estimates (user_id, payment_completed_at desc) where payment_completed_at is not null;
+create index idx_estimates_revision_of on estimates (user_id, revision_of_estimate_id) where revision_of_estimate_id is not null;
+create index idx_estimates_superseded_by on estimates (user_id, superseded_by_estimate_id) where superseded_by_estimate_id is not null;
 create index idx_clients_user_id on clients (user_id);
 create index idx_estimates_user_id on estimates (user_id);
 create index idx_estimates_client_id on estimates (client_id);
@@ -398,6 +481,11 @@ create index idx_analytics_events_user_created on analytics_events (user_id, cre
 create index idx_analytics_events_user_event_created on analytics_events (user_id, event_name, created_at desc);
 create index idx_analytics_events_estimate_created on analytics_events (estimate_id, created_at desc) where estimate_id is not null;
 create unique index idx_analytics_events_external_id_unique on analytics_events (external_id) where external_id is not null;
+create index idx_quickbooks_invoice_links_user_synced on quickbooks_invoice_links (user_id, synced_at desc);
+create index idx_quickbooks_invoice_links_invoice on quickbooks_invoice_links (quickbooks_invoice_id);
+create index idx_estimate_share_links_user_updated on estimate_share_links (user_id, updated_at desc);
+create index idx_estimate_share_links_estimate on estimate_share_links (estimate_id);
+create index idx_estimate_share_links_status on estimate_share_links (status, updated_at desc);
 create index idx_ops_alerts_unresolved_last_seen on ops_alerts (last_seen_at desc) where resolved_at is null;
 create index idx_ops_alerts_source_last_seen on ops_alerts (source, last_seen_at desc);
 create unique index idx_ops_alerts_alert_key_unresolved on ops_alerts (alert_key) where resolved_at is null;

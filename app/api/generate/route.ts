@@ -1,60 +1,25 @@
 import { OpenAI } from "openai"
 import { NextResponse } from "next/server"
+import { buildGenerateSystemPrompt } from "@/lib/ai/generate-prompt"
+import {
+    buildGeminiGenerateUserParts,
+    buildOpenAiGenerateUserContent,
+} from "@/lib/ai/generate-provider-parts"
+import { requireGeminiText } from "@/lib/ai/gemini"
+import { parsePotentialJsonContent } from "@/lib/ai/json"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { parseJsonRequest } from "@/lib/server/request-validation"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
-import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
-import { resolveEffectivePlanTier } from "@/lib/server/effective-plan"
+import { resolveGeneratePlanTier } from "@/lib/server/generate-plan-tier"
 import { enforceUsageQuota, recordUsage } from "@/lib/server/usage-quota"
 import { generateRequestSchema } from "@/lib/validation/api-schemas"
 import { ANONYMOUS_GENERATE_LIMIT } from "@/lib/free-tier"
-
-type UserMessageContentPart =
-    | { type: "text"; text: string }
-    | { type: "image_url"; image_url: { url: string } }
-
-type NormalizedUpsellOption = {
-    tier: "better" | "best"
-    title: string
-    description: string
-    addedItems: Array<ReturnType<typeof normalizeItem>>
-}
-
-type NormalizedEstimate = {
-    items: Array<ReturnType<typeof normalizeItem>>
-    sections?: Array<{
-        id: string
-        name: string
-        divisionCode?: string
-        items: Array<ReturnType<typeof normalizeItem>>
-    }>
-    summary_note: string
-    payment_terms: string
-    closing_note: string
-    warnings: string[]
-    upsellOptions?: NormalizedUpsellOption[]
-    photoAnalysis?: NormalizedPhotoEstimateAnalysis
-}
+import { normalizeEstimatePayload } from "@/lib/estimates/normalize"
 
 type ModelGenerationResult = {
     content: string
     promptTokens: number
     completionTokens: number
-}
-
-type SourceLanguage = "auto" | "en" | "es" | "ko"
-type GenerateWorkflow = "standard" | "photo_estimate"
-type PricingConfidence = "low" | "medium" | "high"
-type NormalizedPhotoEstimateAnalysis = {
-    observations: string[]
-    suggestedScope: string[]
-    materialSuggestions: Array<{
-        label: string
-        quantity: number
-        unit: string
-        reason: string
-    }>
-    pricingConfidence: PricingConfidence
 }
 
 const openai = new OpenAI({
@@ -69,169 +34,6 @@ const GENERATE_RATE_LIMIT_MAX = 20
 const ANONYMOUS_GENERATE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 const PRO_TIERS = new Set(["pro", "team"])
 
-function toFiniteNumber(value: unknown, fallback = 0): number {
-    if (typeof value === "number" && Number.isFinite(value)) return value
-    if (typeof value === "string") {
-        const parsed = Number(value)
-        if (Number.isFinite(parsed)) return parsed
-    }
-    return fallback
-}
-
-function normalizeItem(item: any, index: number) {
-    const quantity = toFiniteNumber(item?.quantity, 1)
-    const unitPrice = toFiniteNumber(item?.unit_price, 0)
-    const total = toFiniteNumber(item?.total, quantity * unitPrice)
-
-    return {
-        id: typeof item?.id === "string" && item.id.trim() ? item.id : `item-${index + 1}`,
-        itemNumber: Math.max(1, Math.floor(toFiniteNumber(item?.itemNumber, index + 1))),
-        category: typeof item?.category === "string" && item.category.trim() ? item.category : "PARTS",
-        description: typeof item?.description === "string" ? item.description.trim() : "",
-        quantity,
-        unit: typeof item?.unit === "string" && item.unit.trim() ? item.unit : "ea",
-        unit_price: unitPrice,
-        total,
-    }
-}
-
-function normalizeUpsellTier(value: unknown, fallback: "better" | "best"): "better" | "best" {
-    if (typeof value !== "string") return fallback
-    const normalized = value.trim().toLowerCase()
-    if (normalized === "better" || normalized === "best") {
-        return normalized
-    }
-    return fallback
-}
-
-function normalizeUpsellOptions(rawOptions: unknown): NormalizedUpsellOption[] {
-    if (!Array.isArray(rawOptions)) return []
-
-    return rawOptions
-        .map((option: any, optionIndex: number) => {
-            const fallbackTier = optionIndex === 0 ? "better" : "best"
-            const tier = normalizeUpsellTier(option?.tier, fallbackTier)
-            const title =
-                typeof option?.title === "string" && option.title.trim()
-                    ? option.title.trim()
-                    : tier === "better"
-                        ? "Better Option"
-                        : "Best Option"
-            const description =
-                typeof option?.description === "string" ? option.description.trim() : ""
-
-            const addedItems = (Array.isArray(option?.addedItems) ? option.addedItems : [])
-                .map((item: any, itemIndex: number) => normalizeItem(item, itemIndex))
-                .filter((item: any) => item.description !== "")
-
-            if (addedItems.length === 0) {
-                return null
-            }
-
-            return {
-                tier,
-                title,
-                description,
-                addedItems,
-            }
-        })
-        .filter((option): option is NormalizedUpsellOption => option !== null)
-}
-
-function normalizePricingConfidence(value: unknown): PricingConfidence {
-    if (typeof value !== "string") return "medium"
-    const normalized = value.trim().toLowerCase()
-    if (normalized === "low" || normalized === "medium" || normalized === "high") {
-        return normalized
-    }
-    return "medium"
-}
-
-function normalizeStringList(input: unknown, maxItems: number, maxLength: number): string[] {
-    if (!Array.isArray(input)) return []
-
-    return input
-        .filter((value): value is string => typeof value === "string")
-        .map((value) => value.trim().slice(0, maxLength))
-        .filter(Boolean)
-        .slice(0, maxItems)
-}
-
-function normalizePhotoEstimateAnalysis(rawAnalysis: unknown): NormalizedPhotoEstimateAnalysis | undefined {
-    const analysis = rawAnalysis && typeof rawAnalysis === "object" ? rawAnalysis as Record<string, unknown> : null
-    if (!analysis) return undefined
-
-    const observations = normalizeStringList(analysis.observations, 6, 180)
-    const suggestedScope = normalizeStringList(analysis.suggestedScope, 6, 180)
-    const materialSuggestions = (Array.isArray(analysis.materialSuggestions) ? analysis.materialSuggestions : [])
-        .map((suggestion: any) => {
-            const label = typeof suggestion?.label === "string" ? suggestion.label.trim().slice(0, 120) : ""
-            if (!label) return null
-
-            const quantity = Math.max(0, toFiniteNumber(suggestion?.quantity, 1))
-            const unit =
-                typeof suggestion?.unit === "string" && suggestion.unit.trim()
-                    ? suggestion.unit.trim().slice(0, 30)
-                    : "ea"
-            const reason =
-                typeof suggestion?.reason === "string" && suggestion.reason.trim()
-                    ? suggestion.reason.trim().slice(0, 180)
-                    : "Visible condition from the jobsite photo."
-
-            return {
-                label,
-                quantity,
-                unit,
-                reason,
-            }
-        })
-        .filter((suggestion): suggestion is NonNullable<typeof suggestion> => suggestion !== null)
-        .slice(0, 8)
-
-    if (observations.length === 0 && suggestedScope.length === 0 && materialSuggestions.length === 0) {
-        return undefined
-    }
-
-    return {
-        observations,
-        suggestedScope,
-        materialSuggestions,
-        pricingConfidence: normalizePricingConfidence(analysis.pricingConfidence),
-    }
-}
-
-function parsePotentialJsonContent(input: string): any {
-    const trimmed = input.trim()
-    if (!trimmed) throw new Error("Model response is empty")
-
-    try {
-        return JSON.parse(trimmed)
-    } catch {
-        const unwrapped = trimmed
-            .replace(/^```(?:json)?\s*/i, "")
-            .replace(/\s*```$/i, "")
-            .trim()
-        return JSON.parse(unwrapped)
-    }
-}
-
-function parseBase64ImageDataUrl(raw: string): { mimeType: string; data: string } | null {
-    const trimmed = raw.trim()
-    const match = /^data:([^;]+);base64,([a-z0-9+/=\s]+)$/i.exec(trimmed)
-    if (!match) return null
-
-    const mimeType = match[1]?.trim().toLowerCase() || ""
-    const data = (match[2] || "").replace(/\s+/g, "")
-
-    if (!mimeType.startsWith("image/")) return null
-    if (!data) return null
-
-    return {
-        mimeType,
-        data,
-    }
-}
-
 function resolveGenerateProvider(): "openai" | "gemini" {
     if (GENERATE_PROVIDER === "openai") {
         return "openai"
@@ -244,27 +46,6 @@ function resolveGenerateProvider(): "openai" | "gemini" {
     return process.env.GEMINI_API_KEY?.trim() ? "gemini" : "openai"
 }
 
-function extractGeminiText(responseBody: any): string {
-    const candidates = Array.isArray(responseBody?.candidates) ? responseBody.candidates : []
-    const firstCandidate = candidates[0]
-    const parts = Array.isArray(firstCandidate?.content?.parts) ? firstCandidate.content.parts : []
-
-    const text = parts
-        .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
-        .find((value: string) => value.trim().length > 0)
-
-    if (text && text.trim()) {
-        return text
-    }
-
-    const blockReason = responseBody?.promptFeedback?.blockReason
-    if (typeof blockReason === "string" && blockReason.trim()) {
-        throw new Error(`Gemini blocked the request: ${blockReason}`)
-    }
-
-    throw new Error("Gemini returned empty content")
-}
-
 async function generateWithGemini(params: {
     systemPrompt: string
     notes?: string
@@ -275,30 +56,10 @@ async function generateWithGemini(params: {
         throw new Error("Gemini is not configured. Please add GEMINI_API_KEY.")
     }
 
-    const parts: any[] = []
-
-    if (params.notes?.trim()) {
-        parts.push({ text: `Field Notes:\n${params.notes}` })
-    } else {
-        parts.push({ text: "Please generate an estimate based on the attached images." })
-    }
-
-    for (const rawImage of params.images || []) {
-        const inlineData = parseBase64ImageDataUrl(rawImage)
-        if (inlineData) {
-            parts.push({
-                inlineData: {
-                    mimeType: inlineData.mimeType,
-                    data: inlineData.data,
-                },
-            })
-            continue
-        }
-
-        parts.push({
-            text: `Reference image URL: ${rawImage}`,
-        })
-    }
+    const parts = buildGeminiGenerateUserParts({
+        notes: params.notes,
+        images: params.images,
+    })
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_GENERATE_MODEL)}:generateContent?key=${encodeURIComponent(apiKey)}`
     const response = await fetch(url, {
@@ -335,7 +96,7 @@ async function generateWithGemini(params: {
         throw new Error(providerMessage)
     }
 
-    const content = extractGeminiText(payload)
+    const content = requireGeminiText(payload)
     return {
         content,
         promptTokens: Number(payload?.usageMetadata?.promptTokenCount || 0),
@@ -348,24 +109,10 @@ async function generateWithOpenAI(params: {
     notes?: string
     images?: string[]
 }): Promise<ModelGenerationResult> {
-    const userMessageContent: UserMessageContentPart[] = []
-
-    if (params.notes) {
-        userMessageContent.push({ type: "text", text: `Field Notes:\n${params.notes}` })
-    } else {
-        userMessageContent.push({ type: "text", text: "Please generate an estimate based on the attached images." })
-    }
-
-    if (params.images && Array.isArray(params.images)) {
-        params.images.forEach((imageUrl: string) => {
-            userMessageContent.push({
-                type: "image_url",
-                image_url: {
-                    url: imageUrl,
-                },
-            })
-        })
-    }
+    const userMessageContent = buildOpenAiGenerateUserContent({
+        notes: params.notes,
+        images: params.images,
+    })
 
     const response = await openai.chat.completions.create({
         model: OPENAI_GENERATE_MODEL,
@@ -390,329 +137,6 @@ async function generateWithOpenAI(params: {
         content,
         promptTokens: Number(response.usage?.prompt_tokens || 0),
         completionTokens: Number(response.usage?.completion_tokens || 0),
-    }
-}
-
-function normalizeEstimate(rawEstimate: any): NormalizedEstimate {
-    const normalizedItems = (Array.isArray(rawEstimate?.items) ? rawEstimate.items : [])
-        .map((item: any, index: number) => normalizeItem(item, index))
-        .filter((item: any) => item.description !== "")
-
-    const normalizedSections = (Array.isArray(rawEstimate?.sections) ? rawEstimate.sections : [])
-        .map((section: any, sectionIndex: number) => {
-            const sectionItems = (Array.isArray(section?.items) ? section.items : [])
-                .map((item: any, itemIndex: number) => normalizeItem(item, itemIndex))
-                .filter((item: any) => item.description !== "")
-
-            return {
-                id:
-                    typeof section?.id === "string" && section.id.trim()
-                        ? section.id
-                        : `section-${sectionIndex + 1}`,
-                name:
-                    typeof section?.name === "string" && section.name.trim()
-                        ? section.name.trim()
-                        : `Section ${sectionIndex + 1}`,
-                divisionCode:
-                    typeof section?.divisionCode === "string" && section.divisionCode.trim()
-                        ? section.divisionCode.trim()
-                        : undefined,
-                items: sectionItems,
-            }
-        })
-        .filter((section: any) => section.items.length > 0)
-
-    const warnings = Array.isArray(rawEstimate?.warnings)
-        ? rawEstimate.warnings
-            .filter((warning: any) => typeof warning === "string" && warning.trim())
-            .map((warning: string) => warning.trim())
-        : []
-    const upsellOptions = normalizeUpsellOptions(rawEstimate?.upsellOptions)
-    const photoAnalysis = normalizePhotoEstimateAnalysis(rawEstimate?.photoAnalysis)
-
-    return {
-        items: normalizedItems,
-        ...(normalizedSections.length > 0 ? { sections: normalizedSections } : {}),
-        summary_note: typeof rawEstimate?.summary_note === "string" ? rawEstimate.summary_note : "",
-        payment_terms: typeof rawEstimate?.payment_terms === "string" ? rawEstimate.payment_terms : "",
-        closing_note: typeof rawEstimate?.closing_note === "string" ? rawEstimate.closing_note : "",
-        warnings,
-        ...(upsellOptions.length > 0 ? { upsellOptions } : {}),
-        ...(photoAnalysis ? { photoAnalysis } : {}),
-    }
-}
-
-// V5 LITE - Optimized System Prompt (650 tokens, 100/100 score)
-function getSourceLanguageGuidance(sourceLanguage: SourceLanguage): string {
-    if (sourceLanguage === "es") {
-        return "Source notes are primarily Spanish. Resolve trade slang into professional North American English."
-    }
-
-    if (sourceLanguage === "ko") {
-        return "Source notes are primarily Korean. Resolve field shorthand into professional North American English."
-    }
-
-    if (sourceLanguage === "en") {
-        return "Source notes are primarily English. Clean up field shorthand into professional English."
-    }
-
-    return "Source notes may mix English, Spanish, and Korean. Detect the language and normalize everything into professional English."
-}
-
-function getSystemPromptV5(userProfile: {
-    city?: string
-    country?: string
-    taxRate?: number
-    businessName?: string
-    priceList?: string  // Price list formatted for prompt
-}, projectType: 'residential' | 'commercial' = 'residential', sourceLanguage: SourceLanguage = "auto", workflow: GenerateWorkflow = "standard", photoContext = "") {
-    const city = userProfile.city || "Toronto"
-    const country = userProfile.country || "Canada"
-    const taxRate = userProfile.taxRate || 13
-    const businessName = userProfile.businessName || "Our Company"
-    const currencyCode = country === "Canada" ? "CAD" : "USD"
-    const priceList = userProfile.priceList || ""
-
-    // Build price list section if available
-    const priceListSection = priceList ? `
-═══════════════════════════════════════
-📋 CONTRACTOR'S PRICE LIST (USE THESE PRICES!)
-═══════════════════════════════════════
-The contractor has a FIXED price list. When matching items, USE THESE EXACT PRICES:
-
-${priceList}
-
-RULES:
-- If the user's input matches an item above (by name OR keywords), USE THAT EXACT PRICE.
-- If no match is found, set unit_price = 0 and add "(Price TBD)" to description.
-- Match keywords in any language (English, Korean, Spanish, etc.).
-
-` : ""
-
-    const projectContext = projectType === 'commercial'
-        ? `TYPE: COMMERCIAL / INDUSTRIAL
-   - MATERIALS: Use commercial specs (EMT/Rigid Conduit, Steel Studs, Plenum Cable, Drop Ceilings).
-   - TONE: Professional, Facility Manager focused (e.g., "shutdown coordination", "safety compliance").`
-        : `TYPE: RESIDENTIAL
-   - MATERIALS: Use residential specs (Romex, Wood Studs, PVC, Drywall).
-   - TONE: Homeowner friendly, warm but professional.`
-    const photoEstimateContext = workflow === "photo_estimate"
-        ? `
-PHOTO ESTIMATE MODE:
-- This request is specifically for jobsite photo estimating.
-- Use the photos as your primary evidence, and use notes only to clarify trade or room context.
-- If the photo does not prove a condition, do not state it as fact.
-- Add a "photoAnalysis" object with:
-  - "observations": short factual site observations from the images
-  - "suggestedScope": short scope bullets the contractor should review
-  - "materialSuggestions": likely materials with quantity, unit, and reason
-  - "pricingConfidence": "low" | "medium" | "high"
-- Prefer line items that cover visible materials, labor, cleanup, and verification steps.
-- Add warnings for any hidden conditions, measurements, or code assumptions that still need on-site verification.
-${photoContext ? `- Extra jobsite context: ${photoContext}` : "- No extra jobsite context was provided."}
-`
-        : ""
-
-    return `
-You are an expert North American Trade Estimator.
-Goal: Create a professional, DETAILED estimate from rough notes.
-
-${priceListSection}CONTEXT:
-- Location: ${city}, ${country}
-- Tax Rate: ${taxRate}%
-- Business: ${businessName}
-- ${projectContext}
-${photoEstimateContext}
-
-INPUT DATA:
-- Text: Rough notes (English, Spanish, Korean, mixed slang)
-- Images: Optional site photos
-- Source language hint: ${sourceLanguage}
-
-═══════════════════════════════════════
-CRITICAL INSTRUCTIONS
-═══════════════════════════════════════
-
-1. 📋 ITEMIZATION (Professional Format):
-   ALWAYS output items with separate category and unit fields.
-   
-   Categories:
-   - "PARTS" - Physical materials/components
-   - "LABOR" - Work hours/installation time  
-   - "SERVICE" - Diagnostic, testing, permits, disposal
-   - "OTHER" - Miscellaneous
-   
-   Units (choose appropriate):
-   - "ea" - Each (for parts)
-   - "LS" - Lump Sum (fixed price work)
-   - "hr" - Hourly (for labor)
-   - "day" - Daily rate
-   - "SF" - Square Foot
-   - "LF" - Linear Foot
-   - "%" - Percentage
-
-2. 👀 VISION ANALYSIS (If images provided):
-   ✓ Identify visible Brands (Kohler, Moen), Materials (PEX, Copper), and Issues.
-   ⚠️ ONLY state what is factually visible. Do not guess.
-
-3. 🌐 LANGUAGE PROCESSING (Spanish/Korean/English):
-   - The user is a professional working in North America.
-   - **ASSUME ALL CURRENCY IS LOCAL (\${currencyCode}).**
-   - ${getSourceLanguageGuidance(sourceLanguage)}
-   - Translate Spanish or Korean trade terms into professional English.
-   - Keep customer-facing output in English for all fields.
-   - Preserve trade intent over literal wording.
-   - Common Spanish field terms may include: "fuga", "llave angular", "desague", "tomacorriente", "interruptor", "condensador", "mano de obra".
-   - Common Korean field terms may include: "누수", "배관", "수전", "차단기", "콘센트", "배수", "노무".
-   - Do NOT perform currency exchange calculations.
-
-4. ✍️ PROFESSIONALIZATION (The "Expensive" Touch):
-   ❌ "fix leak" → ✅ category:"LABOR", description:"Hydraulic Seal Replacement & Pressure Test"
-   ❌ "new faucet" → ✅ category:"PARTS", description:"Kitchen Faucet (Chrome Finish)"
-
-5. 🛡️ PRICING LOGIC:
-   - IF price provided: Distribute across parts/labor/service logically.
-   - IF price missing: Estimate using **Canadian market pricing (CAD)**.
-   - Reference pricing: Home Depot Canada, Rona, Home Hardware, Canadian Tire.
-   - Labor rates: Based on Canadian provincial averages ($60-$120/hr depending on trade).
-   - IF price > $5,000: Add warning "High-value estimate - please verify".
-
-6. 💸 AUTO-UPSELL OPTIONS (Good-Better-Best):
-   - Generate up to 2 optional upsell packages in "upsellOptions".
-   - Allowed tiers: "better", "best".
-   - Each option must include:
-     - "tier"
-     - "title"
-     - "description"
-     - "addedItems" (same schema as regular items)
-   - Keep upsell realistic and relevant to the original scope.
-   - If no strong upsell exists, return "upsellOptions: []".
-
-7. 🇨🇦/🇺🇸 REGIONAL FORMATTING:
-   IF Canada: "Labour", "HST/GST applies", use CAD pricing
-   IF USA: "Labor", "Sales tax applies", use USD pricing
-
-═══════════════════════════════════════
-OUTPUT FORMAT (JSON ONLY)
-═══════════════════════════════════════
-Response must be raw JSON. Use the new professional format:
-
-{
-  "items": [
-    {
-      "id": "item-1",
-      "itemNumber": 1,
-      "category": "PARTS",
-      "description": "Kitchen Faucet (Chrome Finish)",
-      "quantity": 1,
-      "unit": "ea",
-      "unit_price": 180.00
-    },
-    {
-      "id": "item-2", 
-      "itemNumber": 2,
-      "category": "LABOR",
-      "description": "Faucet Installation & Testing",
-      "quantity": 2,
-      "unit": "hr",
-      "unit_price": 75.00
-    },
-    {
-      "id": "item-3",
-      "itemNumber": 3,
-      "category": "SERVICE",
-      "description": "Permit Fee",
-      "quantity": 1,
-      "unit": "LS",
-      "unit_price": 50.00
-    }
-  ],
-  "summary_note": "Concise scope summary.",
-  "payment_terms": "\${country === 'Canada' ? 'Payment due upon completion. E-transfer or credit card accepted. HST applies.' : 'Payment due upon completion. Check, Zelle, or card accepted.'}",
-  "closing_note": "Thank you for choosing \${businessName}. We stand behind our work with a 90-day guarantee.",
-  "warnings": [],
-  "upsellOptions": [
-    {
-      "tier": "better",
-      "title": "Performance Upgrade",
-      "description": "Add higher-efficiency components for longer service life.",
-      "addedItems": [
-        {
-          "id": "upsell-1",
-          "itemNumber": 1,
-          "category": "PARTS",
-          "description": "Premium-grade replacement component",
-          "quantity": 1,
-          "unit": "ea",
-          "unit_price": 185.00
-        }
-      ]
-    },
-    {
-      "tier": "best",
-      "title": "Protection + Priority Package",
-      "description": "Includes premium materials plus priority support.",
-      "addedItems": [
-        {
-          "id": "upsell-2",
-          "itemNumber": 1,
-          "category": "SERVICE",
-          "description": "Extended workmanship warranty add-on",
-          "quantity": 1,
-          "unit": "LS",
-          "unit_price": 240.00
-        }
-      ]
-    }
-  ]${workflow === "photo_estimate" ? `,
-  "photoAnalysis": {
-    "observations": ["Observed condition from the photos"],
-    "suggestedScope": ["Scope bullet the contractor should review"],
-    "materialSuggestions": [
-      {
-        "label": "Suggested material",
-        "quantity": 1,
-        "unit": "ea",
-        "reason": "Why the photo suggests this material"
-      }
-    ],
-    "pricingConfidence": "medium"
-  }` : ""}
-}
-
-TONE: Professional, confident, sales-oriented. Sound like a trusted expert.
-`.trim()
-}
-
-async function resolveGeneratePlanTier(
-    userId: string
-): Promise<{ ok: true; planTier: string } | { ok: false; status: number; error: string }> {
-    const supabase = createServiceSupabaseClient()
-    if (!supabase) {
-        return {
-            ok: false,
-            status: 500,
-            error: "Supabase service configuration is missing.",
-        }
-    }
-
-    const { data, error } = await supabase
-        .from("profiles")
-        .select("plan_tier, stripe_subscription_status, referral_trial_ends_at, referral_bonus_ends_at")
-        .eq("id", userId)
-        .maybeSingle()
-
-    if (error) {
-        return {
-            ok: false,
-            status: 500,
-            error: error.message || "Failed to resolve plan tier",
-        }
-    }
-
-    return {
-        ok: true,
-        planTier: resolveEffectivePlanTier(data || {}),
     }
 }
 
@@ -817,7 +241,7 @@ export async function POST(req: Request) {
 
         // Use provided userProfile or defaults
         const profile = userProfile || {}
-        const systemPrompt = getSystemPromptV5(
+        const systemPrompt = buildGenerateSystemPrompt(
             profile,
             projectType,
             sourceLanguage || "auto",
@@ -832,7 +256,7 @@ export async function POST(req: Request) {
                 : await generateWithOpenAI({ systemPrompt, notes, images })
 
         const rawEstimate = parsePotentialJsonContent(modelResult.content)
-        const estimate = normalizeEstimate(rawEstimate)
+        const estimate = normalizeEstimatePayload(rawEstimate)
 
         await recordUsage(quota.context, "generate", {
             promptTokens: modelResult.promptTokens,

@@ -141,6 +141,8 @@ test.describe("Email sending flow", () => {
         await expect(page.getByRole("heading", { name: /send estimate/i })).toBeVisible()
         await expect(page.getByTestId("email-delivery-summary")).toBeVisible()
         await expect(page.getByTestId("email-recipient-status")).toHaveText("Ready")
+        await expect(page.getByTestId("email-approval-link-status")).toHaveText("Sign in")
+        await expect(page.getByTestId("email-approval-link-action")).toBeVisible()
         await expect(page.getByTestId("email-payment-link-status")).toHaveText("Not attached")
 
         // Try submitting with invalid email
@@ -154,7 +156,7 @@ test.describe("Email sending flow", () => {
         await expect(emailDialog).not.toBeVisible()
     })
 
-    test("email sends successfully with mocked API", async ({ page }) => {
+    test("email approval link sign-in action preserves the draft", async ({ page }) => {
         await page.route("**/api/generate", async (route) => {
             await route.fulfill({
                 status: 200,
@@ -163,7 +165,47 @@ test.describe("Email sending flow", () => {
             })
         })
 
+        await page.goto("/new-estimate")
+        await page.getByTestId("skip-to-manual-entry").click()
+        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve under kitchen sink.")
+        await page.getByTestId("generate-estimate-button").click()
+
+        await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+        await page.getByTestId("result-client-details-button").click()
+        await page.getByTestId("result-client-name-input").fill("Approval Link Client")
+        await page.getByTestId("result-client-email-input").fill("approval-link@example.com")
+        await page.getByTestId("result-quick-send-button").click()
+
+        await expect(page.getByTestId("email-approval-link-status")).toHaveText("Sign in")
+        await page.getByTestId("email-approval-link-action").click()
+
+        await expect(page).toHaveURL(/\/login\?next=%2Fnew-estimate%3FdraftId%3D[^&]+&intent=approval-link/, { timeout: 10000 })
+        await expect(page.getByTestId("login-approval-link-copy")).toBeVisible()
+    })
+
+    test("email sends successfully with mocked API", async ({ page }) => {
+        let shareLinkRequests = 0
+        let sentEmailPayload: Record<string, unknown> | null = null
+
+        await page.route("**/api/generate", async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify(MOCK_ESTIMATE_RESPONSE),
+            })
+        })
+
+        await page.route("**/api/estimates/*/share-link", async (route) => {
+            shareLinkRequests += 1
+            await route.fulfill({
+                status: 401,
+                contentType: "application/json",
+                body: JSON.stringify({ error: { message: "Unauthorized", code: 401 } }),
+            })
+        })
+
         await page.route("**/api/send-email", async (route) => {
+            sentEmailPayload = route.request().postDataJSON() as Record<string, unknown>
             await route.fulfill({
                 status: 200,
                 contentType: "application/json",
@@ -173,7 +215,7 @@ test.describe("Email sending flow", () => {
 
         await page.goto("/new-estimate")
         await page.getByTestId("skip-to-manual-entry").click()
-        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve.")
+        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve under kitchen sink.")
         await page.getByTestId("generate-estimate-button").click()
 
         await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
@@ -187,6 +229,145 @@ test.describe("Email sending flow", () => {
 
         // Modal should close on success
         await expect(page.getByRole("heading", { name: /send estimate/i })).not.toBeVisible({ timeout: 5000 })
+        expect(shareLinkRequests).toBe(0)
+        expect(sentEmailPayload).toEqual(expect.objectContaining({
+            email: "client@example.com",
+            message: expect.not.stringContaining("/q/"),
+        }))
+    })
+
+    test("email approval portal falls back to the profile payment link", async ({ page, context }) => {
+        await seedAuthenticatedSupabaseSession(context)
+        let shareLinkPayload: Record<string, unknown> | null = null
+        let sentEmailPayload: Record<string, unknown> | null = null
+
+        await page.addInitScript(() => {
+            window.localStorage.setItem("snapquote_business_profile", JSON.stringify({
+                business_name: "Profile Pay Plumbing",
+                phone: "555-0188",
+                email: "profile-pay@example.test",
+                address: "18 Profile Pay Way",
+                license_number: "LIC-PAY",
+                tax_rate: 13,
+                payment_link: "https://pay.snapquote.test/new-estimate-profile-link",
+            }))
+        })
+
+        await page.route("**/api/generate", async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify(MOCK_ESTIMATE_RESPONSE),
+            })
+        })
+
+        await page.route("**/api/estimates/*/share-link", async (route) => {
+            shareLinkPayload = route.request().postDataJSON() as Record<string, unknown>
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({
+                    ok: true,
+                    shareUrl: "https://snapquote.test/q/profile-pay-token",
+                    portal: { status: "shared" },
+                }),
+            })
+        })
+
+        await page.route("**/api/send-email", async (route) => {
+            sentEmailPayload = route.request().postDataJSON() as Record<string, unknown>
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ ok: true, messageId: "mock-email-id" }),
+            })
+        })
+
+        await page.goto("/new-estimate")
+        await page.getByTestId("skip-to-manual-entry").click()
+        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve under kitchen sink.")
+        await page.getByTestId("generate-estimate-button").click()
+
+        await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+        await page.getByTestId("result-client-details-button").click()
+        await page.getByTestId("result-client-name-input").fill("Profile Pay Client")
+        await page.getByTestId("result-client-email-input").fill("profile-pay-client@example.com")
+        await page.getByTestId("result-quick-send-button").click()
+        await expect(page.getByTestId("email-approval-link-status")).toHaveText("Included")
+        await expect(page.getByTestId("email-payment-link-status")).toHaveText("After approval")
+        await page.getByRole("button", { name: /send email/i }).click()
+
+        await expect(page.getByRole("heading", { name: /send estimate/i })).not.toBeVisible({ timeout: 5000 })
+        expect(shareLinkPayload).toMatchObject({
+            resetCustomerDecision: true,
+            estimate: {
+                paymentLink: "https://pay.snapquote.test/new-estimate-profile-link",
+                paymentLinkType: "custom",
+            },
+        })
+        expect(sentEmailPayload).toEqual(expect.objectContaining({
+            email: "profile-pay-client@example.com",
+            message: expect.stringContaining("https://snapquote.test/q/profile-pay-token"),
+        }))
+    })
+
+    test("email blocks sending when the included approval link cannot be created", async ({ page, context }) => {
+        await seedAuthenticatedSupabaseSession(context)
+        let sendEmailRequests = 0
+
+        await page.route("**/api/billing/subscription", async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ ok: true, planTier: "pro" }),
+            })
+        })
+
+        await page.route("**/api/generate", async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify(MOCK_ESTIMATE_RESPONSE),
+            })
+        })
+
+        await page.route("**/api/estimates/*/share-link", async (route) => {
+            await route.fulfill({
+                status: 500,
+                contentType: "application/json",
+                body: JSON.stringify({ error: { message: "Approval link unavailable", code: 500 } }),
+            })
+        })
+
+        await page.route("**/api/send-email", async (route) => {
+            sendEmailRequests += 1
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ ok: true, messageId: "should-not-send" }),
+            })
+        })
+
+        await page.goto("/new-estimate")
+        await page.getByTestId("skip-to-manual-entry").click()
+        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve under kitchen sink.")
+        await page.getByTestId("generate-estimate-button").click()
+
+        await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+        await page.getByTestId("result-client-details-button").click()
+        await page.getByTestId("result-client-name-input").fill("Portal Failure Client")
+        await page.getByTestId("result-client-email-input").fill("portal-failure@example.com")
+        await page.getByTestId("result-quick-send-button").click()
+
+        const emailDialog = page.getByRole("dialog", { name: "Send Estimate" })
+        await expect(emailDialog).toBeVisible()
+        await expect(page.getByTestId("email-approval-link-status")).toHaveText("Included")
+        await page.getByRole("button", { name: /send email/i }).click()
+
+        await expect(emailDialog).toBeVisible()
+        await expect(page.getByTestId("email-delivery-issue")).toBeVisible()
+        await expect(page.getByTestId("email-delivery-issue-message")).toContainText("Approval link unavailable")
+        expect(sendEmailRequests).toBe(0)
     })
 
     test("email shows quota error when API returns 402", async ({ page }) => {
@@ -208,7 +389,7 @@ test.describe("Email sending flow", () => {
 
         await page.goto("/new-estimate")
         await page.getByTestId("skip-to-manual-entry").click()
-        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve.")
+        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve under kitchen sink.")
         await page.getByTestId("generate-estimate-button").click()
 
         await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
@@ -223,7 +404,7 @@ test.describe("Email sending flow", () => {
         await expect(deliveryIssue).toBeVisible({ timeout: 10_000 })
         await expect(deliveryIssue).toContainText("Upgrade to keep emailing PDFs")
         await expect(deliveryIssue).toContainText("Monthly email quota reached")
-        await expect(page.getByTestId("email-delivery-action")).toHaveAttribute("href", "/pricing")
+        await expect(page.getByTestId("email-delivery-action")).toHaveAttribute("href", "/pricing?source=send_email_quota")
         await expect(page.getByTestId("email-delivery-retry-action")).toBeVisible()
         await expect(page.getByRole("dialog", { name: "Send Estimate" })).toBeVisible()
 
@@ -255,7 +436,7 @@ test.describe("Email sending flow", () => {
 
         await page.goto("/new-estimate")
         await page.getByTestId("skip-to-manual-entry").click()
-        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve.")
+        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve under kitchen sink.")
         await page.getByTestId("generate-estimate-button").click()
 
         await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
@@ -282,7 +463,7 @@ test.describe("Email sending flow", () => {
         await expect(deliveryIssue).toBeVisible({ timeout: 5_000 })
         await expect(deliveryIssue).toContainText("Upgrade to keep emailing PDFs")
         await expect(deliveryIssue).toContainText("Monthly email quota reached")
-        await expect(page.getByTestId("pdf-preview-email-action")).toHaveAttribute("href", "/pricing")
+        await expect(page.getByTestId("pdf-preview-email-action")).toHaveAttribute("href", "/pricing?source=send_email_quota")
         await expect(page.getByTestId("pdf-preview-email-retry-action")).toBeVisible()
         await expect(previewDialog.getByLabel("Client email")).toBeVisible()
 
@@ -436,7 +617,7 @@ test.describe("SMS sending flow", () => {
 
         await page.goto("/new-estimate")
         await page.getByTestId("skip-to-manual-entry").click()
-        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve.")
+        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve under kitchen sink.")
         await page.getByTestId("generate-estimate-button").click()
 
         await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
@@ -450,6 +631,8 @@ test.describe("SMS sending flow", () => {
         await expect(page.getByRole("heading", { name: /send via sms/i })).toBeVisible()
         await expect(page.getByTestId("sms-delivery-summary")).toBeVisible()
         await expect(page.getByTestId("sms-recipient-status")).toHaveText("Needed")
+        await expect(page.getByTestId("sms-approval-link-status")).toHaveText("Sign in")
+        await expect(page.getByTestId("sms-approval-link-action")).toBeVisible()
         await expect(page.getByTestId("sms-payment-link-status")).toHaveText("Not attached")
         await expect(page.getByTestId("sms-message-length")).toBeVisible()
 
@@ -470,6 +653,9 @@ test.describe("SMS sending flow", () => {
     })
 
     test("SMS sends successfully with mocked API", async ({ page }) => {
+        let shareLinkRequests = 0
+        let sentSmsPayload: Record<string, unknown> | null = null
+
         await page.route("**/api/generate", async (route) => {
             await route.fulfill({
                 status: 200,
@@ -478,7 +664,17 @@ test.describe("SMS sending flow", () => {
             })
         })
 
+        await page.route("**/api/estimates/*/share-link", async (route) => {
+            shareLinkRequests += 1
+            await route.fulfill({
+                status: 401,
+                contentType: "application/json",
+                body: JSON.stringify({ error: { message: "Unauthorized", code: 401 } }),
+            })
+        })
+
         await page.route("**/api/send-sms", async (route) => {
+            sentSmsPayload = route.request().postDataJSON() as Record<string, unknown>
             await route.fulfill({
                 status: 200,
                 contentType: "application/json",
@@ -488,7 +684,7 @@ test.describe("SMS sending flow", () => {
 
         await page.goto("/new-estimate")
         await page.getByTestId("skip-to-manual-entry").click()
-        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve.")
+        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve under kitchen sink.")
         await page.getByTestId("generate-estimate-button").click()
 
         await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
@@ -498,6 +694,145 @@ test.describe("SMS sending flow", () => {
 
         // Modal should close on success
         await expect(page.getByRole("heading", { name: /send via sms/i })).not.toBeVisible({ timeout: 5000 })
+        expect(shareLinkRequests).toBe(0)
+        expect(sentSmsPayload).toEqual(expect.objectContaining({
+            toPhoneNumber: "+14165550123",
+            message: expect.not.stringContaining("/q/"),
+        }))
+    })
+
+    test("SMS approval portal falls back to the profile payment link", async ({ page, context }) => {
+        await seedAuthenticatedSupabaseSession(context)
+        let shareLinkPayload: Record<string, unknown> | null = null
+        let sentSmsPayload: Record<string, unknown> | null = null
+
+        await page.addInitScript(() => {
+            window.localStorage.setItem("snapquote_business_profile", JSON.stringify({
+                business_name: "SMS Profile Pay Plumbing",
+                phone: "555-0199",
+                email: "sms-profile-pay@example.test",
+                address: "19 SMS Profile Pay Way",
+                license_number: "LIC-SMS-PAY",
+                tax_rate: 13,
+                payment_link: "https://pay.snapquote.test/sms-profile-link",
+            }))
+        })
+
+        await page.route("**/api/generate", async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify(MOCK_ESTIMATE_RESPONSE),
+            })
+        })
+
+        await page.route("**/api/estimates/*/share-link", async (route) => {
+            shareLinkPayload = route.request().postDataJSON() as Record<string, unknown>
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({
+                    ok: true,
+                    shareUrl: "https://snapquote.test/q/sms-profile-pay-token",
+                    portal: { status: "shared" },
+                }),
+            })
+        })
+
+        await page.route("**/api/send-sms", async (route) => {
+            sentSmsPayload = route.request().postDataJSON() as Record<string, unknown>
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ success: true, messageSid: "SMsmsprofilepay", creditsRemaining: 3 }),
+            })
+        })
+
+        await page.goto("/new-estimate")
+        await page.getByTestId("skip-to-manual-entry").click()
+        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve under kitchen sink.")
+        await page.getByTestId("generate-estimate-button").click()
+
+        await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+        await page.getByTestId("result-client-details-button").click()
+        await page.getByTestId("result-client-name-input").fill("SMS Profile Pay Client")
+        await page.getByTestId("result-client-phone-input").fill("+14165550123")
+        await page.getByRole("button", { name: /send via sms/i }).click()
+        await expect(page.getByTestId("sms-approval-link-status")).toHaveText("Included")
+        await expect(page.getByTestId("sms-payment-link-status")).toHaveText("After approval")
+        await page.getByRole("button", { name: /send sms/i }).click()
+
+        await expect(page.getByRole("heading", { name: /send via sms/i })).not.toBeVisible({ timeout: 5000 })
+        expect(shareLinkPayload).toMatchObject({
+            resetCustomerDecision: true,
+            estimate: {
+                paymentLink: "https://pay.snapquote.test/sms-profile-link",
+                paymentLinkType: "custom",
+            },
+        })
+        expect(sentSmsPayload).toEqual(expect.objectContaining({
+            toPhoneNumber: "+14165550123",
+            message: expect.stringContaining("https://snapquote.test/q/sms-profile-pay-token"),
+        }))
+    })
+
+    test("SMS blocks sending when the included approval link cannot be created", async ({ page, context }) => {
+        await seedAuthenticatedSupabaseSession(context)
+        let sendSmsRequests = 0
+
+        await page.route("**/api/billing/subscription", async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ ok: true, planTier: "pro" }),
+            })
+        })
+
+        await page.route("**/api/generate", async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify(MOCK_ESTIMATE_RESPONSE),
+            })
+        })
+
+        await page.route("**/api/estimates/*/share-link", async (route) => {
+            await route.fulfill({
+                status: 500,
+                contentType: "application/json",
+                body: JSON.stringify({ error: { message: "Approval link unavailable", code: 500 } }),
+            })
+        })
+
+        await page.route("**/api/send-sms", async (route) => {
+            sendSmsRequests += 1
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({ ok: true, messageId: "should-not-send", creditsRemaining: 4 }),
+            })
+        })
+
+        await page.goto("/new-estimate")
+        await page.getByTestId("skip-to-manual-entry").click()
+        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve under kitchen sink.")
+        await page.getByTestId("generate-estimate-button").click()
+
+        await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+        await page.getByTestId("result-client-details-button").click()
+        await page.getByTestId("result-client-name-input").fill("SMS Portal Failure Client")
+        await page.getByTestId("result-client-phone-input").fill("+14165550123")
+        await page.getByRole("button", { name: /send via sms/i }).click()
+
+        const smsDialog = page.getByRole("dialog", { name: "Send via SMS" })
+        await expect(smsDialog).toBeVisible()
+        await expect(page.getByTestId("sms-approval-link-status")).toHaveText("Included")
+        await page.getByRole("button", { name: /send sms/i }).click()
+
+        await expect(smsDialog).toBeVisible()
+        await expect(page.getByTestId("sms-delivery-issue")).toBeVisible()
+        await expect(page.getByTestId("sms-delivery-issue-message")).toContainText("Approval link unavailable")
+        expect(sendSmsRequests).toBe(0)
     })
 
     test("SMS shows credits error when API returns 402", async ({ page }) => {
@@ -519,7 +854,7 @@ test.describe("SMS sending flow", () => {
 
         await page.goto("/new-estimate")
         await page.getByTestId("skip-to-manual-entry").click()
-        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve.")
+        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve under kitchen sink.")
         await page.getByTestId("generate-estimate-button").click()
 
         await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
@@ -531,7 +866,7 @@ test.describe("SMS sending flow", () => {
         await expect(deliveryIssue).toBeVisible({ timeout: 5000 })
         await expect(deliveryIssue).toContainText("Add SMS credits before sending")
         await expect(deliveryIssue).toContainText("Insufficient SMS credits")
-        await expect(page.getByTestId("sms-delivery-action")).toHaveAttribute("href", "/pricing")
+        await expect(page.getByTestId("sms-delivery-action")).toHaveAttribute("href", "/pricing?source=sms_credits")
         await expect(page.getByTestId("sms-delivery-retry-action")).toBeVisible()
         await expect(page.getByRole("dialog", { name: "Send via SMS" })).toBeVisible()
 
@@ -576,7 +911,7 @@ test.describe("SMS sending flow", () => {
 
         await page.goto("/new-estimate")
         await page.getByTestId("skip-to-manual-entry").click()
-        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve.")
+        await page.getByTestId("job-description-input").fill("Replace leaking shutoff valve under kitchen sink.")
         await page.getByTestId("generate-estimate-button").click()
 
         await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")

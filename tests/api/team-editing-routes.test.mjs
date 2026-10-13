@@ -129,7 +129,10 @@ describe("Team estimate editing routes", () => {
 
       if (query.table === "estimates" && query.action === "select" && query.mode === "maybeSingle" && hasEqFilter(query, "id", "estimate_1")) {
         return {
-          data: buildEstimateRow(),
+          data: buildEstimateRow({
+            status: "sent",
+            payment_completed_at: "2026-03-20T17:00:00.000Z",
+          }),
           error: null,
         }
       }
@@ -152,6 +155,8 @@ describe("Team estimate editing routes", () => {
     assert.equal(data.estimate.clientEmail, "office@harbordental.test")
     assert.equal(data.estimate.clientPhone, "+14165550123")
     assert.equal(data.estimate.clientNotes, "Use side entrance.")
+    assert.equal(data.estimate.status, "paid")
+    assert.equal(data.estimate.paymentCompletedAt, "2026-03-20T17:00:00.000Z")
     assert.equal(data.estimate.sections.length, 1)
   })
 
@@ -568,5 +573,125 @@ describe("Team estimate editing routes", () => {
     assert.equal(clientUpdateCall.payload.email, "dispatch@harbordental.test")
     assert.equal(clientUpdateCall.payload.phone, "+14165550999")
     assert.equal(clientUpdateCall.payload.notes, "Confirm parking access before arrival.")
+  })
+
+  test("PATCH /api/team/estimates/:estimateId preserves payment-completed sent edits as paid", async () => {
+    setTeamEnv()
+    const state = getTestState()
+    const paidAt = "2026-03-20T17:00:00.000Z"
+
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === "profiles" && query.action === "upsert") {
+        return { data: [], error: null }
+      }
+
+      if (query.table === "team_workspace_members" && query.action === "select" && query.mode === "maybeSingle") {
+        return {
+          data: {
+            workspace_id: "workspace_1",
+            user_id: "user-1",
+            role: "admin",
+            joined_at: "2026-03-20T15:00:00.000Z",
+            invited_by: "user-2",
+          },
+          error: null,
+        }
+      }
+
+      if (query.table === "team_workspace_members" && query.action === "select" && query.mode === "execute") {
+        return {
+          data: [{ user_id: "user-1" }, { user_id: "user-2" }],
+          error: null,
+        }
+      }
+
+      if (query.table === "estimates" && query.action === "select" && query.mode === "maybeSingle") {
+        return {
+          data: buildEstimateRow({
+            status: "sent",
+            sent_at: "2026-03-20T16:45:00.000Z",
+            payment_completed_at: paidAt,
+          }),
+          error: null,
+        }
+      }
+
+      if (query.table === "team_estimate_sessions" && query.action === "select" && query.mode === "maybeSingle") {
+        return {
+          data: {
+            estimate_id: "estimate_1",
+            workspace_id: "workspace_1",
+            editor_user_id: "user-1",
+            acquired_at: "2026-03-20T16:00:00.000Z",
+            heartbeat_at: "2026-03-20T16:01:00.000Z",
+            expires_at: futureIso(),
+            created_at: "2026-03-20T16:00:00.000Z",
+            updated_at: "2026-03-20T16:01:00.000Z",
+          },
+          error: null,
+        }
+      }
+
+      if (query.table === "clients" && query.action === "select" && query.mode === "maybeSingle") {
+        return { data: { id: "client_1" }, error: null }
+      }
+
+      if (query.table === "estimates" && query.action === "update") {
+        return { data: [], error: null }
+      }
+
+      if (query.table === "estimate_items" && (query.action === "delete" || query.action === "insert")) {
+        return { data: [], error: null }
+      }
+
+      if (query.table === "estimate_sections" && query.action === "delete") {
+        return { data: [], error: null }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = jsonRequest("http://localhost/api/team/estimates/estimate_1", {
+      clientName: "Harbor Dental",
+      clientAddress: "44 Bay St",
+      summary_note: "Paid edit should stay closed.",
+      status: "sent",
+      taxRate: 5,
+      taxAmount: 110,
+      totalAmount: 2200,
+      sentAt: "2026-03-20T16:45:00.000Z",
+      paymentCompletedAt: paidAt,
+      items: [
+        {
+          id: "item_1",
+          itemNumber: 1,
+          category: "PARTS",
+          description: "Fixture replacement",
+          quantity: 2,
+          unit: "ea",
+          unit_price: 450,
+          total: 900,
+        },
+      ],
+    }, {
+      method: "PATCH",
+      headers: bearerHeader(),
+    })
+
+    const res = await teamEstimatePatch(req, { params: Promise.resolve({ estimateId: "estimate_1" }) })
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.estimate.status, "paid")
+    assert.equal(data.estimate.paymentCompletedAt, paidAt)
+
+    const updateCall = state.supabase.queryCalls.find(
+      (query) => query.table === "estimates" && query.action === "update"
+    )
+    assert.ok(updateCall)
+    assert.equal(updateCall.payload.status, "paid")
+    assert.equal(updateCall.payload.payment_completed_at, paidAt)
+    assert.equal(updateCall.payload.sent_at, "2026-03-20T16:45:00.000Z")
   })
 })

@@ -39,7 +39,12 @@ const seededPaymentEstimate = {
     ],
 }
 
-async function seedStoredEstimate(page: Page, estimate = seededPaymentEstimate) {
+type SeedPaymentEstimate = typeof seededPaymentEstimate & {
+    paymentCompletedAt?: string
+    lastPaymentSessionId?: string
+}
+
+async function seedStoredEstimate(page: Page, estimate: SeedPaymentEstimate = seededPaymentEstimate) {
     await page.goto("/")
 
     await page.evaluate(async (estimate) => {
@@ -126,6 +131,38 @@ async function readStoredEstimates(page: Page) {
     })
 }
 
+async function mockStripePaymentStatus(
+    page: Page,
+    input: {
+        paid: boolean
+        checkoutSessionId?: string
+        paidAt?: string
+        expectedPaymentLinkId?: string
+        expectedSessionId?: string
+    }
+) {
+    await page.route("**/api/payments/stripe/status?**", async (route) => {
+        const requestUrl = new URL(route.request().url())
+        if (input.expectedPaymentLinkId) {
+            expect(requestUrl.searchParams.get("paymentLinkId")).toBe(input.expectedPaymentLinkId)
+        }
+        if (input.expectedSessionId) {
+            expect(requestUrl.searchParams.get("sessionId")).toBe(input.expectedSessionId)
+        }
+
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                ok: true,
+                paid: input.paid,
+                checkoutSessionId: input.checkoutSessionId,
+                paidAt: input.paidAt,
+            }),
+        })
+    })
+}
+
 test.describe("Payment success page", () => {
     test("matching local estimate is marked paid after Stripe success", async ({ page }) => {
         await page.setViewportSize({ width: 1280, height: 900 })
@@ -136,6 +173,13 @@ test.describe("Payment success page", () => {
         expect(estimate.status).toBe("sent")
 
         const sessionId = "cs_test_payment_success_1234567890"
+        await mockStripePaymentStatus(page, {
+            paid: true,
+            checkoutSessionId: sessionId,
+            paidAt: "2026-05-23T12:00:00.000Z",
+            expectedPaymentLinkId: "plink_payment_success",
+            expectedSessionId: sessionId,
+        })
         await page.goto(`/payment-success?estimateId=${estimate.id}&estimateNumber=${estimate.estimateNumber}&session_id=${sessionId}`)
 
         const localStatus = page.getByTestId("payment-success-local-status")
@@ -191,6 +235,113 @@ test.describe("Payment success page", () => {
         expect(lanesBox).toBeTruthy()
         expect(summaryBox).toBeTruthy()
         expect(lanesBox!.y).toBeLessThan(summaryBox!.y)
+    })
+
+    test("unverified success URL does not mark a local estimate paid", async ({ page }) => {
+        await seedStoredEstimate(page)
+
+        const [estimate] = await readStoredEstimates(page)
+        const sessionId = "cs_test_forged_payment_success"
+        await mockStripePaymentStatus(page, {
+            paid: false,
+            expectedPaymentLinkId: "plink_payment_success",
+            expectedSessionId: sessionId,
+        })
+
+        await page.goto(`/payment-success?estimateId=${estimate.id}&estimateNumber=${estimate.estimateNumber}&session_id=${sessionId}`)
+
+        const localStatus = page.getByTestId("payment-success-local-status")
+        await expect(localStatus).toBeVisible()
+        await expect(localStatus).toContainText("Payment status needs a History check")
+        await expect(localStatus).toContainText("Stripe did not confirm")
+
+        const [updatedEstimate] = await readStoredEstimates(page)
+        expect(updatedEstimate.status).toBe("sent")
+        expect(updatedEstimate.lastPaymentSessionId).toBeUndefined()
+        expect(updatedEstimate.paymentCompletedAt).toBeUndefined()
+    })
+
+    test("payment success trusts existing local payment evidence without rechecking Stripe", async ({ page }) => {
+        const paidAt = "2026-05-23T12:00:00.000Z"
+        await seedStoredEstimate(page, {
+            ...seededPaymentEstimate,
+            status: "sent",
+            paymentCompletedAt: paidAt,
+        })
+
+        const [estimate] = await readStoredEstimates(page)
+        expect(estimate.status).toBe("sent")
+        expect(estimate.paymentCompletedAt).toBe(paidAt)
+
+        let stripeStatusRequests = 0
+        await page.route("**/api/payments/stripe/status?**", async (route) => {
+            stripeStatusRequests += 1
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({
+                    ok: false,
+                    paid: false,
+                }),
+            })
+        })
+
+        await page.goto(`/payment-success?estimateId=${estimate.id}&estimateNumber=${estimate.estimateNumber}&session_id=cs_unverified_already_paid`)
+
+        const localStatus = page.getByTestId("payment-success-local-status")
+        await expect(localStatus).toBeVisible()
+        await expect(localStatus).toContainText("Local history already showed paid")
+        await expect(localStatus).toContainText("Paid lane")
+        expect(stripeStatusRequests).toBe(0)
+
+        const [updatedEstimate] = await readStoredEstimates(page)
+        expect(updatedEstimate.status).toBe("paid")
+        expect(updatedEstimate.paymentCompletedAt).toBe(paidAt)
+        expect(updatedEstimate.lastPaymentSessionId).toBeUndefined()
+    })
+
+    test("success URL without a checkout session id does not mark a local estimate paid", async ({ page }) => {
+        await seedStoredEstimate(page)
+
+        const [estimate] = await readStoredEstimates(page)
+        let stripeStatusRequests = 0
+        await page.route("**/api/payments/stripe/status?**", async (route) => {
+            stripeStatusRequests += 1
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({
+                    ok: true,
+                    paid: true,
+                    checkoutSessionId: "cs_paid_without_return_session",
+                    paidAt: "2026-05-23T12:00:00.000Z",
+                }),
+            })
+        })
+
+        await page.goto(`/payment-success?estimateId=${estimate.id}&estimateNumber=${estimate.estimateNumber}`)
+
+        const localStatus = page.getByTestId("payment-success-local-status")
+        const historyLink = page.getByTestId("payment-success-history-link")
+        await expect(localStatus).toBeVisible()
+        await expect(localStatus).toContainText("Payment status needs a History check")
+        await expect(localStatus).toContainText("checkout session id was not included")
+        await expect(historyLink).toHaveText(/Check History/)
+        await expect(historyLink).toHaveAttribute(
+            "href",
+            `/history?payment=success&estimateId=${estimate.id}&estimateNumber=${estimate.estimateNumber}&paymentStatus=missing_session`
+        )
+        expect(stripeStatusRequests).toBe(0)
+
+        const [updatedEstimate] = await readStoredEstimates(page)
+        expect(updatedEstimate.status).toBe("sent")
+        expect(updatedEstimate.lastPaymentSessionId).toBeUndefined()
+        expect(updatedEstimate.paymentCompletedAt).toBeUndefined()
+
+        await historyLink.click()
+        await expect(page).toHaveURL(new RegExp(`/history\\?payment=success&estimateId=${estimate.id}&estimateNumber=${estimate.estimateNumber}&paymentStatus=missing_session`))
+        await expect(page.getByTestId("history-payment-return-banner")).toContainText("Payment confirmation needed")
+        await expect(page.getByTestId("history-payment-return-banner")).toContainText("checkout session id")
     })
 
     test("customer-device success explains that cloud history will sync", async ({ page }) => {
@@ -266,6 +417,13 @@ test.describe("Payment success page", () => {
         const [seededEstimate] = await readStoredEstimates(page)
         expect(seededEstimate.id).toBe(longEstimate.id)
         expect(seededEstimate.estimateNumber).toBe(longEstimate.estimateNumber)
+        await mockStripePaymentStatus(page, {
+            paid: true,
+            checkoutSessionId: sessionId,
+            paidAt: "2026-05-23T12:00:00.000Z",
+            expectedPaymentLinkId: "plink_payment_success",
+            expectedSessionId: sessionId,
+        })
         await page.goto(`/payment-success?estimateId=${longEstimate.id}&estimateNumber=${longEstimate.estimateNumber}&session_id=${sessionId}`)
 
         const referenceGrid = page.getByTestId("payment-success-reference-grid")

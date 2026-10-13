@@ -415,6 +415,7 @@ describe("Team workspace routes", () => {
               estimate_number: "SQ-102",
               total_amount: 980,
               status: "sent",
+              payment_completed_at: "2026-03-20T16:30:00.000Z",
               updated_at: "2026-03-20T16:20:00.000Z",
               created_at: "2026-03-20T16:00:00.000Z",
               clients: { name: "Blue Lantern Cafe" },
@@ -453,6 +454,7 @@ describe("Team workspace routes", () => {
     assert.equal(data.count, 2)
     assert.equal(data.estimates[0].estimateId, "estimate_2")
     assert.equal(data.estimates[0].ownerBusinessName, "Second Crew")
+    assert.equal(data.estimates[0].paymentCompletedAt, "2026-03-20T16:30:00.000Z")
     assert.equal(data.estimates[1].status, "paid")
   })
 })

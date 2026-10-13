@@ -6,10 +6,9 @@
 - Prioritize quote capture, offline reliability, PDF delivery, payment links, and follow-up workflows.
 
 ## Development Harness
-- This project uses OpenCode with `oh-my-openagent` as the preferred agent harness.
-- Local project configuration lives in `.opencode/oh-my-openagent.jsonc`.
-- Use `ultrawork` for implementation tasks and Prometheus/plan mode for risky refactors.
-- Current provider set: OpenAI + Gemini only. Do not assume Claude, Copilot, Kimi, Z.ai, OpenCode Go, or Vercel AI Gateway access.
+- This project uses Claude Code only. OpenCode/oh-my-openagent was removed; do not reintroduce `.opencode/`, `.omo/`, or `codex/`.
+- Use superpowers plans (`writing-plans` → `executing-plans`) or plan mode for risky refactors.
+- Past plans and research live in `docs/plans/` and `docs/research/`.
 
 ## Tech Stack
 - Frontend: Next.js 16 App Router, React 18, TypeScript, Tailwind CSS
@@ -24,7 +23,7 @@
 - Treat SnapQuote as the primary app.
 - Do not edit `inkdesk/` unless the user explicitly asks; it is a separate app currently inside the repo and can break root build/type checks.
 - Avoid resurrecting legacy Orchestrator 5.x files, symlinks, commands, or memory folders.
-- Keep hidden agent config minimal: prefer `.opencode/` plus this file.
+- Keep hidden agent config minimal: this file is the project-level agent context.
 
 ## Engineering Rules
 - Follow the existing codebase patterns before introducing new architecture.
@@ -36,7 +35,7 @@
 - Add comments only for non-obvious logic.
 
 ## Verification
-- For API/server changes, run `npm test`.
+- For API/server changes, run `pnpm test`.
 - For UI changes, run targeted Playwright tests or manually verify the changed page when practical.
 - For build readiness, remember root build is sensitive to `inkdesk/` inclusion; fix project boundaries before treating build failures as SnapQuote app failures.
 - Do not claim production readiness without evidence from lint/test/build or a clear note about what could not be run.

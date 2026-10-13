@@ -385,6 +385,7 @@ create table if not exists estimate_attachments (
   photos jsonb default '[]'::jsonb not null,
   audio_url text,
   original_transcript text,
+  scope_assumptions_confirmed_at timestamp with time zone,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
   unique(estimate_id),
@@ -1012,5 +1013,4 @@ create index if not exists idx_estimates_quote_chaser_stage2_candidates
 create index if not exists idx_estimates_review_request_candidates
   on estimates (user_id, updated_at)
   where status = 'paid' and review_requested_at is null;
-
 

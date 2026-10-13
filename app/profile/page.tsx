@@ -34,6 +34,11 @@ type StripeConnectStatus = {
     payoutsEnabled?: boolean
 }
 
+type StripeConnectIssue = {
+    kind: "onboarding" | "dashboard"
+    message: string
+}
+
 function getStripeStatusLabel(status: StripeConnectStatus | null): string {
     if (!status?.connected) return "Not connected"
     if (status.detailsSubmitted && status.chargesEnabled) return "Ready to take payments"
@@ -71,6 +76,7 @@ export default function ProfilePage() {
     const [stripeStatusLoading, setStripeStatusLoading] = useState(false)
     const [stripeConnecting, setStripeConnecting] = useState(false)
     const [stripeDashboardLoading, setStripeDashboardLoading] = useState(false)
+    const [stripeConnectIssue, setStripeConnectIssue] = useState<StripeConnectIssue | null>(null)
     const [subscription, setSubscription] = useState<BillingSubscriptionStatusResponse | null>(null)
 
     const loadStripeConnectStatus = useCallback(async () => {
@@ -95,6 +101,7 @@ export default function ProfilePage() {
 
             const data = await response.json()
             setStripeConnectStatus(data)
+            setStripeConnectIssue(null)
         } catch (error) {
             console.error("Failed to load Stripe Connect status:", error)
         } finally {
@@ -174,6 +181,7 @@ export default function ProfilePage() {
 
     const handleConnectStripe = async () => {
         setStripeConnecting(true)
+        setStripeConnectIssue(null)
         try {
             const headers = await withAuthHeaders({ "content-type": "application/json" })
             const response = await fetch("/api/stripe/connect/onboard", {
@@ -199,7 +207,9 @@ export default function ProfilePage() {
             window.location.href = data.url
         } catch (error: unknown) {
             console.error("Stripe connect onboarding failed:", error)
-            toast(error instanceof Error ? error.message : "Failed to connect Stripe.", "error")
+            const message = error instanceof Error ? error.message : "Failed to connect Stripe."
+            setStripeConnectIssue({ kind: "onboarding", message })
+            toast(message, "error")
         } finally {
             setStripeConnecting(false)
         }
@@ -207,6 +217,7 @@ export default function ProfilePage() {
 
     const handleOpenStripeDashboard = async () => {
         setStripeDashboardLoading(true)
+        setStripeConnectIssue(null)
         try {
             const headers = await withAuthHeaders({ "content-type": "application/json" })
             const response = await fetch("/api/stripe/connect/dashboard-link", {
@@ -232,7 +243,9 @@ export default function ProfilePage() {
             window.open(data.url, "_blank", "noopener,noreferrer")
         } catch (error: unknown) {
             console.error("Stripe dashboard link failed:", error)
-            toast(error instanceof Error ? error.message : "Failed to open Stripe dashboard.", "error")
+            const message = error instanceof Error ? error.message : "Failed to open Stripe dashboard."
+            setStripeConnectIssue({ kind: "dashboard", message })
+            toast(message, "error")
         } finally {
             setStripeDashboardLoading(false)
         }
@@ -948,11 +961,50 @@ export default function ProfilePage() {
                                 )}
                             </div>
 
+                            {stripeConnectIssue ? (
+                                <div
+                                    role="alert"
+                                    className="rounded-lg border border-amber-300/20 bg-amber-400/10 p-3"
+                                    data-testid="profile-stripe-connect-issue"
+                                >
+                                    <p className="text-sm font-semibold text-amber-100">
+                                        {stripeConnectIssue.kind === "dashboard" ? "Stripe dashboard could not open" : "Stripe setup could not start"}
+                                    </p>
+                                    <p className="mt-1 break-words text-xs leading-5 text-amber-100/75 [overflow-wrap:anywhere]">
+                                        {stripeConnectIssue.message}
+                                    </p>
+                                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            className="h-11 rounded-lg"
+                                            onClick={stripeConnectIssue.kind === "dashboard" ? handleOpenStripeDashboard : handleConnectStripe}
+                                            disabled={stripeConnectIssue.kind === "dashboard" ? stripeDashboardLoading : stripeConnecting}
+                                            data-testid={stripeConnectIssue.kind === "dashboard" ? "profile-stripe-dashboard-retry-action" : "profile-stripe-connect-retry-action"}
+                                        >
+                                            {stripeConnectIssue.kind === "dashboard" ? "Retry dashboard" : "Retry Stripe"}
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-11 rounded-lg border-amber-300/20 bg-slate-950/70 text-amber-100 hover:bg-amber-400/10"
+                                            onClick={() => void loadStripeConnectStatus()}
+                                            disabled={stripeStatusLoading}
+                                            data-testid="profile-stripe-connect-refresh-action"
+                                        >
+                                            Refresh status
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : null}
+
                             <div className="flex flex-wrap gap-2">
                                 <Button
                                     className="flex-1 rounded-lg"
                                     onClick={handleConnectStripe}
                                     disabled={stripeConnecting}
+                                    data-testid="profile-stripe-connect-action"
                                 >
                                     {stripeConnecting ? (
                                         <>
@@ -974,6 +1026,7 @@ export default function ProfilePage() {
                                     disabled={stripeDashboardLoading || !stripeConnectStatus?.connected}
                                     aria-label="Open Stripe dashboard"
                                     title="Open Stripe dashboard"
+                                    data-testid="profile-stripe-dashboard-action"
                                 >
                                     {stripeDashboardLoading ? (
                                         <Loader2 className="h-4 w-4 animate-spin" />

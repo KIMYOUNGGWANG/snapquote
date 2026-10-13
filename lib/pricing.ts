@@ -99,6 +99,8 @@ export async function getBillingSubscriptionStatus(): Promise<BillingSubscriptio
 export async function createBillingCheckoutSession(input: {
     planTier?: BillingPaidPlanTier
     priceId?: string
+    successPath?: string
+    cancelPath?: string
 } = {}): Promise<BillingCheckoutResponse> {
     const headers = await withAuthHeaders({ "content-type": "application/json" })
     if (!headers.authorization) {
@@ -141,6 +143,7 @@ export async function createBillingPortalSession(): Promise<{ url: string }> {
 export async function trackPricingEvent(input: {
     event: PricingEventName
     metadata?: Record<string, unknown>
+    externalId?: string
 }): Promise<void> {
     try {
         const headers = await withAuthHeaders({ "content-type": "application/json" })

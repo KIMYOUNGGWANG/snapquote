@@ -5,6 +5,10 @@ import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 const FUNNEL_EVENTS = [
     "draft_saved",
     "quote_sent",
+    "customer_portal_link_created",
+    "quote_viewed",
+    "quote_approved",
+    "quote_change_requested",
     "payment_link_created",
     "payment_completed",
 ] as const
@@ -35,6 +39,14 @@ function parseDateRange(req: Request): { fromIso: string; toIso: string } {
         fromIso: fromDate.toISOString(),
         toIso: toDate.toISOString(),
     }
+}
+
+function isNonTransitioningPaymentEvent(row: { event_name?: unknown; metadata?: unknown }): boolean {
+    if (row.event_name !== "payment_completed") return false
+    const metadata = row.metadata
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false
+
+    return (metadata as Record<string, unknown>).status_transitioned === false
 }
 
 export async function GET(req: Request) {
@@ -96,7 +108,7 @@ export async function GET(req: Request) {
 
         const { data, error } = await supabase
             .from("analytics_events")
-            .select("event_name")
+            .select("event_name, metadata")
             .gte("created_at", fromIso)
             .lte("created_at", toIso)
             .in("event_name", [...FUNNEL_EVENTS])
@@ -112,11 +124,16 @@ export async function GET(req: Request) {
         const counts: Record<(typeof FUNNEL_EVENTS)[number], number> = {
             draft_saved: 0,
             quote_sent: 0,
+            customer_portal_link_created: 0,
+            quote_viewed: 0,
+            quote_approved: 0,
+            quote_change_requested: 0,
             payment_link_created: 0,
             payment_completed: 0,
         }
 
         for (const row of data || []) {
+            if (isNonTransitioningPaymentEvent(row)) continue
             const eventName = row.event_name as keyof typeof counts
             if (eventName in counts) {
                 counts[eventName] += 1
@@ -125,8 +142,26 @@ export async function GET(req: Request) {
 
         const sendRate =
             counts.draft_saved > 0 ? Number(((counts.quote_sent / counts.draft_saved) * 100).toFixed(1)) : 0
+        const approvalLinkRate =
+            counts.quote_sent > 0
+                ? Number(((counts.customer_portal_link_created / counts.quote_sent) * 100).toFixed(1))
+                : 0
+        const viewRate =
+            counts.customer_portal_link_created > 0
+                ? Number(((counts.quote_viewed / counts.customer_portal_link_created) * 100).toFixed(1))
+                : 0
+        const approvalRate =
+            counts.customer_portal_link_created > 0
+                ? Number(((counts.quote_approved / counts.customer_portal_link_created) * 100).toFixed(1))
+                : 0
+        const changeRequestRate =
+            counts.customer_portal_link_created > 0
+                ? Number(((counts.quote_change_requested / counts.customer_portal_link_created) * 100).toFixed(1))
+                : 0
         const paymentRate =
             counts.quote_sent > 0 ? Number(((counts.payment_completed / counts.quote_sent) * 100).toFixed(1)) : 0
+        const paymentAfterApprovalRate =
+            counts.quote_approved > 0 ? Number(((counts.payment_completed / counts.quote_approved) * 100).toFixed(1)) : 0
 
         return NextResponse.json({
             ok: true,
@@ -134,7 +169,12 @@ export async function GET(req: Request) {
             to: toIso,
             ...counts,
             send_rate: sendRate,
+            approval_link_rate: approvalLinkRate,
+            view_rate: viewRate,
+            approval_rate: approvalRate,
+            change_request_rate: changeRequestRate,
             payment_rate: paymentRate,
+            payment_after_approval_rate: paymentAfterApprovalRate,
         })
     } catch {
         return NextResponse.json(

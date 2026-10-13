@@ -19,8 +19,15 @@ type MockAutomationNetworkOptions = {
     quoteRecoveryResults?: Array<{
         estimateId: string
         estimateNumber: string
-        action: "sent_sms" | "sent_email" | "skipped_no_contact"
+        action:
+            | "sent_sms"
+            | "sent_email"
+            | "skipped_no_contact"
+            | "skipped_scope_review_needed"
+            | "skipped_customer_approved"
+            | "skipped_customer_change_requested"
         messagePreview: string
+        customerPortalStatus?: "shared" | "viewed" | "approved" | "change_requested"
     }>
 }
 
@@ -150,12 +157,19 @@ async function mockAutomationNetwork(page: Page, options: MockAutomationNetworkO
     })
 
     await page.route("**/api/quotes/recovery/trigger", async (route) => {
+        const actionableCount = quoteRecoveryResults.filter((result) =>
+            result.action === "sent_sms" || result.action === "sent_email"
+        ).length
+        const skippedCount = quoteRecoveryResults.length - actionableCount
+
         await route.fulfill({
             status: 200,
             contentType: "application/json",
             body: JSON.stringify({
                 ok: true,
                 processedCount: quoteRecoveryResults.length,
+                actionableCount,
+                skippedCount,
                 results: quoteRecoveryResults,
             }),
         })
@@ -208,6 +222,64 @@ test("automation mobile command center guides setup and quote recovery preview",
     await expect(page.getByText("Latest preview")).toBeVisible()
     await expect(page.getByText("EST-1042")).toBeVisible()
     await expect(page.getByText("Quick reminder: your drain repair quote is ready when you are.")).toBeVisible()
+    await expect(page.getByTestId("quote-recovery-feedback")).toContainText("1 quote ready for follow-up")
+    await expect(page.getByRole("button", { name: "Run Now" })).toBeEnabled()
+})
+
+test("automation quote recovery preview explains customer-decision skips", async ({ page, context }) => {
+    await seedAuthenticatedSupabaseSession(context)
+    await mockAutomationNetwork(page, {
+        quoteRecoveryResults: [
+            {
+                estimateId: "estimate-ready-1",
+                estimateNumber: "EST-READY-1",
+                action: "sent_email",
+                messagePreview: "Quick reminder: your sink repair quote is ready. Review or approve here: https://snapquote.test/q/ready",
+                customerPortalStatus: "viewed",
+            },
+            {
+                estimateId: "estimate-approved-1",
+                estimateNumber: "EST-APPROVED-1",
+                action: "skipped_customer_approved",
+                messagePreview: "Estimate EST-APPROVED-1 is already approved by the customer, so Quote Recovery will not send a reminder.",
+                customerPortalStatus: "approved",
+            },
+            {
+                estimateId: "estimate-change-1",
+                estimateNumber: "EST-CHANGE-1",
+                action: "skipped_customer_change_requested",
+                messagePreview: "Estimate EST-CHANGE-1 has a customer change request, so start a revision instead of sending a reminder. Customer note: Please add disposal haul-away.",
+                customerPortalStatus: "change_requested",
+            },
+            {
+                estimateId: "estimate-scope-1",
+                estimateNumber: "EST-SCOPE-1",
+                action: "skipped_scope_review_needed",
+                messagePreview: "Estimate EST-SCOPE-1 has thin field scope notes that need review before Quote Recovery sends a reminder.",
+                customerPortalStatus: "viewed",
+            },
+        ],
+    })
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/automation")
+
+    await page.getByRole("switch", { name: "Toggle Quote Chaser" }).click()
+    await page.getByTestId("quote-recovery-preview-button").click()
+
+    await expect(page.getByTestId("quote-recovery-feedback")).toContainText("1 quote ready for follow-up")
+    await expect(page.getByTestId("quote-recovery-feedback")).toContainText("3 already handled or missing contact")
+    await expect(page.getByTestId("quote-recovery-result-estimate").filter({ hasText: "EST-READY-1" })).toBeVisible()
+    await expect(page.getByTestId("quote-recovery-result-estimate").filter({ hasText: "EST-APPROVED-1" })).toBeVisible()
+    await expect(page.getByTestId("quote-recovery-result-estimate").filter({ hasText: "EST-CHANGE-1" })).toBeVisible()
+    await expect(page.getByTestId("quote-recovery-result-estimate").filter({ hasText: "EST-SCOPE-1" })).toBeVisible()
+    await expect(page.getByTestId("quote-recovery-result-action").filter({ hasText: "Email" })).toBeVisible()
+    await expect(page.getByTestId("quote-recovery-result-action").filter({ hasText: "Approved" })).toBeVisible()
+    await expect(page.getByTestId("quote-recovery-result-action").filter({ hasText: "Changes requested" })).toBeVisible()
+    await expect(page.getByTestId("quote-recovery-result-action").filter({ hasText: "Scope review" })).toBeVisible()
+    await expect(page.getByTestId("quote-recovery-result-message").filter({ hasText: "already approved" })).toBeVisible()
+    await expect(page.getByTestId("quote-recovery-result-message").filter({ hasText: "Please add disposal" })).toBeVisible()
+    await expect(page.getByTestId("quote-recovery-result-message").filter({ hasText: "thin field scope" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Run Now" })).toBeEnabled()
 })
 

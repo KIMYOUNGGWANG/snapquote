@@ -22,13 +22,28 @@ interface QuickQuoteModalProps {
     open: boolean
     onClose: () => void
     item: PriceListItem | null
+    businessProfile?: QuickQuoteBusinessProfile | null
+}
+
+type QuickQuoteBusinessProfile = {
+    business_name?: string | null
+    phone?: string | null
+    tax_rate?: number | null
 }
 
 function getErrorMessage(error: unknown) {
     return error instanceof Error ? error.message : "Failed to create payment link"
 }
 
-export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
+function toTrimmedString(value: string | null | undefined): string {
+    return typeof value === "string" ? value.trim() : ""
+}
+
+function getUsableTaxRate(value: number | null | undefined): number | null {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+export function QuickQuoteModal({ open, onClose, item, businessProfile }: QuickQuoteModalProps) {
     const router = useRouter()
     const [quantity, setQuantity] = useState(1)
     const [price, setPrice] = useState(0)
@@ -48,15 +63,26 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
             setPaymentLink(null)
             setPaymentLinkIssue(null)
             setCopied(false)
+            setBusinessName("SnapQuote")
+            setBusinessPhone("")
+            setTaxRate(13)
 
-            const profile = getProfile()
-            if (profile) {
-                setBusinessName(profile.business_name || "SnapQuote")
-                setBusinessPhone(profile.phone || "")
-                if (profile.tax_rate) setTaxRate(profile.tax_rate)
-            }
+            const localProfile = getProfile()
+            const resolvedBusinessName =
+                toTrimmedString(businessProfile?.business_name) ||
+                toTrimmedString(localProfile?.business_name)
+            const resolvedPhone =
+                toTrimmedString(businessProfile?.phone) ||
+                toTrimmedString(localProfile?.phone)
+            const resolvedTaxRate =
+                getUsableTaxRate(businessProfile?.tax_rate) ??
+                getUsableTaxRate(localProfile?.tax_rate)
+
+            setBusinessName(resolvedBusinessName || "SnapQuote")
+            setBusinessPhone(resolvedPhone)
+            if (resolvedTaxRate !== null) setTaxRate(resolvedTaxRate)
         }
-    }, [open, item])
+    }, [businessProfile, open, item])
 
     useEffect(() => {
         if (!paymentLinkIssue) return
@@ -303,6 +329,17 @@ export function QuickQuoteModal({ open, onClose, item }: QuickQuoteModalProps) {
                                         </NextLink>
                                     </Button>
                                 ) : null}
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-11 w-full rounded-lg border-emerald-300/20 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-400/15"
+                                    onClick={() => void handleCopyToClipboard()}
+                                    data-testid="quick-quote-copy-without-link-action"
+                                >
+                                    <Copy className="mr-2 h-4 w-4 shrink-0" />
+                                    Copy quote only
+                                </Button>
                                 <Button
                                     type="button"
                                     variant="outline"

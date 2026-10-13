@@ -13,6 +13,11 @@ type SeedDraftEstimate = {
     createdAt: string
     updatedAt: string
     synced?: boolean
+    attachments?: {
+        photos: string[]
+        originalTranscript?: string
+        scopeAssumptionsConfirmedAt?: string
+    }
     items: Array<{
         id: string
         itemNumber: number
@@ -75,6 +80,11 @@ const seedDrafts: SeedDraftEstimate[] = [
         createdAt: "2026-05-22T08:00:00.000Z",
         updatedAt: "2026-05-22T12:00:00.000Z",
         synced: true,
+        attachments: {
+            photos: [],
+            originalTranscript: "Install laundry supply box, reconnect drain, and test operation.",
+            scopeAssumptionsConfirmedAt: "2026-05-22T12:05:00.000Z",
+        },
         items: [
             {
                 id: "draft-item-3",
@@ -170,6 +180,7 @@ test("drafts mobile workbench surfaces next action, search, and sent handoff", a
     await expect(page.getByTestId("drafts-open-count")).toHaveText("2")
     await expect(page.getByTestId("drafts-pricing-needed")).toHaveText("1")
     await expect(page.getByTestId("drafts-count-badge")).toHaveText("2 of 2")
+    await expect(page.getByTestId("drafts-scope-reviewed-count")).toContainText("1 scope reviewed")
     await expect(page.getByTestId("drafts-next-action")).toContainText("Next up: finish draft pricing")
     await expect(page.getByTestId("drafts-next-action")).toContainText("Apex Kitchen Remodel")
     await expect(page.getByTestId("drafts-next-action-button")).toContainText("Finish pricing")
@@ -183,6 +194,8 @@ test("drafts mobile workbench surfaces next action, search, and sent handoff", a
     const apexDraft = page.getByTestId("drafts-card").filter({ hasText: "Apex Kitchen Remodel" })
     await expect(apexDraft.getByRole("heading", { name: "Apex Kitchen Remodel" })).toBeVisible()
     await expect(apexDraft.getByTestId("drafts-edit-button")).toContainText("Finish pricing")
+    await expect(apexDraft.getByTestId("drafts-mark-sent-button")).toHaveCount(0)
+    await expect(apexDraft.getByTestId("drafts-review-before-send-button")).toContainText("Finish pricing")
     const apexTitleBox = await apexDraft.getByRole("heading", { name: "Apex Kitchen Remodel" }).boundingBox()
     const navBox = await page.getByTestId("bottom-navigation").boundingBox()
     expect(apexTitleBox).not.toBeNull()
@@ -200,6 +213,7 @@ test("drafts mobile workbench surfaces next action, search, and sent handoff", a
 
     const laundryDraft = page.getByTestId("drafts-card").filter({ hasText: "Bright Laundry Hookup" })
     await expect(laundryDraft).toBeVisible()
+    await expect(laundryDraft.getByTestId("drafts-scope-reviewed-badge")).toContainText("Scope reviewed")
     await expect(laundryDraft.getByTestId("drafts-edit-button")).toContainText("Review draft")
     await laundryDraft.getByTestId("drafts-mark-sent-button").click()
     await expect(page.getByText("Bright Laundry Hookup moved to Sent.")).toBeVisible()
@@ -213,6 +227,91 @@ test("drafts mobile workbench surfaces next action, search, and sent handoff", a
 
     await page.getByTestId("drafts-next-action-button").click()
     await expect(page).toHaveURL(/\/new-estimate\?draftId=estimate-draft-1/)
+    await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+})
+
+test("draft workbench prioritizes saved field captures and resumes capture", async ({ page }) => {
+    await openSeededDB(page, [
+        {
+            id: "estimate-capture-draft",
+            estimateNumber: "EST-2605-CAPTURE",
+            status: "draft",
+            clientName: "Capture Draft Client",
+            clientAddress: "12 Draft Lane",
+            summary_note: "Replace leaking laundry valve, install new shutoff, test pressure, and clean work area.",
+            taxRate: 8.25,
+            taxAmount: 0,
+            totalAmount: 0,
+            createdAt: "2026-05-24T08:00:00.000Z",
+            updatedAt: "2026-05-24T08:05:00.000Z",
+            synced: false,
+            items: [],
+            attachments: {
+                photos: [],
+                originalTranscript: "Replace leaking laundry valve, install new shutoff, test pressure, and clean work area.",
+            },
+        },
+        seedDrafts[0],
+    ])
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/drafts")
+
+    await expect(page.getByTestId("drafts-open-count")).toHaveText("2")
+    await expect(page.getByTestId("drafts-value")).toHaveText("$640.00")
+    await expect(page.getByTestId("drafts-pricing-needed")).toHaveText("1")
+    await expect(page.getByTestId("drafts-capture-needed-badge")).toContainText("1 needs AI draft")
+    await expect(page.getByTestId("drafts-next-action")).toContainText("Next up: turn capture into quote")
+    await expect(page.getByTestId("drafts-next-action")).toContainText("Capture Draft Client")
+    await expect(page.getByTestId("drafts-next-action-button")).toContainText("Resume capture")
+
+    const captureDraft = page.getByTestId("drafts-card").filter({ hasText: "Capture Draft Client" })
+    await expect(captureDraft.getByTestId("drafts-capture-draft-badge")).toContainText("Needs AI draft")
+    await expect(captureDraft.getByTestId("drafts-line-item-status")).toHaveText("Field capture saved")
+    await expect(captureDraft.getByTestId("drafts-mobile-edit-button")).toContainText("Resume capture")
+    await expect(captureDraft.getByTestId("drafts-mark-sent-button")).toHaveCount(0)
+
+    await page.getByTestId("drafts-next-action-button").click()
+
+    await expect(page).toHaveURL(/\/new-estimate\?draftId=estimate-capture-draft/)
+    await expect(page.getByTestId("job-description-input")).toHaveValue(
+        "Replace leaking laundry valve, install new shutoff, test pressure, and clean work area."
+    )
+    await expect(page.getByTestId("input-client-generate-button")).toContainText("Generate for Capture Draft Client")
+})
+
+test("draft workbench routes unreviewed scope drafts through the composer before sending", async ({ page }) => {
+    await openSeededDB(page, [
+        {
+            ...seedDrafts[1],
+            id: "estimate-thin-scope-unreviewed",
+            estimateNumber: "EST-2605-THIN",
+            clientName: "Thin Scope Sink",
+            summary_note: "Replace sink shutoff.",
+            attachments: {
+                photos: [],
+                originalTranscript: "Fix sink",
+            },
+        },
+    ])
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/drafts")
+
+    await expect(page.getByTestId("drafts-next-action")).toContainText("Next up: review scope assumptions")
+    await expect(page.getByTestId("drafts-next-action")).toContainText("Thin Scope Sink")
+    await expect(page.getByTestId("drafts-next-action-description")).toContainText("need confirmation before sending")
+    await expect(page.getByTestId("drafts-next-action-button")).toContainText("Review scope")
+    await expect(page.getByTestId("drafts-scope-review-needed-count")).toContainText("1 scope review")
+
+    const thinScopeDraft = page.getByTestId("drafts-card").filter({ hasText: "Thin Scope Sink" })
+    await expect(thinScopeDraft.getByTestId("drafts-scope-review-needed-badge")).toContainText("Scope review needed")
+    await expect(thinScopeDraft.getByTestId("drafts-mark-sent-button")).toHaveCount(0)
+    await expect(thinScopeDraft.getByTestId("drafts-review-before-send-button")).toContainText("Review scope")
+
+    await page.getByTestId("drafts-next-action-button").click()
+
+    await expect(page).toHaveURL(/\/new-estimate\?draftId=estimate-thin-scope-unreviewed/)
     await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
 })
 

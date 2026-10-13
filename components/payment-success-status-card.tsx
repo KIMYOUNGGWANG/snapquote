@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { AlertCircle, CheckCircle2, Clock3, Loader2, SearchCheck } from "lucide-react"
+import { withAuthHeaders } from "@/lib/auth-headers"
+import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
 import { getEstimates, updateEstimate, type LocalEstimate } from "@/lib/estimates-storage"
 
 type PaymentSuccessStatusCardProps = {
@@ -17,6 +19,14 @@ type LocalPaymentState =
     | { status: "missing-details" }
     | { status: "error"; message: string }
 
+type StripePaymentStatusResponse = {
+    ok?: boolean
+    paid?: boolean
+    checkoutSessionId?: string
+    paidAt?: string
+    error?: string | { message?: string }
+}
+
 function matchesPaidEstimate(estimate: LocalEstimate, estimateId: string, estimateNumber: string) {
     const idMatches = Boolean(estimateId) && estimate.id === estimateId
     const numberMatches = Boolean(estimateNumber) && estimate.estimateNumber === estimateNumber
@@ -25,6 +35,76 @@ function matchesPaidEstimate(estimate: LocalEstimate, estimateId: string, estima
 
 function formatAmount(amount: number): string {
     return `$${amount.toFixed(2)}`
+}
+
+async function verifyStripePaymentForEstimate(
+    estimate: LocalEstimate,
+    sessionId: string
+): Promise<{ ok: true; checkoutSessionId?: string; paidAt?: string } | { ok: false; message: string }> {
+    const paymentLinkId = estimate.paymentLinkId?.trim()
+    if (!paymentLinkId) {
+        return {
+            ok: false,
+            message: "This local estimate does not have a Stripe payment link saved, so SnapQuote did not mark it paid from the return URL.",
+        }
+    }
+    if (!sessionId.trim()) {
+        return {
+            ok: false,
+            message: "Stripe checkout session id was not included, so SnapQuote did not mark local history paid from this return URL.",
+        }
+    }
+
+    const params = new URLSearchParams({ paymentLinkId })
+    if (estimate.id) params.set("estimateId", estimate.id)
+    if (estimate.estimateNumber) params.set("estimateNumber", estimate.estimateNumber)
+    if (sessionId) params.set("sessionId", sessionId)
+
+    const headers = await withAuthHeaders()
+    const response = await fetch(`/api/payments/stripe/status?${params.toString()}`, {
+        method: "GET",
+        cache: "no-store",
+        headers,
+    })
+
+    const result = await response.json().catch(() => ({})) as StripePaymentStatusResponse
+    if (!response.ok) {
+        if (response.status === 401) {
+            return {
+                ok: false,
+                message: "Sign in and open History to confirm this payment with Stripe before marking local history paid.",
+            }
+        }
+
+        const errorMessage = typeof result.error === "string"
+            ? result.error
+            : result.error?.message
+
+        return {
+            ok: false,
+            message: errorMessage || "Stripe could not confirm this checkout session yet. Open History to retry the payment check.",
+        }
+    }
+
+    if (!result.ok || !result.paid) {
+        return {
+            ok: false,
+            message: "Stripe did not confirm this checkout session as paid yet. Open History to retry the payment check.",
+        }
+    }
+
+    if (sessionId && result.checkoutSessionId && result.checkoutSessionId !== sessionId) {
+        return {
+            ok: false,
+            message: "Stripe confirmed a different checkout session for this estimate. Open History to retry the payment check.",
+        }
+    }
+
+    return {
+        ok: true,
+        checkoutSessionId: result.checkoutSessionId,
+        paidAt: result.paidAt,
+    }
 }
 
 export function PaymentSuccessStatusCard({
@@ -53,15 +133,41 @@ export function PaymentSuccessStatusCard({
                     return
                 }
 
-                const wasAlreadyPaid = estimate.status === "paid"
-                if (!wasAlreadyPaid || estimate.lastPaymentSessionId !== sessionId) {
-                    await updateEstimate(estimate.id, {
-                        status: "paid",
-                        paymentCompletedAt: estimate.paymentCompletedAt || paidAt,
-                        lastPaymentSessionId: sessionId || estimate.lastPaymentSessionId,
-                        synced: false,
-                    })
+                const wasAlreadyPaid = isEstimatePaidLike(estimate)
+                if (wasAlreadyPaid) {
+                    if (estimate.status !== "paid") {
+                        await updateEstimate(estimate.id, {
+                            status: "paid",
+                            paymentCompletedAt: estimate.paymentCompletedAt,
+                            synced: false,
+                        })
+
+                        const refreshed = await getEstimates()
+                        const updatedEstimate = refreshed.find((candidate) => candidate.id === estimate.id) || {
+                            ...estimate,
+                            status: "paid" as const,
+                            synced: false,
+                        }
+                        if (active) setLocalState({ status: "updated", estimate: updatedEstimate, wasAlreadyPaid: true })
+                        return
+                    }
+
+                    if (active) setLocalState({ status: "updated", estimate, wasAlreadyPaid: true })
+                    return
                 }
+
+                const verifiedPayment = await verifyStripePaymentForEstimate(estimate, sessionId)
+                if (!verifiedPayment.ok) {
+                    if (active) setLocalState({ status: "error", message: verifiedPayment.message })
+                    return
+                }
+
+                await updateEstimate(estimate.id, {
+                    status: "paid",
+                    paymentCompletedAt: verifiedPayment.paidAt || estimate.paymentCompletedAt || paidAt,
+                    lastPaymentSessionId: verifiedPayment.checkoutSessionId || sessionId || estimate.lastPaymentSessionId,
+                    synced: false,
+                })
 
                 const refreshed = await getEstimates()
                 const updatedEstimate =

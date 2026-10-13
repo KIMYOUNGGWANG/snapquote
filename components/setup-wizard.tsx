@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Image from "next/image"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
@@ -89,6 +90,7 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
     const [step, setStep] = useState(1)
     const [loading, setLoading] = useState(false)
     const [connectLoading, setConnectLoading] = useState(false)
+    const [stripeConnectIssue, setStripeConnectIssue] = useState<string | null>(null)
     const [businessName, setBusinessName] = useState("")
     const [taxRate, setTaxRate] = useState("0")
     const [logoPreview, setLogoPreview] = useState<string | null>(null)
@@ -293,6 +295,7 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
 
     const handleConnectStripe = async () => {
         setConnectLoading(true)
+        setStripeConnectIssue(null)
         try {
             const { data: { session } } = await supabase.auth.getSession()
             if (!session?.access_token) {
@@ -319,7 +322,9 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
 
             window.location.href = data.url
         } catch (error) {
-            toast(getErrorMessage(error, "Failed to connect Stripe."), "error")
+            const message = getErrorMessage(error, "Failed to connect Stripe.")
+            setStripeConnectIssue(message)
+            toast(message, "error")
         } finally {
             setConnectLoading(false)
         }
@@ -644,6 +649,41 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
                         </div>
                     </div>
                 </div>
+                {stripeConnectIssue ? (
+                    <div
+                        role="alert"
+                        className="rounded-lg border border-amber-300/20 bg-amber-400/10 p-4"
+                        data-testid="setup-final-stripe-issue"
+                    >
+                        <p className="text-sm font-semibold text-amber-100">Stripe setup could not start</p>
+                        <p className="mt-1 break-words text-xs leading-5 text-amber-100/75 [overflow-wrap:anywhere]">
+                            {stripeConnectIssue}
+                        </p>
+                        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                            <Button
+                                asChild
+                                size="sm"
+                                className="h-11 rounded-lg"
+                                data-testid="setup-final-stripe-profile-action"
+                            >
+                                <Link href="/profile#stripe-connect">
+                                    Open Profile setup
+                                </Link>
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-11 rounded-lg border-amber-300/20 bg-slate-950/70 text-amber-100 hover:bg-amber-400/10"
+                                onClick={() => void handleConnectStripe()}
+                                disabled={connectLoading}
+                                data-testid="setup-final-stripe-retry-action"
+                            >
+                                Retry Stripe
+                            </Button>
+                        </div>
+                    </div>
+                ) : null}
             </CardContent>
             <CardFooter className="grid gap-2 p-5 pt-0 sm:grid-cols-2">
                 <Button onClick={handleLoadDemoQuote} className="w-full rounded-lg sm:col-span-2" data-testid="setup-final-demo-action">

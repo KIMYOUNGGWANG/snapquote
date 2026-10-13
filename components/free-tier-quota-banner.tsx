@@ -9,6 +9,7 @@ interface FreeTierQuotaBannerProps {
   limit: number
   periodStart: string
   onUpgrade?: () => void
+  pricingHref?: string
 }
 
 function getUsagePercent(used: number, limit: number): number {
@@ -70,10 +71,12 @@ function UpgradeControl({
   exhausted,
   onUpgrade,
   linkClassName,
+  pricingHref,
 }: {
   exhausted: boolean
   onUpgrade?: () => void
   linkClassName: string
+  pricingHref: string
 }): JSX.Element {
   if (onUpgrade) {
     return (
@@ -91,7 +94,7 @@ function UpgradeControl({
 
   return exhausted ? (
     <Button asChild size="sm" className="w-full rounded-lg sm:w-auto">
-      <Link href="/pricing">Upgrade now</Link>
+      <Link href={pricingHref} data-testid="free-tier-quota-upgrade-link">Upgrade now</Link>
     </Button>
   ) : (
     <Button
@@ -100,7 +103,7 @@ function UpgradeControl({
       size="sm"
       className={cn("h-auto p-0 text-xs", linkClassName)}
     >
-      <Link href="/pricing">Upgrade for more</Link>
+      <Link href={pricingHref} data-testid="free-tier-quota-upgrade-link">Upgrade for more</Link>
     </Button>
   )
 }
@@ -116,6 +119,7 @@ export function FreeTierQuotaBanner(
   const resetDays = getResetDays(props.periodStart)
   const filledSegments = Math.min(Math.max(Math.ceil(usagePercent / 10), 0), 10)
   const resetLabel = resetDays === 1 ? "Resets in 1 day" : `Resets in ${resetDays} days`
+  const pricingHref = props.pricingHref || "/pricing?source=generate_quota"
 
   return (
     <section
@@ -174,6 +178,7 @@ export function FreeTierQuotaBanner(
             exhausted={exhausted}
             onUpgrade={props.onUpgrade}
             linkClassName={tone.link}
+            pricingHref={pricingHref}
           />
         </div>
       </div>

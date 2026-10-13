@@ -12,6 +12,7 @@ describe('offline workflow helpers', () => {
     const summary = summarizePendingSync([
       { status: 'draft', synced: false },
       { status: 'sent', synced: false },
+      { status: 'sent', paymentCompletedAt: '2026-05-29T12:00:00.000Z', synced: false },
       { status: 'paid', synced: false },
       { status: 'draft', synced: true },
     ], 2)
@@ -19,10 +20,10 @@ describe('offline workflow helpers', () => {
     assert.deepEqual(summary, {
       draftCount: 1,
       sentCount: 1,
-      paidCount: 1,
-      unsyncedEstimateCount: 3,
+      paidCount: 2,
+      unsyncedEstimateCount: 4,
       pendingAudioCount: 2,
-      totalPendingCount: 5,
+      totalPendingCount: 6,
     })
   })
 

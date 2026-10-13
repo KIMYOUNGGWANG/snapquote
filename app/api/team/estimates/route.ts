@@ -88,7 +88,7 @@ export async function GET(req: Request) {
 
     const estimatesResult = await supabase
         .from("estimates")
-        .select("id, user_id, estimate_number, total_amount, status, updated_at, created_at, clients(name), profiles(business_name)")
+        .select("id, user_id, estimate_number, total_amount, status, payment_completed_at, updated_at, created_at, clients(name), profiles(business_name)")
         .in("user_id", memberIds)
         .order("updated_at", { ascending: false })
         .limit(limit)
@@ -118,6 +118,9 @@ export async function GET(req: Request) {
                 : {}),
             status: estimate.status || "draft",
             totalAmount: typeof estimate.total_amount === "number" ? estimate.total_amount : 0,
+            ...(typeof estimate.payment_completed_at === "string" && estimate.payment_completed_at
+                ? { paymentCompletedAt: estimate.payment_completed_at }
+                : {}),
             updatedAt: estimate.updated_at,
             createdAt: estimate.created_at,
         })),

@@ -27,6 +27,7 @@ type TeamMockOptions = {
         ownerBusinessName?: string
         status: "draft" | "sent" | "paid"
         totalAmount: number
+        paymentCompletedAt?: string
         updatedAt: string
     }>
 }
@@ -334,4 +335,41 @@ test("team desktop uses a shared feed and workspace access workbench", async ({ 
     expect(inviteBox!.y).toBeGreaterThan(accessBox!.y)
     expect(inviteBox!.y + inviteBox!.height).toBeLessThanOrEqual(accessBox!.y + accessBox!.height)
     expect(membersBox!.y).toBeGreaterThan(accessBox!.y)
+})
+
+test("team metrics treat payment-completed sent estimates as paid", async ({ page, context }) => {
+    await seedAuthenticatedSupabaseSession(context)
+    await mockTeamNetwork(page, {
+        estimates: [
+            {
+                estimateId: "team-estimate-paid-like",
+                estimateNumber: "TEAM-2026-PAID-LIKE",
+                clientName: "Harbor Market",
+                ownerUserId: testUser.id,
+                ownerBusinessName: "North Shore Electric",
+                status: "sent",
+                totalAmount: 1280,
+                paymentCompletedAt: "2026-05-29T12:00:00.000Z",
+                updatedAt: "2026-05-29T12:05:00.000Z",
+            },
+            {
+                estimateId: "team-estimate-sent",
+                estimateNumber: "TEAM-2026-SENT",
+                clientName: "Cedar Apartments",
+                ownerUserId: testUser.id,
+                ownerBusinessName: "North Shore Electric",
+                status: "sent",
+                totalAmount: 940,
+                updatedAt: "2026-05-29T11:00:00.000Z",
+            },
+        ],
+    })
+
+    await page.goto("/team")
+
+    const commandCenter = page.getByTestId("team-command-center")
+    const feed = page.getByTestId("shared-estimate-feed")
+    await expect(commandCenter).toContainText("0 draft · 1 sent · 1 paid")
+    await expect(feed.getByText("Harbor Market")).toBeVisible()
+    await expect(feed.getByText("paid").first()).toBeVisible()
 })

@@ -65,6 +65,11 @@ export async function GET(req: Request) {
     const paymentLinkId = normalizeQueryValue(url.searchParams.get("paymentLinkId"))
     const estimateId = normalizeQueryValue(url.searchParams.get("estimateId"), 80)
     const estimateNumber = normalizeQueryValue(url.searchParams.get("estimateNumber"), 80)
+    const checkoutSessionId = normalizeQueryValue(
+        url.searchParams.get("checkoutSessionId") ||
+        url.searchParams.get("sessionId") ||
+        url.searchParams.get("session_id")
+    )
 
     if (!paymentLinkId) {
         return NextResponse.json(
@@ -105,6 +110,7 @@ export async function GET(req: Request) {
                 scanned += 1
 
                 if (session.payment_status !== "paid") continue
+                if (checkoutSessionId && session.id !== checkoutSessionId) continue
 
                 const metadata = await resolveSessionMetadata(stripe, session)
 

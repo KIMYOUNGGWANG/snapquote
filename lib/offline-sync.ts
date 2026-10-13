@@ -1,3 +1,4 @@
+import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
 import type { LocalEstimate } from "@/lib/estimates-storage"
 
 export interface PendingSyncSummary {
@@ -9,7 +10,9 @@ export interface PendingSyncSummary {
     totalPendingCount: number
 }
 
-type PendingEstimate = Pick<LocalEstimate, "status" | "synced">
+type PendingEstimate = Pick<LocalEstimate, "status" | "synced" | "paymentCompletedAt"> & {
+    payment_completed_at?: string | null
+}
 
 export function summarizePendingSync(
     estimates: PendingEstimate[],
@@ -22,13 +25,13 @@ export function summarizePendingSync(
     for (const estimate of estimates) {
         if (estimate.synced !== false) continue
 
-        if (estimate.status === "sent") {
-            sentCount += 1
+        if (isEstimatePaidLike(estimate)) {
+            paidCount += 1
             continue
         }
 
-        if (estimate.status === "paid") {
-            paidCount += 1
+        if (estimate.status === "sent") {
+            sentCount += 1
             continue
         }
 

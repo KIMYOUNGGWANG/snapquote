@@ -75,6 +75,7 @@ describe('POST /api/webhooks/stripe', () => {
       data: {
         object: {
           id: 'cs_123',
+          created: 1735689600,
           metadata: {
             estimateId: 'estimate_1',
             estimateNumber: 'EST-1',
@@ -132,6 +133,10 @@ describe('POST /api/webhooks/stripe', () => {
       (query) => query.table === 'estimates' && query.action === 'update'
     )
     assert.ok(updateCall)
+    assert.equal(updateCall.payload.status, 'paid')
+    assert.equal(updateCall.payload.payment_completed_at, '2025-01-01T00:00:00.000Z')
+    assert.equal(updateCall.payload.last_payment_session_id, 'cs_123')
+    assert.match(updateCall.payload.updated_at, /Z$/)
   })
 
   test('falls back to payment intent metadata for async payment success events', async () => {
@@ -148,6 +153,7 @@ describe('POST /api/webhooks/stripe', () => {
       data: {
         object: {
           id: 'cs_async_paid',
+          created: 1735689900,
           metadata: {},
           payment_intent: 'pi_async_paid',
         },
@@ -210,6 +216,89 @@ describe('POST /api/webhooks/stripe', () => {
       ),
       true
     )
+    const updateCall = state.supabase.queryCalls.find(
+      (query) => query.table === 'estimates' && query.action === 'update'
+    )
+    assert.equal(updateCall.payload.payment_completed_at, '2025-01-01T00:05:00.000Z')
+    assert.equal(updateCall.payload.last_payment_session_id, 'cs_async_paid')
+  })
+
+  test('keeps existing payment timestamp and records no transition for paid-like webhook targets', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+
+    const state = getTestState()
+    const paidAt = '2024-12-31T23:00:00.000Z'
+
+    state.stripe.constructEvent = () => ({
+      id: 'evt_paid_like',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: 'cs_paid_like',
+          created: 1735689600,
+          metadata: {
+            estimateId: 'estimate_paid_like',
+            estimateNumber: 'EST-PAID-LIKE',
+            userId: 'user_1',
+          },
+        },
+      },
+    })
+
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'estimates' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return {
+          data: {
+            id: 'estimate_paid_like',
+            user_id: 'user_1',
+            estimate_number: 'EST-PAID-LIKE',
+            status: 'sent',
+            payment_completed_at: paidAt,
+          },
+          error: null,
+        }
+      }
+
+      if (query.table === 'estimates' && query.action === 'update' && query.mode === 'maybeSingle') {
+        return { data: { id: 'estimate_paid_like' }, error: null }
+      }
+
+      if (query.table === 'analytics_events' && query.action === 'upsert') {
+        return { data: [], error: null }
+      }
+
+      return { data: null, error: null }
+    }
+
+    const req = new Request('http://localhost/api/webhooks/stripe', {
+      method: 'POST',
+      body: JSON.stringify({ fake: true }),
+      headers: {
+        'stripe-signature': 'sig_test',
+      },
+    })
+
+    const res = await stripeWebhook(req)
+    const text = await res.text()
+
+    assert.equal(res.status, 200)
+    assert.equal(text, 'Received')
+
+    const updateCall = state.supabase.queryCalls.find(
+      (query) => query.table === 'estimates' && query.action === 'update'
+    )
+    assert.ok(updateCall)
+    assert.equal(updateCall.payload.status, 'paid')
+    assert.equal(updateCall.payload.payment_completed_at, paidAt)
+
+    const analyticsCall = state.supabase.queryCalls.find(
+      (query) => query.table === 'analytics_events' && query.action === 'upsert'
+    )
+    assert.ok(analyticsCall)
+    assert.equal(analyticsCall.payload[0].metadata.status_transitioned, false)
   })
 
   test('skips settlement when Stripe metadata userId does not match estimate owner', async () => {
@@ -424,6 +513,40 @@ describe('GET /api/payments/stripe/status', () => {
     assert.match(data.paidAt, /Z$/)
   })
 
+  test('returns paid=false when a requested checkout session id does not match', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+
+    const state = getTestState()
+    state.stripe.sessionsListPages = [
+      {
+        data: [
+          {
+            id: 'cs_paid_other',
+            payment_status: 'paid',
+            metadata: {
+              estimateId: '11111111-1111-4111-8111-111111111111',
+              estimateNumber: 'EST-PAID-1',
+              userId: 'user-1',
+            },
+            created: 1735689600,
+          },
+        ],
+        has_more: false,
+      },
+    ]
+
+    const req = new Request('http://localhost/api/payments/stripe/status?paymentLinkId=plink_abc&estimateId=11111111-1111-4111-8111-111111111111&estimateNumber=EST-PAID-1&sessionId=cs_requested', {
+      method: 'GET',
+    })
+
+    const res = await stripePaymentStatusGet(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.paid, false)
+  })
+
   test('returns 401 for Stripe authentication errors', async () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test'
 
@@ -475,6 +598,7 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
         data: [
           {
             id: 'cs_paid_1',
+            created: 1735689600,
             payment_status: 'paid',
             metadata: {
               estimateId: 'estimate_paid_1',
@@ -532,6 +656,95 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
     assert.equal(data.paidSessions, 1)
     assert.equal(data.matched, 1)
     assert.equal(data.updated, 1)
+    const updateCall = state.supabase.queryCalls.find(
+      (query) => query.table === 'estimates' && query.action === 'update'
+    )
+    assert.equal(updateCall.payload.status, 'paid')
+    assert.equal(updateCall.payload.payment_completed_at, '2025-01-01T00:00:00.000Z')
+    assert.equal(updateCall.payload.last_payment_session_id, 'cs_paid_1')
+    assert.match(updateCall.payload.updated_at, /Z$/)
+  })
+
+  test('reconcile treats payment-completed sent estimates as already paid', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+    process.env.CRON_SECRET = 'cron_secret'
+
+    const state = getTestState()
+    const paidAt = '2024-12-31T23:00:00.000Z'
+
+    state.stripe.sessionsListPages = [
+      {
+        data: [
+          {
+            id: 'cs_paid_like_reconcile',
+            created: 1735689600,
+            payment_status: 'paid',
+            metadata: {
+              estimateId: 'estimate_paid_like_reconcile',
+              estimateNumber: 'EST-PAID-LIKE-RECONCILE',
+              userId: 'user_1',
+            },
+          },
+        ],
+        has_more: false,
+      },
+    ]
+
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'estimates' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return {
+          data: {
+            id: 'estimate_paid_like_reconcile',
+            user_id: 'user_1',
+            estimate_number: 'EST-PAID-LIKE-RECONCILE',
+            status: 'sent',
+            payment_completed_at: paidAt,
+          },
+          error: null,
+        }
+      }
+
+      if (query.table === 'estimates' && query.action === 'update' && query.mode === 'execute') {
+        return { data: [{ id: 'estimate_paid_like_reconcile' }], error: null }
+      }
+
+      if (query.table === 'analytics_events' && query.action === 'upsert') {
+        return { data: [], error: null }
+      }
+
+      return { data: [], error: null }
+    }
+
+    const req = new Request('http://localhost/api/webhooks/stripe/reconcile?lookbackHours=24', {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer cron_secret',
+      },
+    })
+
+    const res = await stripeReconcileGet(req)
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.ok, true)
+    assert.equal(data.matched, 1)
+    assert.equal(data.updated, 0)
+    assert.equal(data.alreadyPaid, 1)
+
+    const updateCall = state.supabase.queryCalls.find(
+      (query) => query.table === 'estimates' && query.action === 'update'
+    )
+    assert.ok(updateCall)
+    assert.equal(updateCall.payload.status, 'paid')
+    assert.equal(updateCall.payload.payment_completed_at, paidAt)
+
+    const analyticsCall = state.supabase.queryCalls.find(
+      (query) => query.table === 'analytics_events' && query.action === 'upsert'
+    )
+    assert.ok(analyticsCall)
+    assert.equal(analyticsCall.payload[0].metadata.status_transitioned, false)
   })
 
   test('skips reconcile when session metadata is missing userId', async () => {

@@ -7,6 +7,7 @@ const tinySitePhotoPng = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
     "base64"
 )
+const tinySitePhotoDataUrl = `data:image/png;base64,${tinySitePhotoPng.toString("base64")}`
 
 async function expectTouchTarget(locator: Locator) {
     const box = await locator.boundingBox()
@@ -31,6 +32,8 @@ async function readStoredEstimateApprovals(page: Page) {
         type StoredEstimateApproval = {
             clientName?: string
             clientSignature?: string
+            customerPortalStatus?: string
+            customerPortalUrl?: string
             sentAt?: string
             signedAt?: string
             status?: string
@@ -56,6 +59,75 @@ async function readStoredEstimateApprovals(page: Page) {
         database.close()
         return estimates
     })
+}
+
+async function seedLocalEstimates(page: Page, estimates: Array<Record<string, unknown>>) {
+    await page.goto("/")
+
+    await page.evaluate(async (records) => {
+        function requestToPromise<T>(request: IDBRequest<T>) {
+            return new Promise<T>((resolve, reject) => {
+                request.onerror = () => reject(request.error)
+                request.onsuccess = () => resolve(request.result)
+            })
+        }
+
+        await new Promise<void>((resolve, reject) => {
+            const deleteRequest = indexedDB.deleteDatabase("snapquote-db")
+            deleteRequest.onerror = () => reject(deleteRequest.error)
+            deleteRequest.onsuccess = () => resolve()
+            deleteRequest.onblocked = () => resolve()
+        })
+
+        const database = await new Promise<IDBDatabase>((resolve, reject) => {
+            const request = indexedDB.open("snapquote-db", 6)
+            request.onerror = () => reject(request.error)
+            request.onupgradeneeded = () => {
+                const database = request.result
+                const createStore = (
+                    name: string,
+                    indexes: Array<{ name: string; keyPath: string }>
+                ) => {
+                    const store = database.objectStoreNames.contains(name)
+                        ? request.transaction!.objectStore(name)
+                        : database.createObjectStore(name, { keyPath: "id" })
+
+                    for (const index of indexes) {
+                        if (!store.indexNames.contains(index.name)) {
+                            store.createIndex(index.name, index.keyPath)
+                        }
+                    }
+                }
+
+                createStore("estimates", [
+                    { name: "by-date", keyPath: "createdAt" },
+                    { name: "by-status", keyPath: "status" },
+                ])
+                createStore("photos", [{ name: "by-estimate", keyPath: "estimateId" }])
+                createStore("pendingAudio", [
+                    { name: "by-date", keyPath: "createdAt" },
+                    { name: "by-processed", keyPath: "processed" },
+                ])
+                createStore("priceList", [
+                    { name: "by-category", keyPath: "category" },
+                    { name: "by-name", keyPath: "name" },
+                ])
+                createStore("receipts", [{ name: "by-date", keyPath: "date" }])
+                createStore("timeEntries", [{ name: "by-date", keyPath: "date" }])
+                createStore("clients", [{ name: "by-name", keyPath: "name" }])
+            }
+            request.onsuccess = () => resolve(request.result)
+        })
+
+        const transaction = database.transaction("estimates", "readwrite")
+        const store = transaction.objectStore("estimates")
+        await Promise.all(records.map((estimate) => requestToPromise(store.put(estimate))))
+        await new Promise<void>((resolve, reject) => {
+            transaction.onerror = () => reject(transaction.error)
+            transaction.oncomplete = () => resolve()
+        })
+        database.close()
+    }, estimates)
 }
 
 function getSupabaseAuthStorageKey() {
@@ -119,8 +191,9 @@ async function mockSignedInBilling(page: Page, planTier: "free" | "starter" | "p
     })
 }
 
-async function mockGeneratedEstimate(page: Page) {
+async function mockGeneratedEstimate(page: Page, onPayload?: (payload: Record<string, unknown>) => void) {
     await page.route("**/api/generate", async (route) => {
+        onPayload?.(route.request().postDataJSON() as Record<string, unknown>)
         await route.fulfill({
             status: 200,
             contentType: "application/json",
@@ -169,6 +242,142 @@ test("field capture input enables generation and renders a generated draft", asy
 
     await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
     await expect(page.getByTestId("line-item-description-0")).toHaveValue("Replace shower cartridge")
+})
+
+test("field capture quota issue keeps the capture visible with a pricing action", async ({ page }) => {
+    await page.route("**/api/generate", async (route) => {
+        await route.fulfill({
+            status: 402,
+            contentType: "application/json",
+            body: JSON.stringify({
+                error: "Usage quota exceeded",
+                metric: "generate",
+            }),
+        })
+    })
+
+    await page.goto("/new-estimate")
+    await page.getByTestId("job-description-input").fill(
+        "Replace leaking shower cartridge, test valve operation, and clean the work area."
+    )
+
+    await page.getByTestId("generate-estimate-button").click()
+
+    await expect(page.getByTestId("quota-upgrade-prompt")).toBeVisible()
+    await expect(page.getByTestId("quota-upgrade-title")).toHaveText("AI draft quota reached")
+    await expect(page.getByTestId("quota-upgrade-message")).toContainText("Your capture is still saved")
+    await expect(page.getByTestId("quota-upgrade-pricing-link")).toHaveAttribute("href", "/pricing?source=generate_quota")
+    await expect(page.getByTestId("job-description-input")).toHaveValue(
+        "Replace leaking shower cartridge, test valve operation, and clean the work area."
+    )
+})
+
+test("field capture generation failure keeps save and retry recovery actions", async ({ page }) => {
+    let generateAttempts = 0
+    await page.route("**/api/generate", async (route) => {
+        generateAttempts += 1
+
+        if (generateAttempts === 1) {
+            await route.fulfill({
+                status: 500,
+                contentType: "application/json",
+                body: JSON.stringify({ error: "AI service unavailable" }),
+            })
+            return
+        }
+
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                items: [
+                    {
+                        id: "item-retry-1",
+                        itemNumber: 1,
+                        category: "LABOR",
+                        description: "Retry generated labor",
+                        quantity: 1,
+                        unit: "LS",
+                        unit_price: 240,
+                        total: 240,
+                    },
+                ],
+                summary_note: "Retry generated estimate.",
+                payment_terms: "Due on approval.",
+                closing_note: "Thank you.",
+                warnings: [],
+            }),
+        })
+    })
+
+    const fieldNotes = "Replace leaking laundry valve, install new shutoff, test pressure, and clean work area."
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/new-estimate?capture=type")
+    await page.getByTestId("job-description-input").fill(fieldNotes)
+    await page.getByTestId("generate-estimate-button").click()
+
+    const generationRecovery = page.getByTestId("generation-recovery-prompt")
+    await expect(generationRecovery).toBeVisible()
+    await expect(page.getByTestId("generation-recovery-title")).toHaveText("AI draft did not finish")
+    await expect(page.getByTestId("generation-recovery-message")).toContainText("Your field capture is still in the composer")
+    await expect(page.getByTestId("job-description-input")).toHaveValue(fieldNotes)
+    await expect(page.getByTestId("generation-recovery-retry-action")).toContainText("Try again")
+    await expect(page.getByTestId("generation-recovery-save-action")).toContainText("Save capture")
+    await expect(page.getByTestId("generation-recovery-manual-action")).toContainText("Manual line entry")
+    await expectTouchTarget(page.getByTestId("generation-recovery-retry-action"))
+    await expectTouchTarget(page.getByTestId("generation-recovery-save-action"))
+
+    await page.getByTestId("generation-recovery-save-action").click()
+    await expect(page.getByTestId("toast-message")).toContainText("Field capture saved to Drafts.")
+
+    const savedCaptureDraft = await page.evaluate(async (expectedNotes) => {
+        const request = indexedDB.open("snapquote-db")
+        const database = await new Promise<IDBDatabase>((resolve, reject) => {
+            request.onerror = () => reject(request.error)
+            request.onsuccess = () => resolve(request.result)
+        })
+        const transaction = database.transaction("estimates", "readonly")
+        const estimates = await new Promise<Array<{
+            attachments?: { originalTranscript?: string }
+            items?: unknown[]
+            status?: string
+            summary_note?: string
+            totalAmount?: number
+        }>>((resolve, reject) => {
+            const getAllRequest = transaction.objectStore("estimates").getAll()
+            getAllRequest.onerror = () => reject(getAllRequest.error)
+            getAllRequest.onsuccess = () => resolve(getAllRequest.result)
+        })
+        database.close()
+        return estimates.find((estimate) => estimate.summary_note?.includes(expectedNotes)) || null
+    }, fieldNotes)
+
+    expect(savedCaptureDraft).toMatchObject({
+        items: [],
+        status: "draft",
+        totalAmount: 0,
+        attachments: {
+            originalTranscript: fieldNotes,
+        },
+    })
+
+    await page.getByTestId("generation-recovery-retry-action").click()
+    await expect.poll(() => generateAttempts).toBe(2)
+    await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+    await expect(page.getByTestId("line-item-description-0")).toHaveValue("Retry generated labor")
+    await expect(generationRecovery).toHaveCount(0)
+})
+
+test("free quote quota banner opens pricing with generate quota context", async ({ page }) => {
+    await page.goto("/")
+    await seedAuthenticatedSupabaseSession(page)
+    await mockSignedInBilling(page, "free")
+
+    await page.goto("/new-estimate")
+
+    await expect(page.getByLabel("Free tier quota banner")).toBeVisible()
+    await expect(page.getByTestId("free-tier-quota-upgrade-link")).toHaveAttribute("href", "/pricing?source=generate_quota")
 })
 
 test("mobile voice capture puts recording before notes and clear of bottom navigation", async ({ page }) => {
@@ -265,6 +474,9 @@ test("mobile voice capture puts recording before notes and clear of bottom navig
     await expectTouchTarget(stopButton)
     await stopButton.click()
     await expect(page.getByText("Processing Audio...")).toBeVisible()
+    await expect(page.getByText("Verify Details")).toBeVisible()
+    await expect(page.getByTestId("verify-scope-detail-status")).toHaveText("Quote-ready scope")
+    await expect(page.getByTestId("verify-scope-next-detail")).toHaveText("Ready for AI draft.")
     await page.goto("/new-estimate")
 
     await page.getByTestId("input-capture-settings-summary").scrollIntoViewIfNeeded()
@@ -290,6 +502,8 @@ test("desktop composer uses the available shell width and keeps generate control
 
     await expect(page.getByTestId("input-readiness-card")).toBeVisible()
     await expect(page.getByTestId("input-readiness-scope-status")).toHaveText("Record or type scope")
+    await expect(page.getByTestId("input-scope-detail-status")).toHaveText("Needs scope")
+    await expect(page.getByTestId("input-scope-next-detail")).toContainText("Start with the work requested")
     await expect(page.getByTestId("input-readiness-client-status")).toHaveText("Client later")
     await expect(page.getByTestId("input-readiness-delivery-status")).toHaveText("Before sending")
     expect(capturePanelBox).not.toBeNull()
@@ -344,12 +558,440 @@ test("photo capture previews attachments with a reachable remove control", async
 
     await expect(page.getByAltText("Site photo 1")).toBeVisible()
     await expect(page.getByTestId("quick-generate-button")).toBeVisible()
+    await expect(page.getByTestId("input-scope-detail-status")).toHaveText("Good start")
+    await expect(page.getByTestId("quick-generate-scope-helper")).toHaveText("Add work.")
+    await expect(page.getByTestId("input-scope-next-detail")).toContainText("Add work to perform")
     await expectTouchTarget(page.getByLabel("Remove site photo 1"))
 
     await page.getByLabel("Remove site photo 1").click()
     await expect(page.getByAltText("Site photo 1")).toHaveCount(0)
     await expect(page.getByTestId("quick-generate-button")).toHaveCount(0)
     await expect(page.getByTestId("generate-estimate-button")).toBeDisabled()
+})
+
+test("typed capture nudges thin field notes before generation", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/new-estimate?capture=type")
+
+    await page.getByTestId("job-description-input").fill("Fix sink")
+
+    await expect(page.getByTestId("quick-generate-button")).toBeVisible()
+    await expect(page.getByTestId("input-scope-detail-status")).toHaveText("Thin scope")
+    await expect(page.getByTestId("quick-generate-scope-helper")).toHaveText("Add cost.")
+    await expect(page.getByTestId("input-scope-next-detail")).toContainText("Add materials or labor")
+
+    const costPrompt = page.getByTestId("scope-guidance-prompt-cost")
+    await expect(page.getByTestId("scope-guidance-card")).toContainText("Sharpen AI draft")
+    await expect(costPrompt).toContainText("Materials or labor")
+    await expectTouchTarget(costPrompt)
+
+    await costPrompt.click()
+
+    await expect(page.getByTestId("job-description-input")).toHaveValue(/Fix sink\nMaterials\/labor:/)
+    await expect(page.getByTestId("job-description-input")).toBeFocused()
+    await expect(page.getByTestId("input-scope-detail-status")).toHaveText("Good start")
+    await expect(page.getByTestId("quick-generate-scope-helper")).toHaveText("Add site.")
+    await expect(page.getByTestId("scope-guidance-prompt-site")).toContainText("Site conditions")
+    await expect(page.getByTestId("scope-guidance-prompt-cost")).toHaveCount(0)
+})
+
+test("thin scope results show estimate assumptions before sending", async ({ page }) => {
+    await mockGeneratedEstimate(page)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/new-estimate?capture=type")
+
+    await page.getByTestId("job-description-input").click()
+    await page.keyboard.type("Fix sink")
+    await page.getByTestId("quick-generate-button").click()
+
+    await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+    await expect(page.getByTestId("result-readiness-strip")).toContainText("Scope check")
+    await expect(page.getByTestId("result-scope-confidence-card")).toContainText("Estimate assumptions")
+    await expect(page.getByTestId("result-scope-confidence-status")).toHaveText("Low confidence")
+    await expect(page.getByTestId("result-scope-confidence-helper")).toContainText("limited field detail")
+    await expect(page.getByTestId("result-scope-assumption-list")).toContainText("Materials or labor")
+    await expect(page.getByTestId("result-scope-assumption-list")).toContainText("Site conditions")
+
+    await page.getByTestId("result-client-details-button").click()
+    await page.getByTestId("result-client-name-input").fill("Scope Gate Client")
+    await page.getByTestId("result-client-email-input").fill("scope-gate@example.com")
+    await page.getByTestId("result-quick-send-button").click()
+    await expect(page.getByTestId("toast-message")).toContainText("Confirm scope assumptions before emailing this estimate.")
+    await expect(page.getByRole("dialog", { name: "Send Estimate" })).toHaveCount(0)
+
+    await page.getByTestId("result-quick-sms-button").click()
+    await expect(page.getByTestId("toast-message")).toContainText("Confirm scope assumptions before texting this estimate.")
+    await expect(page.getByRole("dialog", { name: "Send via SMS" })).toHaveCount(0)
+
+    await page.getByTestId("result-quick-pdf-button").click()
+    await expect(page.getByTestId("toast-message")).toContainText(
+        "Confirm scope assumptions before creating the customer PDF."
+    )
+
+    await page.getByTestId("handoff-actions-card").scrollIntoViewIfNeeded()
+    await expect(page.getByTestId("handoff-scope-assumptions-status")).toHaveText("Scope check")
+    await expect(page.getByTestId("handoff-actions-helper")).toHaveText("Confirm scope assumptions before sharing.")
+    await expect(page.getByTestId("result-share-pdf-button")).toContainText("Review assumptions first")
+    await page.getByTestId("result-share-pdf-button").click()
+    await expect(page.getByTestId("toast-message")).toContainText("Confirm scope assumptions before sharing this PDF.")
+
+    await page.getByTestId("result-scope-confidence-card").scrollIntoViewIfNeeded()
+    const confirmScopeButton = page.getByTestId("result-confirm-scope-assumptions-button")
+    await expectTouchTarget(confirmScopeButton)
+    await confirmScopeButton.click()
+
+    await expect(page.getByTestId("result-scope-confidence-status")).toHaveText("Confirmed")
+    await expect(page.getByTestId("result-scope-confidence-helper")).toHaveText(
+        "Scope assumptions reviewed for customer delivery."
+    )
+    await expect(page.getByTestId("result-scope-assumption-list")).toContainText("Reviewed")
+    await expect(confirmScopeButton).toContainText("Scope reviewed")
+    await expect(confirmScopeButton).toBeDisabled()
+    await expect(page.getByTestId("toast-message")).toContainText("Scope assumptions confirmed")
+
+    await page.getByTestId("handoff-actions-card").scrollIntoViewIfNeeded()
+    await expect(page.getByTestId("handoff-actions-status")).toHaveText("PDF ready")
+    await expect(page.getByTestId("handoff-scope-assumptions-status")).toHaveCount(0)
+    await expect(page.getByTestId("handoff-actions-helper")).toHaveText("PDF is ready; payment and referral are optional.")
+    await expect(page.getByTestId("result-share-pdf-button")).toContainText("Customer-ready estimate")
+
+    await page.getByTestId("result-quick-send-button").click()
+    const emailDialog = page.getByRole("dialog", { name: "Send Estimate" })
+    await expect(emailDialog).toBeVisible()
+    await emailDialog.getByRole("button", { name: "Cancel" }).click()
+    await expect(emailDialog).toHaveCount(0)
+
+    await page.getByTestId("result-quick-sms-button").click()
+    const smsDialog = page.getByRole("dialog", { name: "Send via SMS" })
+    await expect(smsDialog).toBeVisible()
+    await smsDialog.getByRole("button", { name: "Cancel" }).click()
+    await expect(smsDialog).toHaveCount(0)
+
+    const editSourceNotesButton = page.getByTestId("result-edit-source-notes-button")
+    await expectTouchTarget(editSourceNotesButton)
+    await editSourceNotesButton.click()
+
+    await expect(page.getByTestId("job-description-input")).toBeFocused()
+    await expect(page.getByTestId("job-description-input")).toHaveValue("Fix sink")
+    await expect(page.getByTestId("scope-guidance-card")).toContainText("Sharpen AI draft")
+})
+
+test("saved thin scope confirmation survives reopening from history", async ({ page }) => {
+    await mockGeneratedEstimate(page)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/new-estimate?capture=type")
+
+    await page.getByTestId("job-description-input").click()
+    await page.keyboard.type("Fix sink")
+    await page.getByTestId("quick-generate-button").click()
+
+    await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+    await expect(page.getByTestId("result-scope-confidence-status")).toHaveText("Low confidence")
+    await page.getByTestId("result-client-details-button").click()
+    await page.getByTestId("result-client-name-input").fill("Persistent Scope Client")
+    await page.getByTestId("result-client-email-input").fill("persistent-scope@example.com")
+    await page.getByTestId("result-confirm-scope-assumptions-button").click()
+    await expect(page.getByTestId("result-scope-confidence-status")).toHaveText("Confirmed")
+
+    await page.getByTestId("result-quick-save-button").click()
+    await expect(page).toHaveURL(/\/history/)
+
+    const savedEstimate = await page.evaluate(async () => {
+        const request = indexedDB.open("snapquote-db")
+        const database = await new Promise<IDBDatabase>((resolve, reject) => {
+            request.onerror = () => reject(request.error)
+            request.onsuccess = () => resolve(request.result)
+        })
+        const transaction = database.transaction("estimates", "readonly")
+        const estimates = await new Promise<Array<{
+            attachments?: {
+                originalTranscript?: string
+                scopeAssumptionsConfirmedAt?: string
+            }
+            clientName?: string
+        }>>((resolve, reject) => {
+            const getAllRequest = transaction.objectStore("estimates").getAll()
+            getAllRequest.onerror = () => reject(getAllRequest.error)
+            getAllRequest.onsuccess = () => resolve(getAllRequest.result)
+        })
+        database.close()
+        return estimates.find((estimate) => estimate.clientName === "Persistent Scope Client") || null
+    })
+
+    expect(savedEstimate?.attachments?.originalTranscript).toBe("Fix sink")
+    expect(savedEstimate?.attachments?.scopeAssumptionsConfirmedAt).toEqual(expect.any(String))
+
+    await page.getByTestId("history-next-action-button").click()
+
+    await expect(page).toHaveURL(/\/new-estimate\?draftId=/)
+    await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+    await expect(page.getByTestId("result-scope-confidence-status")).toHaveText("Confirmed")
+    await expect(page.getByTestId("result-scope-confidence-helper")).toHaveText(
+        "Scope assumptions reviewed for customer delivery."
+    )
+    await expect(page.getByTestId("handoff-actions-status")).toHaveText("PDF ready")
+    await expect(page.getByTestId("result-share-pdf-button")).toContainText("Customer-ready estimate")
+
+    await page.getByTestId("result-quick-send-button").click()
+    await expect(page.getByRole("dialog", { name: "Send Estimate" })).toBeVisible()
+})
+
+test("typed capture restores unsent field notes after refresh", async ({ page }) => {
+    await mockGeneratedEstimate(page)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/new-estimate?capture=type")
+    await expect(page.getByTestId("input-scope-next-detail")).toContainText("Start with the work requested")
+
+    await page.getByTestId("job-description-input").fill(
+        "Replace leaking kitchen faucet, install owner supplied fixture, test shutoffs, and clean work area."
+    )
+    await expect(page.getByTestId("quick-generate-button")).toBeVisible()
+    await page.getByTestId("input-add-client-details-button").click()
+    await expect(page.getByTestId("input-client-details-fields")).toBeVisible()
+    await page.getByPlaceholder("Client name").fill("Recovered Client")
+    await page.getByPlaceholder("Job address").fill("81 Recovery Lane")
+    await page.waitForFunction(() => Boolean(window.localStorage.getItem("snapquote_unsent_capture_draft")))
+
+    await page.reload()
+
+    await expect(page.getByTestId("toast-message")).toContainText("Recovered unsent field notes")
+    await expect(page.getByTestId("job-description-input")).toHaveValue(
+        "Replace leaking kitchen faucet, install owner supplied fixture, test shutoffs, and clean work area."
+    )
+    await expect(page.getByTestId("input-scope-detail-status")).toHaveText("Quote-ready scope")
+    await expect(page.getByTestId("input-client-details-fields")).toBeVisible()
+    await expect(page.getByPlaceholder("Client name")).toHaveValue("Recovered Client")
+    await expect(page.getByPlaceholder("Job address")).toHaveValue("81 Recovery Lane")
+
+    await page.getByTestId("input-client-generate-button").click()
+    await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+    const unsentCaptureDraft = await page.evaluate(() => window.localStorage.getItem("snapquote_unsent_capture_draft"))
+    expect(unsentCaptureDraft).toBeNull()
+})
+
+test("photo capture route does not restore a stale typed unsent draft", async ({ page }) => {
+    await page.addInitScript(() => {
+        window.localStorage.setItem(
+            "snapquote_unsent_capture_draft",
+            JSON.stringify({
+                version: 1,
+                updatedAt: new Date().toISOString(),
+                captureIntent: "type",
+                transcribedText: "Old typed notes that should stay out of photo capture.",
+                photoContext: "",
+                generateWorkflow: "standard",
+                sourceLanguage: "auto",
+                projectType: "residential",
+                clientName: "",
+                clientAddress: "",
+                clientEmail: "",
+                clientPhone: "",
+                clientNotes: "",
+                clientDetailsOpen: false,
+            })
+        )
+    })
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/new-estimate?capture=photos")
+
+    await expect(page.getByTestId("photo-capture-action")).toHaveAttribute("aria-pressed", "true")
+    await expect(page.getByTestId("type-capture-action")).toHaveAttribute("aria-pressed", "false")
+    await expect(page.getByTestId("job-description-input")).toHaveValue("")
+    await expect(page.getByTestId("toast-message")).toHaveCount(0)
+})
+
+test("typed capture can save field notes as a local draft before generating", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/new-estimate?capture=type")
+    await expect(page.getByTestId("input-save-capture-draft-button")).toBeDisabled()
+
+    await page.getByTestId("job-description-input").fill(
+        "Replace leaking laundry valve, install new shutoff, test pressure, and clean work area."
+    )
+    await page.getByTestId("input-add-client-details-button").click()
+    await expect(page.getByTestId("input-client-details-fields")).toBeVisible()
+    await page.getByPlaceholder("Client name").fill("Capture Draft Client")
+    await page.getByPlaceholder("Job address").fill("12 Draft Lane")
+    await page.waitForFunction(() => Boolean(window.localStorage.getItem("snapquote_unsent_capture_draft")))
+
+    await expect(page.getByTestId("input-save-capture-draft-button")).toBeEnabled()
+    await page.getByTestId("input-save-capture-draft-button").click()
+
+    await expect(page.getByTestId("toast-message")).toContainText("Field capture saved to Drafts.")
+    await expect.poll(
+        async () => page.evaluate(() => window.localStorage.getItem("snapquote_unsent_capture_draft"))
+    ).toBeNull()
+
+    const savedCaptureDraft = await page.evaluate(async () => {
+        const request = indexedDB.open("snapquote-db")
+        const database = await new Promise<IDBDatabase>((resolve, reject) => {
+            request.onerror = () => reject(request.error)
+            request.onsuccess = () => resolve(request.result)
+        })
+        const transaction = database.transaction("estimates", "readonly")
+        const estimates = await new Promise<Array<{
+            attachments?: { originalTranscript?: string }
+            clientAddress?: string
+            clientName?: string
+            items?: unknown[]
+            status?: string
+            summary_note?: string
+            totalAmount?: number
+        }>>((resolve, reject) => {
+            const getAllRequest = transaction.objectStore("estimates").getAll()
+            getAllRequest.onerror = () => reject(getAllRequest.error)
+            getAllRequest.onsuccess = () => resolve(getAllRequest.result)
+        })
+        database.close()
+        return estimates.find((estimate) => estimate.clientName === "Capture Draft Client") || null
+    })
+
+    expect(savedCaptureDraft).toMatchObject({
+        clientAddress: "12 Draft Lane",
+        clientName: "Capture Draft Client",
+        items: [],
+        status: "draft",
+        summary_note: expect.stringContaining("Replace leaking laundry valve"),
+        totalAmount: 0,
+        attachments: {
+            originalTranscript: expect.stringContaining("Replace leaking laundry valve"),
+        },
+    })
+})
+
+test("saved capture draft reopens in input and saves the generated estimate over the same draft", async ({ page }) => {
+    await mockGeneratedEstimate(page)
+    const draftId = "capture-resume-draft"
+    const fieldNotes = "Replace leaking laundry valve, install new shutoff, test pressure, and clean work area."
+
+    await seedLocalEstimates(page, [
+        {
+            id: draftId,
+            estimateNumber: "EST-2605-CAPTURE",
+            status: "draft",
+            clientName: "Capture Resume Client",
+            clientAddress: "88 Resume Rd",
+            summary_note: fieldNotes,
+            taxRate: 8.25,
+            taxAmount: 0,
+            totalAmount: 0,
+            createdAt: "2026-05-24T08:00:00.000Z",
+            updatedAt: "2026-05-24T08:05:00.000Z",
+            synced: false,
+            items: [],
+            attachments: {
+                photos: [],
+                originalTranscript: fieldNotes,
+            },
+        },
+    ])
+
+    await page.goto(`/new-estimate?draftId=${draftId}`)
+
+    await expect(page.getByTestId("toast-message")).toContainText("Field capture loaded. Generate when ready.")
+    await expect(page.getByTestId("job-description-input")).toHaveValue(fieldNotes)
+    await expect(page.getByPlaceholder("Client name")).toHaveValue("Capture Resume Client")
+    await expect(page.getByPlaceholder("Job address")).toHaveValue("88 Resume Rd")
+    await expect(page.getByTestId("input-client-generate-button")).toContainText("Generate for Capture Resume Client")
+
+    await page.getByTestId("input-client-generate-button").click()
+
+    await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+    await expect(page.getByTestId("line-item-description-0")).toHaveValue("Replace shower cartridge")
+    await page.getByTestId("result-quick-save-button").click()
+    await expect(page.getByTestId("toast-message")).toContainText("Estimate saved successfully.")
+
+    const storedEstimate = await page.evaluate(async (id) => {
+        const request = indexedDB.open("snapquote-db")
+        const database = await new Promise<IDBDatabase>((resolve, reject) => {
+            request.onerror = () => reject(request.error)
+            request.onsuccess = () => resolve(request.result)
+        })
+        const transaction = database.transaction("estimates", "readonly")
+        const estimate = await new Promise<{
+            attachments?: { originalTranscript?: string }
+            clientAddress?: string
+            clientName?: string
+            estimateNumber?: string
+            id?: string
+            items?: unknown[]
+            status?: string
+            totalAmount?: number
+        } | undefined>((resolve, reject) => {
+            const getRequest = transaction.objectStore("estimates").get(id)
+            getRequest.onerror = () => reject(getRequest.error)
+            getRequest.onsuccess = () => resolve(getRequest.result)
+        })
+        database.close()
+        return estimate || null
+    }, draftId)
+
+    expect(storedEstimate).toMatchObject({
+        id: draftId,
+        estimateNumber: "EST-2605-CAPTURE",
+        clientName: "Capture Resume Client",
+        clientAddress: "88 Resume Rd",
+        status: "draft",
+        attachments: {
+            originalTranscript: fieldNotes,
+        },
+    })
+    expect(storedEstimate?.items?.length).toBeGreaterThan(0)
+    expect(storedEstimate?.totalAmount).toBeGreaterThan(0)
+})
+
+test("saved photo capture draft restores the photo and sends photo context for generation", async ({ page }) => {
+    const generatePayload: { current: Record<string, unknown> | null } = { current: null }
+    await mockGeneratedEstimate(page, (payload) => {
+        generatePayload.current = payload
+    })
+    const draftId = "photo-capture-resume-draft"
+    const fieldNotes = "Replace leaking laundry valve and inspect corrosion around the old shutoff."
+    const photoContext = "Laundry room cabinet, corrosion visible near the existing valve."
+
+    await seedLocalEstimates(page, [
+        {
+            id: draftId,
+            estimateNumber: "EST-2605-PHOTO",
+            status: "draft",
+            clientName: "",
+            clientAddress: "",
+            summary_note: `${fieldNotes}\n\nPhoto context: ${photoContext}`,
+            taxRate: 8.25,
+            taxAmount: 0,
+            totalAmount: 0,
+            createdAt: "2026-05-24T09:00:00.000Z",
+            updatedAt: "2026-05-24T09:05:00.000Z",
+            synced: false,
+            items: [],
+            attachments: {
+                photos: [tinySitePhotoDataUrl],
+                originalTranscript: fieldNotes,
+            },
+        },
+    ])
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto(`/new-estimate?draftId=${draftId}`)
+
+    await expect(page.getByTestId("toast-message")).toContainText("Field capture loaded. Generate when ready.")
+    await expect(page.getByTestId("job-description-input")).toHaveValue(fieldNotes)
+    await expect(page.getByAltText("Site photo 1")).toBeVisible()
+    await expect(page.getByTestId("quick-generate-button")).toBeVisible()
+
+    await page.getByTestId("quick-generate-button").click()
+
+    await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+    expect(generatePayload.current).not.toBeNull()
+    if (!generatePayload.current) throw new Error("Generate payload was not captured.")
+    const capturedGeneratePayload = generatePayload.current
+    expect(capturedGeneratePayload).toMatchObject({
+        workflow: "standard",
+        notes: expect.stringContaining(fieldNotes),
+    })
+    expect(capturedGeneratePayload.notes).toEqual(expect.stringContaining(`Photo context: ${photoContext}`))
+    expect(capturedGeneratePayload.images).toEqual([tinySitePhotoDataUrl])
 })
 
 test("typed capture shows a quick generate action before the bottom navigation", async ({ page }) => {
@@ -364,6 +1006,8 @@ test("typed capture shows a quick generate action before the bottom navigation",
     const quickGenerateButton = page.getByTestId("quick-generate-button")
     await expect(quickGenerateButton).toBeVisible()
     await expect(page.getByTestId("input-readiness-scope-status")).toHaveText("Scope ready")
+    await expect(page.getByTestId("input-scope-detail-status")).toHaveText("Quote-ready scope")
+    await expect(page.getByTestId("quick-generate-scope-helper")).toHaveText("Ready.")
 
     const quickBox = await quickGenerateButton.boundingBox()
     const navBox = await page.getByTestId("bottom-navigation").boundingBox()
@@ -379,13 +1023,13 @@ test("typed capture shows a quick generate action before the bottom navigation",
     await expect(page.getByTestId("result-readiness-strip")).toContainText("2 lines")
     await expect(page.getByTestId("result-readiness-strip")).toContainText("Payment optional")
     await expect(page.getByTestId("result-readiness-actions")).toBeVisible()
-    await expect(page.getByTestId("result-review-lines-button")).toHaveText("Review 2 lines")
-    await expect(page.getByTestId("result-payment-link-button")).toHaveText("Add payment")
+    await expect(page.getByTestId("result-review-lines-button")).toContainText("Lines")
+    await expect(page.getByTestId("result-payment-link-button")).toContainText("Payment")
     await expectTouchTarget(page.getByTestId("result-review-lines-button"))
     await expectTouchTarget(page.getByTestId("result-payment-link-button"))
-    await expect(page.getByTestId("result-quick-sms-label")).toHaveText("Text quote")
-    await expect(page.getByTestId("result-quick-preview-label")).toHaveText("Preview")
-    await expect(page.getByTestId("result-quick-pdf-label")).toHaveText("Download")
+    await expect(page.getByTestId("result-quick-sms-label")).toHaveText("Text")
+    await expect(page.getByTestId("result-quick-preview-label")).toHaveText("View")
+    await expect(page.getByTestId("result-quick-pdf-label")).toHaveText("PDF")
     await expect(page.getByTestId("result-quick-sign-label")).toHaveText("Sign")
     await expectVisibleActionLabel(page.getByTestId("result-quick-sms-label"))
     await expectVisibleActionLabel(page.getByTestId("result-quick-preview-label"))
@@ -525,7 +1169,7 @@ test("typed capture shows a quick generate action before the bottom navigation",
     await expect(page.getByTestId("handoff-referral-signin")).toContainText("Sign in to copy invites")
     await expect(page.getByTestId("result-share-pdf-button")).toContainText("Share PDF")
     await expect(page.getByTestId("result-referral-link-button")).toContainText("Copy invite")
-    await expect(page.getByTestId("result-quick-save-label")).toHaveText("Save quote")
+    await expect(page.getByTestId("result-quick-save-label")).toHaveText("Save")
     await expectVisibleActionLabel(page.getByTestId("result-quick-save-label"))
     const handoffTextFits = await page.evaluate(() => {
         return [
@@ -565,6 +1209,80 @@ test("material import upload controls are keyboard reachable from line review", 
     await expectTouchTarget(page.getByRole("button", { name: /Click to upload a CSV file/ }))
 })
 
+test("receipt scanner keeps failed uploads recoverable with retry and manual fallback", async ({ page }) => {
+    await mockGeneratedEstimate(page)
+    let parseAttempts = 0
+    await page.route("**/api/parse-receipt", async (route) => {
+        parseAttempts += 1
+
+        if (parseAttempts === 1) {
+            await route.fulfill({
+                status: 500,
+                contentType: "application/json",
+                body: JSON.stringify({ error: "No parsable line items found" }),
+            })
+            return
+        }
+
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                items: [
+                    {
+                        id: "receipt-retry-item",
+                        description: "Retry parsed receipt materials",
+                        quantity: 1,
+                        unit_price: 74.25,
+                        total: 74.25,
+                        confidence_score: 0.92,
+                    },
+                ],
+                warnings: [],
+            }),
+        })
+    })
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/new-estimate?capture=type")
+
+    await page.getByTestId("job-description-input").fill("Replace shower cartridge and import receipt materials.")
+    await page.getByTestId("quick-generate-button").click()
+    await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+
+    await page.getByTestId("result-review-lines-button").click()
+    await page.getByRole("button", { name: "Scan Receipt" }).click()
+    await page.getByTestId("receipt-scanner-file-input").setInputFiles({
+        name: "receipt.png",
+        mimeType: "image/png",
+        buffer: tinySitePhotoPng,
+    })
+    await page.getByTestId("receipt-scanner-context-input").fill("Ferguson receipt for retry test")
+    await expect(page.getByAltText("Receipt Preview")).toBeVisible()
+
+    await page.getByTestId("receipt-scanner-submit-action").click()
+
+    const receiptParseIssue = page.getByTestId("receipt-scanner-parse-issue")
+    await expect(receiptParseIssue).toBeVisible()
+    await expect(page.getByTestId("receipt-scanner-parse-title")).toHaveText("Receipt could not be read")
+    await expect(page.getByTestId("receipt-scanner-parse-message")).toContainText("Keep the photo selected")
+    await expect(page.getByTestId("receipt-scanner-context-input")).toHaveValue("Ferguson receipt for retry test")
+    await expect(page.getByAltText("Receipt Preview")).toBeVisible()
+    await expect(page.getByTestId("receipt-scanner-retry-action")).toContainText("Retry scan")
+    await expect(page.getByTestId("receipt-scanner-manual-action")).toContainText("Manual line entry")
+    await expect(page.getByTestId("receipt-scanner-keep-editing-action")).toContainText("Keep editing")
+    await expectTouchTarget(page.getByTestId("receipt-scanner-retry-action"))
+    await expectTouchTarget(page.getByTestId("receipt-scanner-manual-action"))
+    expect(parseAttempts).toBe(1)
+
+    await page.getByTestId("receipt-scanner-retry-action").click()
+
+    await expect.poll(() => parseAttempts).toBe(2)
+    await expect(page.getByRole("dialog", { name: "AI Material Receipt Scanner" })).toHaveCount(0)
+    await expect(page.getByTestId("line-item-description-2")).toHaveValue("Retry parsed receipt materials")
+    await expect(page.getByTestId("toast-message")).toContainText("Receipt parsed successfully.")
+})
+
 test("result with client name but no contact prompts for delivery contact before sending", async ({ page }) => {
     await mockGeneratedEstimate(page)
     await page.setViewportSize({ width: 390, height: 844 })
@@ -597,13 +1315,33 @@ test("line review gate flags incomplete manual line items before sending", async
     await page.getByTestId("quick-generate-button").click()
     await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
     await expect(page.getByTestId("line-review-status")).toHaveText("Ready for customer copy")
+    await page.getByTestId("result-client-details-button").click()
+    await page.getByTestId("result-client-name-input").fill("Line Gate Client")
+    await page.getByTestId("result-client-email-input").fill("line-gate@example.com")
+    await expect(page.getByTestId("result-send-readiness-status")).toContainText("Ready to send")
+    await expect(page.getByTestId("result-quick-send-button")).toBeVisible()
 
     await page.getByRole("button", { name: "Add Item" }).click()
 
+    await expect(page.getByTestId("result-send-readiness-status")).toContainText("1 fix before send")
+    await expect(page.getByTestId("result-readiness-strip")).toContainText("2 line fixes")
+    await expect(page.getByTestId("result-fix-lines-before-send-button")).toContainText("Fix lines")
+    await expect(page.getByTestId("result-quick-send-button")).toHaveCount(0)
     await expect(page.getByTestId("line-review-status")).toHaveText("2 fixes before sending")
     await expect(page.getByTestId("line-review-description-status")).toHaveText("1 missing")
     await expect(page.getByTestId("line-review-pricing-status")).toHaveText("1 zero price")
     await expect(page.getByTestId("line-review-quantity-status")).toHaveText("Checked")
+    await page.getByTestId("result-fix-lines-before-send-button").click()
+    await expect(page.getByTestId("line-items-review-summary")).toBeVisible()
+    await page.waitForFunction(() => {
+        const qualityGate = document.querySelector('[data-testid="line-review-quality-gate"]')
+        const nav = document.querySelector('[data-testid="bottom-navigation"]')
+        if (!qualityGate || !nav) return false
+
+        const qualityGateBox = qualityGate.getBoundingClientRect()
+        const navBox = nav.getBoundingClientRect()
+        return qualityGateBox.bottom <= navBox.top - 8
+    })
 
     const qualityGateBox = await page.getByTestId("line-review-quality-gate").boundingBox()
     const navBox = await page.getByTestId("bottom-navigation").boundingBox()
@@ -714,6 +1452,114 @@ test("share PDF fallback downloads a named PDF and persists sent status", async 
     )
 })
 
+test("share PDF failure stays visible with retry and download fallback", async ({ page }) => {
+    await mockGeneratedEstimate(page)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/new-estimate?capture=type")
+
+    await page.getByTestId("job-description-input").fill("Replace shower cartridge and recover from failed PDF share.")
+    await page.getByTestId("quick-generate-button").click()
+    await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+    await page.getByTestId("result-confirm-scope-assumptions-button").click()
+    await page.getByTestId("result-client-details-button").click()
+    await page.getByTestId("result-client-name-input").fill("Share Failure Client")
+    await page.evaluate(() => {
+        Object.defineProperty(navigator, "canShare", {
+            value: () => true,
+            configurable: true,
+        })
+        Object.defineProperty(navigator, "share", {
+            value: async () => {
+                throw new Error("Native share failed after PDF was prepared")
+            },
+            configurable: true,
+        })
+    })
+
+    await page.getByTestId("result-share-pdf-button").click()
+
+    const pdfDeliveryIssue = page.getByTestId("pdf-delivery-issue")
+    await expect(pdfDeliveryIssue).toBeVisible()
+    await expect(page.getByTestId("handoff-actions-status")).toHaveText("Retry PDF")
+    await expect(page.getByTestId("pdf-delivery-issue-title")).toHaveText("PDF share did not finish")
+    await expect(page.getByTestId("pdf-delivery-issue-message")).toContainText("download the PDF and send it manually")
+    await expect(page.getByTestId("pdf-delivery-retry-share-action")).toContainText("Retry share")
+    await expect(page.getByTestId("pdf-delivery-download-action")).toContainText("Download PDF")
+    await expect(page.getByTestId("pdf-delivery-preview-action")).toContainText("Preview PDF")
+    await expectTouchTarget(page.getByTestId("pdf-delivery-retry-share-action"))
+    await expectTouchTarget(page.getByTestId("pdf-delivery-download-action"))
+
+    const downloadPromise = page.waitForEvent("download")
+    await page.getByTestId("pdf-delivery-download-action").click()
+    const download = await downloadPromise
+
+    expect(download.suggestedFilename()).toMatch(/^EST-\d{4}-\d{3}-share-failure-client-estimate\.pdf$/)
+    await expect(pdfDeliveryIssue).toHaveCount(0)
+    await expect(page.getByText(/PDF downloaded as EST-\d{4}-\d{3}-share-failure-client-estimate\.pdf\./)).toBeVisible()
+})
+
+test("signed-in share PDF fallback creates and persists a customer approval link", async ({ page }) => {
+    await page.addInitScript(() => {
+        Object.defineProperty(navigator, "share", { value: undefined, configurable: true })
+        Object.defineProperty(navigator, "canShare", { value: undefined, configurable: true })
+    })
+    await mockGeneratedEstimate(page)
+    await mockSignedInBilling(page)
+
+    let shareLinkPayload: Record<string, unknown> | null = null
+    await page.route("**/api/estimates/*/share-link", async (route) => {
+        shareLinkPayload = route.request().postDataJSON() as Record<string, unknown>
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                ok: true,
+                shareUrl: "https://snapquote.test/q/share-pdf-token",
+                portal: { status: "shared" },
+            }),
+        })
+    })
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/new-estimate?capture=type")
+    await seedAuthenticatedSupabaseSession(page)
+
+    await page.getByTestId("job-description-input").fill(
+        "Replace shower cartridge for customer bathroom access, include cleanup, and share an approval-ready PDF."
+    )
+    await page.getByTestId("quick-generate-button").click()
+    await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+    await page.getByTestId("result-client-details-button").click()
+    await page.getByTestId("result-client-name-input").fill("Share Portal Client")
+
+    const downloadPromise = page.waitForEvent("download")
+    await page.getByTestId("result-share-pdf-button").click()
+    const download = await downloadPromise
+
+    expect(download.suggestedFilename()).toMatch(/^EST-\d{4}-\d{3}-share-portal-client-estimate\.pdf$/)
+    await expect(page.getByText("PDF downloaded. Approval link copied and estimate marked sent.")).toBeVisible()
+    expect(shareLinkPayload).toMatchObject({
+        resetCustomerDecision: true,
+        estimate: {
+            clientName: "Share Portal Client",
+            estimateNumber: expect.stringMatching(/^EST-/),
+        },
+    })
+
+    const storedEstimates = await readStoredEstimateApprovals(page)
+    expect(storedEstimates).toEqual(
+        expect.arrayContaining([
+            expect.objectContaining({
+                clientName: "Share Portal Client",
+                status: "sent",
+                customerPortalUrl: "https://snapquote.test/q/share-pdf-token",
+                customerPortalStatus: "shared",
+                sentAt: expect.any(String),
+            }),
+        ])
+    )
+})
+
 test("result payment quick action starts payment setup from the handoff card", async ({ page }) => {
     await mockGeneratedEstimate(page)
 
@@ -725,7 +1571,7 @@ test("result payment quick action starts payment setup from the handoff card", a
     await page.getByTestId("generate-estimate-button").click()
 
     await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
-    await expect(page.getByTestId("result-payment-link-button")).toHaveText("Add payment")
+    await expect(page.getByTestId("result-payment-link-button")).toContainText("payment")
     await page.getByTestId("result-payment-link-button").click()
 
     await expect(page).toHaveURL(/\/login\?next=%2Fnew-estimate%3FdraftId%3D[^&]+&intent=payment-link/, { timeout: 10000 })
@@ -833,9 +1679,8 @@ test("result can load a saved client and return to delivery actions", async ({ p
     await page.getByRole("button", { name: "Save Client" }).click()
 
     await page.goto("/new-estimate?capture=type")
-    await page.getByTestId("job-description-input").fill(
-        "Replace leaking shower cartridge, test valve operation, and clean the work area."
-    )
+    await page.getByTestId("job-description-input").click()
+    await page.keyboard.type("Replace leaking shower cartridge, test valve operation, and clean the work area.")
     await page.getByTestId("quick-generate-button").click()
 
     await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
@@ -861,7 +1706,7 @@ test("result can load a saved client and return to delivery actions", async ({ p
     await expect(page.getByTestId("result-client-email-input")).toHaveCount(0)
     await expect(page.getByTestId("result-client-phone-input")).toHaveCount(0)
     await expect(page.getByTestId("result-quick-send-button")).toBeVisible()
-    await expect(page.getByTestId("result-quick-send-button")).toContainText("Email quote")
+    await expect(page.getByTestId("result-quick-send-button")).toContainText("Email")
 
     const quickActionsBox = await page.getByTestId("result-quick-actions").boundingBox()
     const sendButtonBox = await page.getByTestId("result-quick-send-button").boundingBox()
@@ -1063,6 +1908,81 @@ test("section-based estimate keeps section line descriptions readable on mobile"
     expect(descriptionBox!.y + descriptionBox!.height).toBeLessThanOrEqual(navBox!.y - 8)
 })
 
+test("customer change request duplicates keep revision context visible and saved", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.addInitScript(() => {
+        window.localStorage.setItem(
+            "duplicate_estimate",
+            JSON.stringify({
+                items: [
+                    {
+                        id: "revision-item-1",
+                        itemNumber: 1,
+                        category: "SERVICE",
+                        description: "Panel cleanup and disposal",
+                        quantity: 1,
+                        unit: "LS",
+                        unit_price: 1200,
+                        total: 1200,
+                    },
+                ],
+                summary_note: "Revision for requested disposal line.",
+                clientName: "Revision Customer",
+                clientAddress: "44 Revision Rd",
+                clientEmail: "revision@example.test",
+                clientNotes: "Customer requested changes on May 29: Please add disposal haul-away before approval.",
+                taxRate: 13,
+                revisionContext: {
+                    originalEstimateId: "original-estimate-1",
+                    originalEstimateNumber: "EST-ORIGINAL-001",
+                    requestedAt: "2026-05-29T18:00:00.000Z",
+                    customerName: "Revision Customer",
+                    customerEmail: "revision@example.test",
+                    note: "Please add disposal haul-away before approval.",
+                },
+            })
+        )
+    })
+
+    await page.goto("/new-estimate")
+
+    await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
+    await expect(page.getByTestId("customer-revision-context")).toBeVisible()
+    await expect(page.getByTestId("customer-revision-customer")).toHaveText("Revision Customer")
+    await expect(page.getByTestId("customer-revision-context")).toContainText("Original #EST-ORIGINAL-001")
+    await expect(page.getByTestId("customer-revision-note")).toContainText("Please add disposal haul-away")
+
+    await page.getByTestId("result-client-name-input").fill("Revision Customer Updated")
+    await page.getByTestId("result-quick-save-button").click()
+    await expect(page.getByTestId("toast-message")).toContainText("Estimate saved successfully.")
+
+    const storedRevisionDraft = await page.evaluate(async () => {
+        const request = indexedDB.open("snapquote-db")
+        const database = await new Promise<IDBDatabase>((resolve, reject) => {
+            request.onerror = () => reject(request.error)
+            request.onsuccess = () => resolve(request.result)
+        })
+        const transaction = database.transaction("estimates", "readonly")
+        const estimates = await new Promise<Array<{
+            clientName?: string
+            clientNotes?: string
+            revisionOfEstimateId?: string
+            revisionOfEstimateNumber?: string
+        }>>((resolve, reject) => {
+            const getAllRequest = transaction.objectStore("estimates").getAll()
+            getAllRequest.onerror = () => reject(getAllRequest.error)
+            getAllRequest.onsuccess = () => resolve(getAllRequest.result)
+        })
+        database.close()
+        return estimates.find((estimate) => estimate.clientName === "Revision Customer Updated") || null
+    })
+
+    expect(storedRevisionDraft).not.toBeNull()
+    expect(storedRevisionDraft?.clientNotes).toContain("Please add disposal haul-away before approval.")
+    expect(storedRevisionDraft?.revisionOfEstimateId).toBe("original-estimate-1")
+    expect(storedRevisionDraft?.revisionOfEstimateNumber).toBe("EST-ORIGINAL-001")
+})
+
 test("demo quote button loads a tutorial draft for first-time practice", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto("/new-estimate")
@@ -1072,7 +1992,9 @@ test("demo quote button loads a tutorial draft for first-time practice", async (
     await expect(page.getByTestId("demo-tutorial-banner")).toBeVisible()
     await expect(page.getByTestId("estimate-draft-title")).toHaveText("Estimate Draft")
     await expect(page.getByTestId("result-quick-actions")).toBeVisible()
-    await expect(page.getByTestId("result-quick-actions")).toContainText("Review the essentials, then send the customer copy.")
+    await expect(page.getByTestId("result-send-readiness-status")).toContainText("1 fix before send")
+    await expect(page.getByTestId("result-quick-actions")).toContainText("Clear the remaining send checks before delivery.")
+    await expect(page.getByTestId("result-add-contact-button")).toContainText("Email")
     await expect(page.getByTestId("toast-message")).toHaveCount(0)
     await expect(page.getByTestId("line-item-description-0")).toHaveValue("Vanity drain assembly and shutoff parts package")
     await expect(page.locator('input[value="Demo Customer"]').first()).toBeVisible()

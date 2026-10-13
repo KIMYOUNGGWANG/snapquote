@@ -1,8 +1,17 @@
 import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
+import { isEstimatePaidLike } from '@/lib/estimate-payment-state'
 import { recordOpsAlert } from '@/lib/ops-alerts'
 import { resolveEstimateForSettlement } from '@/lib/server/payment-estimate-ownership'
+
+function getCheckoutSessionPaidAt(session: Stripe.Checkout.Session): string {
+    const createdUnixSeconds = typeof session.created === 'number' && Number.isFinite(session.created)
+        ? session.created
+        : Math.floor(Date.now() / 1000)
+
+    return new Date(createdUnixSeconds * 1000).toISOString()
+}
 
 export async function POST(req: Request) {
     // Validate required environment variables
@@ -154,13 +163,19 @@ export async function POST(req: Request) {
         const targetEstimate = settlementResolution.estimate
         console.log(`💰 Payment succeeded for estimate: ${targetEstimate.id}`)
 
-        let statusTransitioned = false
+        const paymentCompletedAt = targetEstimate.payment_completed_at || getCheckoutSessionPaidAt(session)
+        const syncedAt = new Date().toISOString()
+        let statusTransitioned = !isEstimatePaidLike(targetEstimate)
 
         const { data: updatedEstimate, error } = await supabase
             .from('estimates')
-            .update({ status: 'paid' })
+            .update({
+                status: 'paid',
+                payment_completed_at: paymentCompletedAt,
+                last_payment_session_id: session.id,
+                updated_at: syncedAt,
+            })
             .eq('id', targetEstimate.id)
-            .neq('status', 'paid')
             .select('id')
             .maybeSingle()
 
@@ -180,7 +195,7 @@ export async function POST(req: Request) {
             return new NextResponse('Database Error', { status: 500 })
         }
 
-        statusTransitioned = Boolean(updatedEstimate?.id)
+        statusTransitioned = statusTransitioned && Boolean(updatedEstimate?.id)
 
         // Non-blocking analytics event emit for payment conversion tracking.
         const { error: analyticsError } = await supabase

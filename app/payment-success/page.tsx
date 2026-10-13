@@ -27,9 +27,13 @@ export default async function PaymentSuccessPage({ searchParams }: PaymentSucces
     const historyParams = new URLSearchParams({ payment: "success" })
     if (estimateId) historyParams.set("estimateId", estimateId)
     if (estimateNumber) historyParams.set("estimateNumber", estimateNumber)
-    const historyHref = `/history?${historyParams.toString()}`
     const hasEstimateReference = Boolean(estimateId || estimateNumber)
-    const historyActionLabel = hasEstimateReference ? "View paid estimate" : "Open History"
+    const paymentNeedsVerification = hasEstimateReference && !sessionId
+    if (paymentNeedsVerification) historyParams.set("paymentStatus", "missing_session")
+    const historyHref = `/history?${historyParams.toString()}`
+    const historyActionLabel = paymentNeedsVerification
+        ? "Check History"
+        : hasEstimateReference ? "View paid estimate" : "Open History"
     const localHistoryHandoffText = hasEstimateReference
         ? "Local History is updated when this return URL matches the saved estimate."
         : "Open History to check the latest Stripe sync status for this payment."

@@ -14,6 +14,12 @@ function includesAny(value: string, fragments: string[]) {
     return fragments.some((fragment) => value.includes(fragment))
 }
 
+function getQuotaActionHref(channel: DeliveryChannel): string {
+    return channel === "email"
+        ? "/pricing?source=send_email_quota"
+        : "/pricing?source=sms_credits"
+}
+
 export function buildDeliveryIssue(input: {
     channel: DeliveryChannel
     message: string
@@ -49,7 +55,7 @@ export function buildDeliveryIssue(input: {
                 ? "Upgrade to keep emailing PDFs"
                 : "Add SMS credits before sending",
             message,
-            actionHref: "/pricing",
+            actionHref: getQuotaActionHref(input.channel),
             actionLabel: "View plans",
             canRetry: true,
         }
