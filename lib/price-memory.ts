@@ -7,7 +7,7 @@ const LEARNABLE_CATEGORIES: ReadonlySet<string> = new Set<PriceCategory>(["PARTS
 export const PRICE_LIST_AI_LIMIT = 100
 
 function lastActivity(item: PriceListItem): string {
-    return item.lastUsedAt ?? item.updatedAt
+    return item.lastUsedAt ?? item.updatedAt ?? ""
 }
 
 export function selectPriceListForAI(
@@ -131,4 +131,8 @@ export function countEditedLines(original: readonly EstimateItem[], sent: readon
     }
 
     return edited
+}
+
+export function wasEstimateAlreadySent(estimate: { readonly sentAt?: string | null; readonly status?: string }): boolean {
+    return Boolean(estimate.sentAt) || estimate.status === "sent" || estimate.status === "paid"
 }

@@ -24,7 +24,7 @@ import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceList
 import type { BusinessInfo, EstimateItem, EstimateSection, LocalEstimate } from "@/lib/estimates-storage"
 import { normalizeCategory, normalizeEstimateItem, normalizeEstimatePayload, normalizeUnit, toSafeNumber, type EstimateDraft } from "@/lib/estimates/normalize"
 import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
-import { countEditedLines, getLearnableItems } from "@/lib/price-memory"
+import { countEditedLines, getLearnableItems, wasEstimateAlreadySent } from "@/lib/price-memory"
 import { dismissToasts, toast } from "@/components/toast"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
@@ -2894,7 +2894,7 @@ function NewEstimatePageContent() {
             return persistedEstimate
         }
 
-        const wasAlreadySent = Boolean(existing.sentAt) || existing.status === "sent"
+        const wasAlreadySent = wasEstimateAlreadySent(existing)
         const sentAt = existing.sentAt || persistedEstimate.sentAt || new Date().toISOString()
         const nextPersistedEstimate = {
             ...persistedEstimate,

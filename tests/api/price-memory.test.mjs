@@ -9,6 +9,7 @@ import {
   normalizePriceKey,
   PRICE_LIST_AI_LIMIT,
   selectPriceListForAI,
+  wasEstimateAlreadySent,
 } from '../../lib/price-memory.ts'
 
 const NOW = '2026-10-13T00:00:00.000Z'
@@ -168,5 +169,24 @@ describe('price list selection for AI', () => {
     const text = formatPriceListForAI([priceItem()])
     assert.equal(text, '- "Toilet Installation": $180/LS [LABOR] (keywords: toilet)')
     assert.equal(formatPriceListForAI([]), '')
+  })
+})
+
+describe('final review fixes', () => {
+  test('treats sent or paid estimates as already sent', () => {
+    assert.equal(wasEstimateAlreadySent({ status: 'draft' }), false)
+    assert.equal(wasEstimateAlreadySent({ status: 'draft', sentAt: '2026-10-01T00:00:00.000Z' }), true)
+    assert.equal(wasEstimateAlreadySent({ status: 'sent' }), true)
+    assert.equal(wasEstimateAlreadySent({ status: 'paid' }), true)
+  })
+
+  test('does not throw when a stored item has no updatedAt', () => {
+    const legacy = priceItem({ id: 'legacy', usageCount: 1 })
+    delete legacy.updatedAt
+    const dated = priceItem({ id: 'dated', usageCount: 1 })
+
+    const selected = selectPriceListForAI([legacy, dated])
+
+    assert.deepEqual(selected.map((entry) => entry.id), ['dated', 'legacy'])
   })
 })
