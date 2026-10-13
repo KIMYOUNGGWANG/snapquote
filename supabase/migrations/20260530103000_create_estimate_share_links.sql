@@ -2,7 +2,7 @@
 -- Public customer access is routed through server endpoints using Service Role.
 
 create table if not exists estimate_share_links (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   user_id uuid references profiles(id) on delete cascade not null,
   estimate_id text not null,
   token_hash text not null unique,

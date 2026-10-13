@@ -17,7 +17,7 @@ create table profiles (
 
 -- Clients
 create table clients (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   user_id uuid references profiles(id) on delete cascade,
   name text,
   address text,
@@ -27,7 +27,7 @@ create table clients (
 
 -- Estimates
 create table estimates (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   user_id uuid references profiles(id) on delete cascade,
   client_id uuid references clients(id),
   estimate_number text,
@@ -43,7 +43,7 @@ create table estimates (
 
 -- Estimate Items
 create table estimate_items (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   estimate_id uuid references estimates(id) on delete cascade,
   description text,
   quantity int,
@@ -53,7 +53,7 @@ create table estimate_items (
 
 -- Feedback
 create table feedback (
-  id uuid default uuid_generate_v4() primary key,
+  id uuid default gen_random_uuid() primary key,
   user_id uuid references auth.users on delete set null,
   rating int check (rating >= 1 and rating <= 5),
   category text,
