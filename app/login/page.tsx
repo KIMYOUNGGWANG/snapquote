@@ -6,7 +6,12 @@ import { supabase } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { trackReferralEvent } from "@/lib/referrals"
-import { buildPostAuthRedirectPath, normalizeIntent, normalizeNextPath } from "@/lib/auth/oauth-callback"
+import {
+    buildAuthCallbackRedirectPath,
+    buildPostAuthRedirectPath,
+    normalizeIntent,
+    normalizeNextPath,
+} from "@/lib/auth/oauth-callback"
 import { AlertCircle, ArrowRight, CheckCircle2, Clock3, Mail, ShieldCheck, Sparkles } from "lucide-react"
 
 const REFERRAL_TOKEN_PATTERN = /^[a-z0-9]{8,32}$/
@@ -113,16 +118,13 @@ function LoginPageContent() {
         e.preventDefault()
         setLoading(true)
         setNotice(null)
-        const redirectUrl = new URL(nextPath, window.location.origin)
-        if (intent) {
-            redirectUrl.searchParams.set("intent", intent)
-        }
+        const callbackUrl = new URL(buildAuthCallbackRedirectPath(nextPath, intent), window.location.origin)
 
         const { error } = await supabase.auth.signInWithOtp({
             email,
             options: {
                 shouldCreateUser: true,
-                emailRedirectTo: redirectUrl.toString(),
+                emailRedirectTo: callbackUrl.toString(),
             },
         })
         if (error) {
@@ -150,9 +152,7 @@ function LoginPageContent() {
         setNotice(null)
         setOauthLoading(true)
 
-        const callbackPath = buildPostAuthRedirectPath("/auth/callback", intent)
-        const callbackUrl = new URL(callbackPath, window.location.origin)
-        callbackUrl.searchParams.set("next", nextPath)
+        const callbackUrl = new URL(buildAuthCallbackRedirectPath(nextPath, intent), window.location.origin)
 
         const { error } = await supabase.auth.signInWithOAuth({
             provider: "google",

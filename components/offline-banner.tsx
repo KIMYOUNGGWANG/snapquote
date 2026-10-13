@@ -84,7 +84,11 @@ export function OfflineBanner() {
     if (!showBanner) return null
 
     return (
-        <div className="pointer-events-none fixed left-0 right-0 z-[95] flex justify-center px-4" style={{ bottom: bottomOffset }}>
+        <div
+            className="pointer-events-none fixed left-0 right-0 z-[95] flex justify-center px-4"
+            data-testid="offline-banner"
+            style={{ bottom: bottomOffset }}
+        >
             <div
                 data-testid="offline-status-banner"
                 className={`pointer-events-auto w-full max-w-md rounded-lg border px-3 py-2 text-center text-xs font-medium shadow-[0_18px_48px_-28px_rgba(0,0,0,0.95)] transition-all duration-300 md:max-w-2xl ${isOffline

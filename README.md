@@ -114,6 +114,32 @@ Optional but recommended:
 - `TWILIO_FROM_NUMBER`
 - `GEMINI_API_KEY`
 
+## Supabase Auth setup
+
+OAuth and magic-link redirects must point at a domain that actually resolves.
+If sign-in lands on `snapquote.app` with `DNS_PROBE_FINISHED_NXDOMAIN`, either
+connect DNS for that domain or replace it in Supabase with the real production
+URL.
+
+In Supabase Dashboard -> Authentication -> URL Configuration:
+
+- Set Site URL to the real production app URL.
+- Add Redirect URLs for production, local development, and Vercel previews:
+  - `https://<production-domain>/**`
+  - `http://localhost:3000/**`
+  - `https://*-<vercel-team-or-account-slug>.vercel.app/**`
+
+In Authentication -> Providers -> Google:
+
+- Enable Google.
+- Add the Google Client ID and Client Secret.
+- In Google Cloud, set the authorized redirect URI to the Supabase callback URL:
+  `https://<project-ref>.supabase.co/auth/v1/callback`.
+
+If custom Supabase email templates are enabled, make sure magic-link templates
+use `{{ .RedirectTo }}` rather than hard-coding `{{ .SiteURL }}` so the app's
+`/auth/callback` redirect is honored.
+
 ## Useful commands
 
 ```bash
