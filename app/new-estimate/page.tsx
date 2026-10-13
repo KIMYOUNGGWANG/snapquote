@@ -20,10 +20,11 @@ import NextLink from "next/link"
 import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { saveEstimate, generateEstimateNumber, getProfile, saveProfile, getEstimates, updateEstimate } from "@/lib/estimates-storage"
-import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI, getClients, type Client } from "@/lib/db"
+import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI, getClients, learnFromSentEstimate, type Client } from "@/lib/db"
 import type { BusinessInfo, EstimateItem, EstimateSection, LocalEstimate } from "@/lib/estimates-storage"
 import { normalizeCategory, normalizeEstimateItem, normalizeEstimatePayload, normalizeUnit, toSafeNumber, type EstimateDraft } from "@/lib/estimates/normalize"
 import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
+import { countEditedLines, getLearnableItems } from "@/lib/price-memory"
 import { dismissToasts, toast } from "@/components/toast"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
@@ -590,6 +591,7 @@ function NewEstimatePageContent() {
     const fileInputRef = useRef<HTMLInputElement>(null)
     const notesTextareaRef = useRef<HTMLTextAreaElement>(null)
     const draftMetaRef = useRef<{ id: string; estimateNumber: string; createdAt?: string } | null>(null)
+    const aiOriginalItemsRef = useRef<EstimateItem[] | null>(null)
     const handledPaymentIntentRef = useRef(false)
     const handledReferralIntentRef = useRef(false)
     const handledApprovalLinkIntentRef = useRef(false)
@@ -1099,6 +1101,7 @@ function NewEstimatePageContent() {
             const resumedPreviewUrls = photoEntries.map((entry) => entry.url)
             const resumedTranscript = getCaptureResumeText(draft)
 
+            aiOriginalItemsRef.current = null
             setEstimate(null)
             setClientName(draftClientName)
             setClientAddress(draftClientAddress)
@@ -1130,6 +1133,7 @@ function NewEstimatePageContent() {
 
         const draftOriginalTranscript = getDraftOriginalTranscript(draft)
 
+        aiOriginalItemsRef.current = null
         setEstimate(normalizeEstimatePayload(draft))
         setClientName(draftClientName)
         setClientAddress(draftClientAddress)
@@ -1176,6 +1180,7 @@ function NewEstimatePageContent() {
         resetPaymentLinkState()
         setTeamEstimateContext(detail)
         setRevisionContext(null)
+        aiOriginalItemsRef.current = null
         setEstimate({
             items: detail.items as EstimateItem[],
             ...(detail.sections && detail.sections.length > 0 ? { sections: detail.sections as EstimateSection[] } : {}),
@@ -1255,6 +1260,7 @@ function NewEstimatePageContent() {
         resetDraftMeta()
         clearUnsentCaptureDraft()
         resetPaymentLinkState()
+        aiOriginalItemsRef.current = null
         setEstimate(null)
         setClientName("")
         setClientAddress("")
@@ -1975,7 +1981,9 @@ function NewEstimatePageContent() {
             setQuotaIssue(null)
             setGenerationIssue(null)
             setPdfDeliveryIssue(null)
-            setEstimate(normalizeEstimatePayload(data))
+            const generatedEstimate = normalizeEstimatePayload(data)
+            aiOriginalItemsRef.current = getAllItemsFromEstimate(generatedEstimate)
+            setEstimate(generatedEstimate)
             setStep("result")
         } catch (error: unknown) {
             console.error("Generate error:", error)
@@ -2845,6 +2853,18 @@ function NewEstimatePageContent() {
         }
     }, [teamEstimateContext])
 
+    const getPriceMemoryMetadata = useCallback((): Record<string, number> => {
+        if (!estimate) return {}
+        const sentItems = getAllItemsFromEstimate(estimate)
+        const metadata: Record<string, number> = {
+            priceMemoryEligibleLines: getLearnableItems(sentItems).length,
+        }
+        if (aiOriginalItemsRef.current) {
+            metadata.editedLineCount = countEditedLines(aiOriginalItemsRef.current, sentItems)
+        }
+        return metadata
+    }, [estimate])
+
     const persistCurrentEstimateAsSent = useCallback(async (
         overrides: Parameters<typeof buildLocalEstimatePayload>[1] = {}
     ) => {
@@ -2855,6 +2875,11 @@ function NewEstimatePageContent() {
         const nextEstimate = await buildLocalEstimatePayload("sent", overrides)
         const persistedEstimate = await persistTeamEstimateToCloud(nextEstimate)
         const existing = (await getEstimates()).find((entry) => entry.id === nextEstimate.id)
+        const learnPriceMemory = (sentItems: readonly EstimateItem[]) => {
+            void learnFromSentEstimate(sentItems).catch((error: unknown) => {
+                console.error("Price memory learning failed:", error)
+            })
+        }
 
         if (!existing) {
             await saveEstimate(persistedEstimate)
@@ -2865,9 +2890,11 @@ function NewEstimatePageContent() {
                     synced: false,
                 })
             }
+            learnPriceMemory(nextEstimate.items)
             return persistedEstimate
         }
 
+        const wasAlreadySent = Boolean(existing.sentAt) || existing.status === "sent"
         const sentAt = existing.sentAt || persistedEstimate.sentAt || new Date().toISOString()
         const nextPersistedEstimate = {
             ...persistedEstimate,
@@ -2877,6 +2904,9 @@ function NewEstimatePageContent() {
             synced: isTeamEstimateMode ? true : false,
         } as const
         await updateEstimate(existing.id, nextPersistedEstimate)
+        if (!wasAlreadySent) {
+            learnPriceMemory(nextEstimate.items)
+        }
 
         if (revisionContext?.originalEstimateId && revisionContext.originalEstimateId !== existing.id) {
             await updateEstimate(revisionContext.originalEstimateId, {
@@ -2972,6 +3002,7 @@ function NewEstimatePageContent() {
                     estimateNumber: draftMeta.estimateNumber,
                     channel: "share_pdf",
                     metadata: {
+                        ...getPriceMemoryMetadata(),
                         fileName,
                         nativeShare: true,
                         hasPaymentLink: Boolean(effectiveCustomerPaymentLink),
@@ -3009,6 +3040,7 @@ function NewEstimatePageContent() {
                     estimateNumber: draftMeta.estimateNumber,
                     channel: "share_pdf_download",
                     metadata: {
+                        ...getPriceMemoryMetadata(),
                         fileName,
                         nativeShare: false,
                         hasPaymentLink: Boolean(effectiveCustomerPaymentLink),
@@ -3169,6 +3201,7 @@ function NewEstimatePageContent() {
                     estimateNumber: draftMeta.estimateNumber,
                     channel: "email",
                     metadata: {
+                        ...getPriceMemoryMetadata(),
                         recipient: email,
                         hasPaymentLink: Boolean(effectiveCustomerPaymentLink),
                         hasCustomerPortalLink: Boolean(portalResult?.shareUrl),
@@ -3197,6 +3230,7 @@ function NewEstimatePageContent() {
         businessProfile,
         buildLocalEstimatePayload,
         createEstimatePdfDocument,
+        getPriceMemoryMetadata,
         effectiveCustomerPaymentLink,
         getOrCreateDraftMeta,
         persistCurrentEstimateAsSent,
@@ -3208,6 +3242,7 @@ function NewEstimatePageContent() {
 
         if (!estimate) {
             // Create new estimate with imported items
+            aiOriginalItemsRef.current = null
             setEstimate({
                 items: normalizedImportedItems,
                 summary_note: "Imported from CSV",
@@ -5144,6 +5179,7 @@ function NewEstimatePageContent() {
                                 estimateNumber: draftMeta.estimateNumber,
                                 channel: "sms",
                                 metadata: {
+                                    ...getPriceMemoryMetadata(),
                                     creditsRemaining: data.creditsRemaining,
                                     hasPaymentLink: Boolean(effectiveCustomerPaymentLink),
                                     hasCustomerPortalLink: Boolean(portalResult?.shareUrl),
