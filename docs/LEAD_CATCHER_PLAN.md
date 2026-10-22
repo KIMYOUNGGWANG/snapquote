@@ -113,13 +113,16 @@ sequenceDiagram
 
 ## 수익화 모델
 
+> 기준: 현재 코드 티어(`lib/marketing-plans.ts`, Starter / Pro / Team). Lead Catcher는 별도 티어를 만들지 않고 기존 티어에 얹는다.
+
 | Tier | 가격 | 포함 내용 |
 | :--- | :--- | :--- |
-| **Free (SnapQuote Basic)** | $0 | 견적 생성만 가능 |
-| **Pro** | $29/mo | Lead Catcher (월 100 리드) + Quick Quote |
-| **Business** | $79/mo | 무제한 리드 + Calendar Sync + Analytics |
+| **Free** | $0 | 견적 생성 월 3건, Lead Catcher 없음 |
+| **Starter** | $34/mo | 견적 월 80건, Lead Catcher 없음 |
+| **Pro** | $59/mo | 견적 월 250건 + Lead Catcher (월 100 리드) + Quick Quote |
+| **Team** | $129/mo | 견적 월 800건 + 무제한 리드 + Calendar Sync + Analytics |
 
-> **목표 MRR $3,000:** Pro 티어 103명 or Business 38명
+> **목표 MRR $3,000:** Pro 티어 51명 or Team 24명
 
 ---
 
@@ -151,5 +154,5 @@ sequenceDiagram
 3. SnapQuote API로 Draft Estimate 생성 테스트
 
 ### 시장 검증
-1. Reddit r/Plumbing, r/Electricians에 "Would you pay $29/mo for this?" 설문
+1. Reddit r/Plumbing, r/Electricians에 "Would you pay $59/mo for this?" 설문
 2. 기존 SnapQuote 유저 5명에게 Feature Interview
