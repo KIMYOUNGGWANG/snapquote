@@ -587,6 +587,152 @@ describe("customer quote portal routes", () => {
     assert.equal(data.error.message, "Paid quotes cannot be reset for customer review.")
   })
 
+  const TINY_PHOTO = "data:image/jpeg;base64,/9j/4AAQSkZJRg=="
+
+  function buildCompletion(overrides = {}) {
+    return {
+      completedAt: "2026-10-25T10:00:00.000Z",
+      summary: "All work finished.",
+      photos: [TINY_PHOTO],
+      items: [{ itemId: "item-1", done: true, photoIndexes: [0] }],
+      amountPaid: 500,
+      balanceDue: 1075,
+      ...overrides,
+    }
+  }
+
+  async function postShareLink(body) {
+    const req = jsonRequest("http://localhost/api/estimates/estimate_1/share-link", body, {
+      headers: bearerHeader(),
+    })
+    return customerShareLinkPost(req, { params: Promise.resolve({ estimateId: "estimate_1" }) })
+  }
+
+  test("share link accepts snapshot with completion and addedOnSite section", async () => {
+    setCustomerPortalEnv()
+    const state = getTestState()
+    let stored
+
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === "estimate_share_links" && query.action === "select" && query.mode === "maybeSingle") {
+        return { data: null, error: null }
+      }
+      if (query.table === "estimate_share_links" && query.action === "insert" && query.mode === "single") {
+        stored = query.payload.estimate_snapshot
+        return { data: buildShareRow({ estimate_snapshot: stored }), error: null }
+      }
+      return { data: null, error: null }
+    }
+
+    const res = await postShareLink({
+      estimate: buildSnapshot({
+        completion: buildCompletion(),
+        sections: [{
+          name: "Added on site",
+          addedOnSite: true,
+          items: [{ description: "Extra drain fitting", quantity: 1, unit_price: 80, total: 80 }],
+        }],
+      }),
+    })
+
+    assert.equal(res.status, 200)
+    assert.equal(stored.completion.balanceDue, 1075)
+    assert.equal(stored.completion.photos.length, 1)
+    assert.equal(stored.sections[0].addedOnSite, true)
+  })
+
+  test("share link rejects completion with 7 photos", async () => {
+    setCustomerPortalEnv()
+    const res = await postShareLink({
+      estimate: buildSnapshot({
+        completion: buildCompletion({ photos: Array.from({ length: 7 }, () => TINY_PHOTO) }),
+      }),
+    })
+    assert.equal(res.status, 400)
+  })
+
+  test("share link rejects completion with non-image photo, bad date or out-of-range photo index", async () => {
+    setCustomerPortalEnv()
+    for (const completion of [
+      buildCompletion({ photos: ["https://evil.test/x.jpg"] }),
+      buildCompletion({ completedAt: "yesterday" }),
+      buildCompletion({ items: [{ itemId: "item-1", done: true, photoIndexes: [1] }] }),
+      buildCompletion({ balanceDue: -1 }),
+    ]) {
+      const res = await postShareLink({ estimate: buildSnapshot({ completion }) })
+      assert.equal(res.status, 400)
+    }
+  })
+
+  test("re-posting snapshot without resetCustomerDecision keeps approved status", async () => {
+    setCustomerPortalEnv()
+    const state = getTestState()
+
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === "estimate_share_links" && query.action === "select" && query.mode === "maybeSingle") {
+        return {
+          data: buildShareRow({ status: "approved", approved_at: "2026-10-24T09:00:00.000Z" }),
+          error: null,
+        }
+      }
+      if (query.table === "estimate_share_links" && query.action === "update" && query.mode === "single") {
+        assert.equal(query.payload.status, undefined)
+        assert.equal(query.payload.approved_at, undefined)
+        assert.equal(query.payload.estimate_snapshot.completion.balanceDue, 1075)
+        return {
+          data: buildShareRow({
+            status: "approved",
+            approved_at: "2026-10-24T09:00:00.000Z",
+            estimate_snapshot: query.payload.estimate_snapshot,
+          }),
+          error: null,
+        }
+      }
+      return { data: null, error: null }
+    }
+
+    const res = await postShareLink({ estimate: buildSnapshot({ completion: buildCompletion() }) })
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.portal.status, "approved")
+  })
+
+  test("payment action shows Pay balance when completion balance exists", () => {
+    for (const status of ["shared", "viewed", "approved", "change_requested"]) {
+      const state = getCustomerPortalPaymentActionState(status, true, "deposit", false, true)
+      assert.equal(state.showPayLink, true)
+      assert.equal(state.buttonLabel, "Pay balance")
+    }
+    assert.equal(getCustomerPortalPaymentActionState("approved", false, "deposit", false, true).showPayLink, false)
+    assert.equal(getCustomerPortalPaymentActionState("approved", true, "deposit", true, true).showPayLink, false)
+  })
+
+  test("customer quote snapshots carry the completion report only when provided", () => {
+    const estimate = {
+      id: "est-1",
+      estimateNumber: "EST-1",
+      completion: {
+        completedAt: "2026-10-25T10:00:00.000Z",
+        summary: "Done",
+        photos: [TINY_PHOTO],
+        items: [{ itemId: "item-1", done: true, photoIndexes: [0] }],
+      },
+      sections: [{ id: "s1", name: "Added on site", addedOnSite: true, items: [] }],
+      items: [],
+      taxRate: 0,
+      taxAmount: 0,
+      totalAmount: 0,
+      createdAt: "2026-10-01T00:00:00.000Z",
+    }
+    const withOptions = buildCustomerQuoteSnapshot(estimate, { completion: { amountPaid: 100, balanceDue: 50 } })
+    assert.equal(withOptions.completion.balanceDue, 50)
+    assert.equal(withOptions.completion.amountPaid, 100)
+    assert.equal(withOptions.completion.summary, "Done")
+    assert.equal(withOptions.sections[0].addedOnSite, true)
+    assert.equal(buildCustomerQuoteSnapshot(estimate).completion, undefined)
+  })
+
   test("GET /api/estimates/:estimateId/share-link returns customer response status", async () => {
     setCustomerPortalEnv()
     const state = getTestState()

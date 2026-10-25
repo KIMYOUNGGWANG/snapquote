@@ -22,6 +22,7 @@ type CustomerQuoteActionsProps = {
     paymentLink?: string
     paymentLinkType?: CustomerPortalPaymentLinkType
     paymentComplete?: boolean
+    hasCompletionBalance?: boolean
 }
 
 function getErrorMessage(error: unknown): string {
@@ -43,6 +44,7 @@ export function CustomerQuoteActions({
     paymentLink,
     paymentLinkType,
     paymentComplete = false,
+    hasCompletionBalance = false,
 }: CustomerQuoteActionsProps) {
     const [status, setStatus] = useState<CustomerPortalStatus>(initialStatus)
     const [customerName, setCustomerName] = useState("")
@@ -102,7 +104,7 @@ export function CustomerQuoteActions({
     }
 
     const decisionIsComplete = paymentComplete || status === "approved" || status === "change_requested"
-    const paymentAction = getCustomerPortalPaymentActionState(status, Boolean(paymentLink?.trim()), paymentLinkType, paymentComplete)
+    const paymentAction = getCustomerPortalPaymentActionState(status, Boolean(paymentLink?.trim()), paymentLinkType, paymentComplete, hasCompletionBalance)
     const paymentGateClassName = paymentAction.tone === "success"
         ? "mt-3 rounded-lg border border-emerald-300/25 bg-emerald-500/10 px-3 py-2 text-sm leading-6 text-emerald-100"
         : "mt-3 rounded-lg border border-blue-300/20 bg-blue-500/10 px-3 py-2 text-sm leading-6 text-blue-100"

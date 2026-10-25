@@ -44,7 +44,9 @@ function asOptionalHttpUrl(value: string | undefined): string | undefined {
 
 export function buildCustomerQuoteSnapshot(
     estimate: LocalEstimate,
-    options: Pick<CustomerPortalLinkOptions, "paymentLinkOverride" | "paymentLinkTypeOverride"> = {}
+    options: Pick<CustomerPortalLinkOptions, "paymentLinkOverride" | "paymentLinkTypeOverride"> & {
+        completion?: { amountPaid: number; balanceDue: number }
+    } = {}
 ): CustomerQuoteSnapshotInput {
     const items = getAllItemsFromEstimate(estimate).map((item, index) => ({
         id: item.id,
@@ -85,6 +87,7 @@ export function buildCustomerQuoteSnapshot(
             id: section.id,
             name: section.name,
             divisionCode: section.divisionCode,
+            addedOnSite: section.addedOnSite || undefined,
             items: section.items.map((item, index) => ({
                 id: item.id,
                 itemNumber: item.itemNumber || index + 1,
@@ -96,6 +99,9 @@ export function buildCustomerQuoteSnapshot(
                 total: lineTotal(item),
             })),
         })),
+        completion: estimate.completion && options.completion
+            ? { ...estimate.completion, ...options.completion }
+            : undefined,
         createdAt: estimate.createdAt,
         sentAt: estimate.sentAt,
     }

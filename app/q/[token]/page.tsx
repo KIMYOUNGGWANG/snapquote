@@ -233,6 +233,7 @@ export default async function CustomerQuotePage({ params }: CustomerQuotePagePro
                         paymentLink={estimate.paymentLink}
                         paymentLinkType={estimate.paymentLinkType}
                         paymentComplete={paymentComplete}
+                        hasCompletionBalance={Boolean(estimate.completion && estimate.completion.balanceDue > 0)}
                     />
 
                     <CustomerQuoteNextStep

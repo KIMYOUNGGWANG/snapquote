@@ -40,14 +40,14 @@ const completionReportItemSchema = z.object({
     description: z.string({ error: "Invalid completion item" }).max(1_000, "Invalid completion item"),
 }).strict()
 
-const completionReportPhotoSchema = z
+export const completionPhotoSchema = z
     .string({ error: "Invalid photo payload" })
     .max(400_000, "Invalid photo payload")
     .regex(/^data:image\/(jpeg|png|webp|heic|heif|gif);base64,[A-Za-z0-9+/=]+$/, "Invalid photo payload")
 
 export const completionReportRequestSchema = z.object({
     items: z.array(completionReportItemSchema, { error: "Invalid completion items" }).min(1, "Invalid completion items").max(300, "Invalid completion items"),
-    photos: z.array(completionReportPhotoSchema, { error: "Invalid photos input" }).min(1, "Invalid photos input").max(6, "Invalid photos input"),
+    photos: z.array(completionPhotoSchema, { error: "Invalid photos input" }).min(1, "Invalid photos input").max(6, "Invalid photos input"),
     note: z.string({ error: "Invalid note input" }).max(2_000, "Invalid note input").optional(),
 }).strict()
 
@@ -180,8 +180,32 @@ const customerQuoteSectionSchema = z.object({
     id: z.string({ error: "Invalid customer quote payload" }).trim().max(120, "Invalid customer quote payload").optional(),
     name: z.string({ error: "Invalid customer quote payload" }).trim().min(1, "Invalid customer quote payload").max(160, "Invalid customer quote payload"),
     divisionCode: z.string({ error: "Invalid customer quote payload" }).trim().max(20, "Invalid customer quote payload").optional(),
+    addedOnSite: z.boolean({ error: "Invalid customer quote payload" }).optional(),
     items: z.array(customerQuoteItemSchema, { error: "Invalid customer quote payload" }).max(200, "Invalid customer quote payload"),
 }).strict()
+
+const customerQuoteCompletionSchema = z.object({
+    completedAt: z.string({ error: "Invalid customer quote payload" }).datetime("Invalid customer quote payload"),
+    summary: z.string({ error: "Invalid customer quote payload" }).trim().max(2000, "Invalid customer quote payload"),
+    photos: z.array(completionPhotoSchema, { error: "Invalid customer quote payload" }).max(6, "Invalid customer quote payload"),
+    items: z.array(z.object({
+        itemId: z.string({ error: "Invalid customer quote payload" }).min(1, "Invalid customer quote payload").max(120, "Invalid customer quote payload"),
+        done: z.boolean({ error: "Invalid customer quote payload" }),
+        photoIndexes: z.array(z.number({ error: "Invalid customer quote payload" }).int("Invalid customer quote payload").min(0, "Invalid customer quote payload"), { error: "Invalid customer quote payload" }).max(6, "Invalid customer quote payload"),
+    }).strict(), { error: "Invalid customer quote payload" }).max(300, "Invalid customer quote payload"),
+    amountPaid: z.number({ error: "Invalid customer quote payload" }).finite("Invalid customer quote payload").min(0, "Invalid customer quote payload").max(1_000_000, "Invalid customer quote payload"),
+    balanceDue: z.number({ error: "Invalid customer quote payload" }).finite("Invalid customer quote payload").min(0, "Invalid customer quote payload").max(1_000_000, "Invalid customer quote payload"),
+}).strict().superRefine((value, context) => {
+    value.items.forEach((item, itemIndex) => {
+        if (item.photoIndexes.some((photoIndex) => photoIndex >= value.photos.length)) {
+            context.addIssue({
+                code: "custom",
+                path: ["items", itemIndex, "photoIndexes"],
+                message: "Invalid customer quote payload",
+            })
+        }
+    })
+})
 
 export const customerQuoteSnapshotSchema = z.object({
     estimateNumber: z.string({ error: "Invalid customer quote payload" }).trim().min(1, "Invalid customer quote payload").max(120, "Invalid customer quote payload"),
@@ -202,6 +226,7 @@ export const customerQuoteSnapshotSchema = z.object({
     paymentCompletedAt: z.string({ error: "Invalid customer quote payload" }).trim().max(80, "Invalid customer quote payload").optional(),
     items: z.array(customerQuoteItemSchema, { error: "Invalid customer quote payload" }).max(300, "Invalid customer quote payload"),
     sections: z.array(customerQuoteSectionSchema, { error: "Invalid customer quote payload" }).max(50, "Invalid customer quote payload").optional(),
+    completion: customerQuoteCompletionSchema.optional(),
     createdAt: z.string({ error: "Invalid customer quote payload" }).trim().max(80, "Invalid customer quote payload").optional(),
     sentAt: z.string({ error: "Invalid customer quote payload" }).trim().max(80, "Invalid customer quote payload").optional(),
 }).strict()
