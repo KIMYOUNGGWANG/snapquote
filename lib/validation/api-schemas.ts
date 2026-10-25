@@ -42,8 +42,8 @@ const completionReportItemSchema = z.object({
 
 const completionReportPhotoSchema = z
     .string({ error: "Invalid photo payload" })
-    .startsWith("data:image/", "Invalid photo payload")
     .max(400_000, "Invalid photo payload")
+    .regex(/^data:image\/(jpeg|png|webp|heic|heif|gif);base64,[A-Za-z0-9+/=]+$/, "Invalid photo payload")
 
 export const completionReportRequestSchema = z.object({
     items: z.array(completionReportItemSchema, { error: "Invalid completion items" }).min(1, "Invalid completion items").max(300, "Invalid completion items"),

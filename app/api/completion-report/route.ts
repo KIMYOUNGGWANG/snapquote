@@ -1,14 +1,11 @@
 import { OpenAI } from "openai"
 import { NextResponse } from "next/server"
-import { buildCompletionSystemPrompt, buildCompletionUserNotes } from "@/lib/ai/completion-prompt"
+import { buildCompletionSystemPrompt, buildCompletionUserText } from "@/lib/ai/completion-prompt"
 import { requireGeminiText } from "@/lib/ai/gemini"
 import { resolveGenerateProvider } from "@/lib/ai/generate-provider"
-import {
-    buildGeminiGenerateUserParts,
-    buildOpenAiGenerateUserContent,
-} from "@/lib/ai/generate-provider-parts"
 import { parsePotentialJsonContent } from "@/lib/ai/json"
 import { sanitizeCompletionMatches } from "@/lib/job-completion"
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { resolveGeneratePlanTier } from "@/lib/server/generate-plan-tier"
 import { parseJsonRequest } from "@/lib/server/request-validation"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
@@ -24,7 +21,7 @@ type ModelResult = {
 
 type ModelInput = {
     systemPrompt: string
-    notes: string
+    userText: string
     images: string[]
 }
 
@@ -36,6 +33,8 @@ const OPENAI_MODEL = process.env.OPENAI_GENERATE_MODEL?.trim() || "gpt-4o"
 const GEMINI_MODEL = process.env.GEMINI_GENERATE_MODEL?.trim() || "gemini-2.5-flash"
 const MAX_OUTPUT_TOKENS = 8000
 const FREE_COMPLETIONS_PER_MONTH = 2
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000
+const RATE_LIMIT_MAX = 20
 const PAID_TIERS = new Set(["starter", "pro", "team"])
 
 async function matchWithGemini(input: ModelInput): Promise<ModelResult> {
@@ -53,7 +52,14 @@ async function matchWithGemini(input: ModelInput): Promise<ModelResult> {
             contents: [
                 {
                     role: "user",
-                    parts: buildGeminiGenerateUserParts({ notes: input.notes, images: input.images }),
+                    parts: [
+                        { text: input.userText },
+                        // Schema guarantees `data:image/<type>;base64,<data>`.
+                        ...input.images.map((image) => {
+                            const [header, data] = image.split(";base64,")
+                            return { inlineData: { mimeType: header.slice("data:".length), data } }
+                        }),
+                    ],
                 },
             ],
             generationConfig: {
@@ -82,7 +88,13 @@ async function matchWithOpenAI(input: ModelInput): Promise<ModelResult> {
         model: OPENAI_MODEL,
         messages: [
             { role: "system", content: input.systemPrompt },
-            { role: "user", content: buildOpenAiGenerateUserContent({ notes: input.notes, images: input.images }) },
+            {
+                role: "user",
+                content: [
+                    { type: "text", text: input.userText },
+                    ...input.images.map((url) => ({ type: "image_url" as const, image_url: { url } })),
+                ],
+            },
         ],
         response_format: { type: "json_object" },
         temperature: 0.2,
@@ -168,12 +180,24 @@ export async function POST(req: Request) {
             )
         }
 
+        const rateLimit = await checkRateLimit({
+            key: `completion-report:${getClientIp(req)}`,
+            limit: RATE_LIMIT_MAX,
+            windowMs: RATE_LIMIT_WINDOW_MS,
+        })
+        if (!rateLimit.allowed) {
+            return NextResponse.json(
+                { error: "Too many requests. Please wait and try again." },
+                { status: 429 }
+            )
+        }
+
         let modelResult: ModelResult
         let rawMatches: unknown
         try {
             const input: ModelInput = {
                 systemPrompt: buildCompletionSystemPrompt(photos.length),
-                notes: buildCompletionUserNotes(items, note),
+                userText: buildCompletionUserText(items, note),
                 images: photos,
             }
             modelResult =
