@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
+import { resolveLwwSyncAction } from '../../lib/sync-resolution.ts'
 import {
+  applyCloudAmountPaidToLocalEstimate,
   applyCloudCustomerPortalLinkToLocalEstimate,
   applyCloudQuickBooksLinkToLocalEstimate,
   assertSupabaseMutation,
@@ -499,5 +501,31 @@ describe('sync estimate cloud mapping', () => {
     const local = mapCloudEstimateToLocal({ id: 'e1', estimate_attachments: [{ photos: ['data:image/png;base64,a'] }] })
     assert.equal(local.completion, undefined)
     assert.equal(local.attachments.photos.length, 1)
+  })
+
+  test('push branch (local newer) still takes server amount_paid and never pushes it back', () => {
+    const local = {
+      id: 'e1', estimateNumber: 'EST-1', items: [], summary_note: '', clientName: 'A', clientAddress: '',
+      taxRate: 5, taxAmount: 0, totalAmount: 1000, createdAt: '2026-05-24T08:00:00.000Z',
+      updatedAt: '2026-05-25T08:00:00.000Z', status: 'sent', amountPaid: 100, synced: false,
+    }
+    const cloud = { id: 'e1', created_at: local.createdAt, updated_at: '2026-05-24T09:00:00.000Z', amount_paid: '500.00' }
+
+    assert.equal(resolveLwwSyncAction({
+      localUpdatedAt: local.updatedAt, localCreatedAt: local.createdAt,
+      cloudUpdatedAt: cloud.updated_at, cloudCreatedAt: cloud.created_at,
+    }), 'push')
+
+    const patched = applyCloudAmountPaidToLocalEstimate(local, cloud)
+    assert.equal(patched.amountPaid, 500)
+    assert.equal(patched.updatedAt, local.updatedAt)
+    assert.equal('amount_paid' in mapLocalEstimateToCloudRow('user-1', null, patched), false)
+  })
+
+  test('applyCloudAmountPaidToLocalEstimate is a no-op when equal or cloud has no value', () => {
+    const local = { id: 'e1', amountPaid: 500 }
+    assert.equal(applyCloudAmountPaidToLocalEstimate(local, { amount_paid: 500 }), local)
+    assert.equal(applyCloudAmountPaidToLocalEstimate(local, { amount_paid: null }), local)
+    assert.equal(applyCloudAmountPaidToLocalEstimate(local, undefined), local)
   })
 })

@@ -2,6 +2,7 @@ import { supabase } from './supabase'
 import { getEstimates, saveEstimate, LocalEstimate } from './estimates-storage' // Correct imports
 import { resolveLwwSyncAction } from './sync-resolution'
 import {
+    applyCloudAmountPaidToLocalEstimate,
     applyCloudCustomerPortalLinkToLocalEstimate,
     applyCloudQuickBooksLinkToLocalEstimate,
     assertSupabaseMutation,
@@ -334,12 +335,14 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
                 await pushEstimateToCloud(user.id, local)
                 const quickBooksPatch = mapCloudQuickBooksLinkToLocalPatch(quickBooksLinkMap.get(local.id))
                 const customerPortalPatch = mapCloudCustomerPortalLinkToLocalPatch(customerPortalLinkMap.get(local.id))
+                const withAmountPaid = applyCloudAmountPaidToLocalEstimate(local, cloud)
                 if (
                     hasQuickBooksEstimatePatchChanged(local, quickBooksPatch) ||
-                    hasCustomerPortalEstimatePatchChanged(local, customerPortalPatch)
+                    hasCustomerPortalEstimatePatchChanged(local, customerPortalPatch) ||
+                    withAmountPaid !== local
                 ) {
                     await saveEstimate({
-                        ...local,
+                        ...withAmountPaid,
                         ...(quickBooksPatch || {}),
                         ...(customerPortalPatch || {}),
                         synced: true,
@@ -353,12 +356,14 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
                 // Same? Just ensure local synced flag is true if it was false
                 const quickBooksPatch = mapCloudQuickBooksLinkToLocalPatch(quickBooksLinkMap.get(local.id))
                 const customerPortalPatch = mapCloudCustomerPortalLinkToLocalPatch(customerPortalLinkMap.get(local.id))
+                const withAmountPaid = applyCloudAmountPaidToLocalEstimate(local, cloud)
                 if (
                     hasQuickBooksEstimatePatchChanged(local, quickBooksPatch) ||
-                    hasCustomerPortalEstimatePatchChanged(local, customerPortalPatch)
+                    hasCustomerPortalEstimatePatchChanged(local, customerPortalPatch) ||
+                    withAmountPaid !== local
                 ) {
                     await saveEstimate({
-                        ...local,
+                        ...withAmountPaid,
                         ...(quickBooksPatch || {}),
                         ...(customerPortalPatch || {}),
                         synced: true,

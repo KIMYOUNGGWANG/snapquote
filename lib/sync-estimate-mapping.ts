@@ -659,6 +659,17 @@ export function applyCloudCustomerPortalLinkToLocalEstimate(
     }
 }
 
+// amount_paid is server-owned (Stripe webhook): local only ever receives it, on every sync branch.
+export function applyCloudAmountPaidToLocalEstimate(
+    estimate: LocalEstimate,
+    cloudEstimate: Pick<CloudEstimateRow, "amount_paid"> | undefined
+): LocalEstimate {
+    if (cloudEstimate?.amount_paid == null) return estimate
+
+    const amountPaid = toSafeNumber(cloudEstimate.amount_paid)
+    return estimate.amountPaid === amountPaid ? estimate : { ...estimate, amountPaid }
+}
+
 export function assertSupabaseMutation(
     result: SupabaseMutationResult,
     fallbackMessage: string,
