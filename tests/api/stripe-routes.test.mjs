@@ -800,6 +800,35 @@ describe('GET /api/payments/stripe/status', () => {
       assert.equal('amountPaid' in data, false)
     })
 
+    test('status route skips the lookup when the session estimateId is missing or not a UUID', async () => {
+      for (const estimateId of [undefined, 'not-a-uuid']) {
+        const state = arrangePaidSession(async () => ({ data: { status: 'paid', amount_paid: 1 }, error: null }))
+        state.stripe.sessionsListPages[0].data[0].metadata.estimateId = estimateId
+
+        const res = await stripePaymentStatusGet(new Request('http://localhost/api/payments/stripe/status?paymentLinkId=plink_abc&estimateNumber=EST-PAID-1'))
+        const data = await res.json()
+
+        assert.equal(res.status, 200)
+        assert.equal(data.paid, true)
+        assert.equal('estimateStatus' in data, false)
+        assert.equal('amountPaid' in data, false)
+        assert.equal(state.supabase.queryCalls.some((q) => q.table === 'estimates'), false)
+      }
+    })
+
+    test('status route omits verdict keys when service Supabase config is missing', async () => {
+      const state = arrangePaidSession(async () => ({ data: { status: 'paid', amount_paid: 1 }, error: null }))
+      delete process.env.SUPABASE_SERVICE_ROLE_KEY
+
+      const res = await stripePaymentStatusGet(new Request(statusUrl))
+      const data = await res.json()
+
+      assert.equal(res.status, 200)
+      assert.equal(data.paid, true)
+      assert.equal('estimateStatus' in data, false)
+      assert.equal(state.supabase.queryCalls.some((q) => q.table === 'estimates'), false)
+    })
+
     test('status route stays 200 and omits verdict keys on a DB error', async () => {
       arrangePaidSession(async () => ({ data: null, error: { message: 'db down' } }))
       const originalError = console.error

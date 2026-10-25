@@ -35,6 +35,8 @@ async function resolveSessionMetadata(stripe: Stripe, session: Stripe.Checkout.S
     return { estimateId, estimateNumber, userId }
 }
 
+const ESTIMATE_STATUSES = ["draft", "sent", "paid"] as const
+
 // The server (webhook) owns the "paid" verdict; clients must follow this, not the session alone.
 async function readEstimateVerdict(estimateId: string, userId: string) {
     if (!UUID_PATTERN.test(estimateId)) return {}
@@ -56,12 +58,10 @@ async function readEstimateVerdict(estimateId: string, userId: string) {
         }
         if (!data) return {}
 
-        const status = data.status
+        const estimateStatus = ESTIMATE_STATUSES.find((status) => status === data.status)
         const amountPaid = Number(data.amount_paid)
         return {
-            ...(status === "draft" || status === "sent" || status === "paid"
-                ? { estimateStatus: status as "draft" | "sent" | "paid" }
-                : {}),
+            ...(estimateStatus ? { estimateStatus } : {}),
             ...(data.amount_paid != null && Number.isFinite(amountPaid) ? { amountPaid } : {}),
         }
     } catch (error) {

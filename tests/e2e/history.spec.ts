@@ -412,6 +412,9 @@ async function readEstimatePaymentFields(page: Page, estimateId: string) {
             paymentLinkId?: string
             paymentLinkType?: string
             paymentCompletedAt?: string
+            amountPaid?: number
+            lastPaymentSessionId?: string
+            updatedAt?: string
             customerPortalStatus?: string
             customerPortalUrl?: string
             synced?: boolean
@@ -429,6 +432,9 @@ async function readEstimatePaymentFields(page: Page, estimateId: string) {
             paymentLinkId: estimate?.paymentLinkId,
             paymentLinkType: estimate?.paymentLinkType,
             paymentCompletedAt: estimate?.paymentCompletedAt,
+            amountPaid: estimate?.amountPaid,
+            lastPaymentSessionId: estimate?.lastPaymentSessionId,
+            updatedAt: estimate?.updatedAt,
             customerPortalStatus: estimate?.customerPortalStatus,
             customerPortalUrl: estimate?.customerPortalUrl,
             synced: estimate?.synced,
@@ -647,6 +653,85 @@ test("history treats sent estimates with completed payment evidence as paid", as
     const secondaryActions = page.getByTestId("history-estimate-secondary-actions")
     await expect(page.getByTestId("history-customer-portal-link-action")).toHaveCount(0)
     await expect(secondaryActions.getByRole("button", { name: "SMS" })).toHaveCount(0)
+})
+
+test("history poll records a partial payment once and keeps the estimate sent", async ({ page, context }) => {
+    await seedAuthenticatedSupabaseSession(context)
+    await routeAuthenticatedHistoryShell(page)
+
+    let stripeStatusRequests = 0
+    await page.route("**/api/payments/stripe/status?**", async (route) => {
+        stripeStatusRequests += 1
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                ok: true,
+                paid: true,
+                checkoutSessionId: "cs_partial_deposit",
+                paidAt: "2026-05-30T12:00:00.000Z",
+                estimateStatus: "sent",
+                amountPaid: 500,
+            }),
+        })
+    })
+    let paymentCompletedEvents = 0
+    await page.route("**/api/analytics/events", async (route) => {
+        if (JSON.stringify(route.request().postDataJSON()).includes("payment_completed")) paymentCompletedEvents += 1
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) })
+    })
+
+    await openSeededDB(page, seedEstimates)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/history")
+
+    await expect.poll(async () => (await readEstimatePaymentFields(page, "estimate-sent-1")).amountPaid).toBe(500)
+    const first = await readEstimatePaymentFields(page, "estimate-sent-1")
+    expect(first.status).toBe("sent")
+    expect(first.paymentCompletedAt).toBeUndefined()
+    expect(first.lastPaymentSessionId).toBe("cs_partial_deposit")
+    await expect.poll(() => paymentCompletedEvents).toBe(1)
+
+    // Second poll with identical data must not write, count or emit again.
+    const requestsBefore = stripeStatusRequests
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")))
+    await expect.poll(() => stripeStatusRequests).toBeGreaterThan(requestsBefore)
+    await page.waitForTimeout(500)
+
+    const second = await readEstimatePaymentFields(page, "estimate-sent-1")
+    expect(second.updatedAt).toBe(first.updatedAt)
+    expect(second.status).toBe("sent")
+    expect(paymentCompletedEvents).toBe(1)
+})
+
+test("history poll marks the estimate paid only when the server says paid", async ({ page, context }) => {
+    await seedAuthenticatedSupabaseSession(context)
+    await routeAuthenticatedHistoryShell(page)
+
+    await page.route("**/api/payments/stripe/status?**", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                ok: true,
+                paid: true,
+                checkoutSessionId: "cs_full_payment",
+                paidAt: "2026-05-30T12:00:00.000Z",
+                estimateStatus: "paid",
+                amountPaid: 1280,
+            }),
+        })
+    })
+
+    await openSeededDB(page, seedEstimates)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto("/history")
+
+    await expect.poll(async () => (await readEstimatePaymentFields(page, "estimate-sent-1")).status).toBe("paid")
+    const fields = await readEstimatePaymentFields(page, "estimate-sent-1")
+    expect(fields.amountPaid).toBe(1280)
+    expect(fields.paymentCompletedAt).toBe("2026-05-30T12:00:00.000Z")
+    expect(fields.lastPaymentSessionId).toBe("cs_full_payment")
 })
 
 test("history mobile command center and search keep the pipeline actionable", async ({ page }) => {

@@ -402,11 +402,19 @@ function HistoryPageContent() {
 
                 // Only the server decides "paid"; a partial payment just records amountPaid.
                 const isServerPaid = result.estimateStatus === "paid"
+                const nextAmountPaid = typeof result.amountPaid === "number" ? result.amountPaid : estimate.amountPaid
+                // A partially paid estimate stays "sent" and is polled again: skip the write, toast and event when nothing changed.
+                if (
+                    !isServerPaid &&
+                    nextAmountPaid === estimate.amountPaid &&
+                    result.checkoutSessionId === estimate.lastPaymentSessionId
+                ) continue
+
                 await updateEstimate(estimate.id, {
                     ...(isServerPaid
                         ? { status: "paid" as const, paymentCompletedAt: result.paidAt || new Date().toISOString() }
                         : {}),
-                    ...(typeof result.amountPaid === "number" ? { amountPaid: result.amountPaid } : {}),
+                    ...(typeof nextAmountPaid === "number" ? { amountPaid: nextAmountPaid } : {}),
                     lastPaymentSessionId: result.checkoutSessionId,
                     synced: false,
                 })
