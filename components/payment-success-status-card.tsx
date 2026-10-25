@@ -24,6 +24,8 @@ type StripePaymentStatusResponse = {
     paid?: boolean
     checkoutSessionId?: string
     paidAt?: string
+    estimateStatus?: "draft" | "sent" | "paid"
+    amountPaid?: number
     error?: string | { message?: string }
 }
 
@@ -40,7 +42,10 @@ function formatAmount(amount: number): string {
 async function verifyStripePaymentForEstimate(
     estimate: LocalEstimate,
     sessionId: string
-): Promise<{ ok: true; checkoutSessionId?: string; paidAt?: string } | { ok: false; message: string }> {
+): Promise<
+    | { ok: true; checkoutSessionId?: string; paidAt?: string; estimateStatus?: "draft" | "sent" | "paid"; amountPaid?: number }
+    | { ok: false; message: string }
+> {
     const paymentLinkId = estimate.paymentLinkId?.trim()
     if (!paymentLinkId) {
         return {
@@ -104,6 +109,8 @@ async function verifyStripePaymentForEstimate(
         ok: true,
         checkoutSessionId: result.checkoutSessionId,
         paidAt: result.paidAt,
+        estimateStatus: result.estimateStatus,
+        amountPaid: result.amountPaid,
     }
 }
 
@@ -162,9 +169,13 @@ export function PaymentSuccessStatusCard({
                     return
                 }
 
+                // Only the server decides "paid"; a partial payment just records amountPaid.
+                const isServerPaid = verifiedPayment.estimateStatus === "paid"
                 await updateEstimate(estimate.id, {
-                    status: "paid",
-                    paymentCompletedAt: verifiedPayment.paidAt || estimate.paymentCompletedAt || paidAt,
+                    ...(isServerPaid
+                        ? { status: "paid" as const, paymentCompletedAt: verifiedPayment.paidAt || estimate.paymentCompletedAt || paidAt }
+                        : {}),
+                    ...(typeof verifiedPayment.amountPaid === "number" ? { amountPaid: verifiedPayment.amountPaid } : {}),
                     lastPaymentSessionId: verifiedPayment.checkoutSessionId || sessionId || estimate.lastPaymentSessionId,
                     synced: false,
                 })
@@ -172,7 +183,9 @@ export function PaymentSuccessStatusCard({
                 const refreshed = await getEstimates()
                 const updatedEstimate =
                     refreshed.find((candidate) => candidate.id === estimate.id) ||
-                    { ...estimate, status: "paid" as const, paymentCompletedAt: estimate.paymentCompletedAt || paidAt }
+                    (isServerPaid
+                        ? { ...estimate, status: "paid" as const, paymentCompletedAt: estimate.paymentCompletedAt || paidAt }
+                        : estimate)
 
                 if (active) setLocalState({ status: "updated", estimate: updatedEstimate, wasAlreadyPaid })
             } catch (error) {
@@ -210,19 +223,23 @@ export function PaymentSuccessStatusCard({
     }
 
     if (localState.status === "updated") {
+        const isPaid = localState.estimate.status === "paid"
         return (
             <div className="rounded-lg border border-emerald-400/25 bg-emerald-500/10 p-4 text-emerald-100" data-testid="payment-success-local-status">
                 <div className="flex gap-3">
                     <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
                     <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold">
-                            {localState.wasAlreadyPaid ? "Local history already showed paid" : "Local history updated to paid"}
+                            {!isPaid
+                                ? "Payment received"
+                                : localState.wasAlreadyPaid ? "Local history already showed paid" : "Local history updated to paid"}
                         </p>
                         <p className="mt-1 break-words text-xs leading-5 text-emerald-100/75 [overflow-wrap:anywhere]">
-                            {localState.estimate.estimateNumber || estimateNumber || "This estimate"} is ready in the Paid lane.
+                            {localState.estimate.estimateNumber || estimateNumber || "This estimate"}{" "}
+                            {isPaid ? "is ready in the Paid lane." : "moves to the Paid lane once it is fully paid."}
                         </p>
                         <div className="mt-3 rounded-lg border border-emerald-300/15 bg-slate-950/45 px-3 py-2" data-testid="payment-success-paid-summary">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-100/55">Paid record</p>
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-100/55">{isPaid ? "Paid record" : "Payment record"}</p>
                             <div className="mt-1 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                                 <p
                                     className="line-clamp-3 min-w-0 break-words text-sm font-semibold leading-5 text-white [overflow-wrap:anywhere]"

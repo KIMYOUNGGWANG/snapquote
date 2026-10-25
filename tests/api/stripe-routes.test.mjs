@@ -738,6 +738,86 @@ describe('GET /api/payments/stripe/status', () => {
     assert.match(data.paidAt, /Z$/)
   })
 
+  describe('server estimate verdict', () => {
+    const ESTIMATE_ID = '11111111-1111-4111-8111-111111111111'
+    const statusUrl = `http://localhost/api/payments/stripe/status?paymentLinkId=plink_abc&estimateId=${ESTIMATE_ID}&estimateNumber=EST-PAID-1`
+
+    function arrangePaidSession(resolver) {
+      process.env.STRIPE_SECRET_KEY = 'sk_test'
+      process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+      process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+
+      const state = getTestState()
+      state.stripe.sessionsListPages = [
+        {
+          data: [
+            {
+              id: 'cs_paid_1',
+              payment_status: 'paid',
+              metadata: { estimateId: ESTIMATE_ID, estimateNumber: 'EST-PAID-1', userId: 'user-1' },
+              created: 1735689600,
+            },
+          ],
+          has_more: false,
+        },
+      ]
+      state.supabase.queryResolver = resolver
+      return state
+    }
+
+    test('status route reports server estimate status alongside session paid', async () => {
+      const state = arrangePaidSession(async (query) => {
+        if (query.table === 'estimates' && query.action === 'select' && query.mode === 'maybeSingle') {
+          return { data: { status: 'sent', amount_paid: 500 }, error: null }
+        }
+        return { data: [], error: null }
+      })
+
+      const res = await stripePaymentStatusGet(new Request(statusUrl))
+      const data = await res.json()
+
+      assert.equal(res.status, 200)
+      assert.equal(data.paid, true)
+      assert.equal(data.estimateStatus, 'sent')
+      assert.equal(data.amountPaid, 500)
+
+      const lookup = state.supabase.queryCalls.find((q) => q.table === 'estimates')
+      assert.deepEqual(
+        lookup.filters.map((f) => [f.op, f.column, f.value]),
+        [['eq', 'id', ESTIMATE_ID], ['eq', 'user_id', 'user-1']]
+      )
+    })
+
+    test('status route omits verdict keys when the estimate row is missing', async () => {
+      arrangePaidSession(async () => ({ data: null, error: null }))
+
+      const res = await stripePaymentStatusGet(new Request(statusUrl))
+      const data = await res.json()
+
+      assert.equal(res.status, 200)
+      assert.equal(data.paid, true)
+      assert.equal('estimateStatus' in data, false)
+      assert.equal('amountPaid' in data, false)
+    })
+
+    test('status route stays 200 and omits verdict keys on a DB error', async () => {
+      arrangePaidSession(async () => ({ data: null, error: { message: 'db down' } }))
+      const originalError = console.error
+      console.error = () => {}
+      try {
+        const res = await stripePaymentStatusGet(new Request(statusUrl))
+        const data = await res.json()
+
+        assert.equal(res.status, 200)
+        assert.equal(data.paid, true)
+        assert.equal('estimateStatus' in data, false)
+        assert.equal('amountPaid' in data, false)
+      } finally {
+        console.error = originalError
+      }
+    })
+  })
+
   test('returns paid=false when a requested checkout session id does not match', async () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test'
 

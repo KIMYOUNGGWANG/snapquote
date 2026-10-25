@@ -60,6 +60,8 @@ type StripePaymentStatusResponse = {
     paid: boolean
     checkoutSessionId?: string
     paidAt?: string
+    estimateStatus?: "draft" | "sent" | "paid"
+    amountPaid?: number
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -398,9 +400,13 @@ function HistoryPageContent() {
                 const result = await response.json() as StripePaymentStatusResponse
                 if (!result.ok || !result.paid) continue
 
+                // Only the server decides "paid"; a partial payment just records amountPaid.
+                const isServerPaid = result.estimateStatus === "paid"
                 await updateEstimate(estimate.id, {
-                    status: "paid",
-                    paymentCompletedAt: result.paidAt || new Date().toISOString(),
+                    ...(isServerPaid
+                        ? { status: "paid" as const, paymentCompletedAt: result.paidAt || new Date().toISOString() }
+                        : {}),
+                    ...(typeof result.amountPaid === "number" ? { amountPaid: result.amountPaid } : {}),
                     lastPaymentSessionId: result.checkoutSessionId,
                     synced: false,
                 })
@@ -413,7 +419,7 @@ function HistoryPageContent() {
                     channel: "stripe_status_poll",
                     metadata: {
                         checkoutSessionId: result.checkoutSessionId,
-                        status_transitioned: true,
+                        status_transitioned: isServerPaid,
                     },
                 })
             }
