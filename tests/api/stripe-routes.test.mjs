@@ -411,6 +411,17 @@ describe('POST /api/webhooks/stripe', () => {
       assert.equal(findUpdate(state), undefined)
     })
 
+    test('older session replayed after the estimate is fully paid adds nothing', async () => {
+      const state = setupWebhook({
+        session: { id: 'cs_deposit_A', payment_status: 'paid', amount_total: 50000 },
+        estimate: { status: 'paid', total_amount: 1740, amount_paid: 1740, last_payment_session_id: 'cs_balance_B' },
+      })
+
+      const res = await send()
+      assert.equal(res.status, 200)
+      assert.equal(findUpdate(state), undefined)
+    })
+
     test('unpaid async checkout completion is ignored', async () => {
       const state = setupWebhook({
         session: { id: 'cs_unpaid', payment_status: 'unpaid', amount_total: 174000 },
@@ -969,6 +980,52 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
     const updateCall = state.supabase.queryCalls.find((q) => q.table === 'estimates' && q.action === 'update')
     assert.equal(updateCall.payload.status, 'paid')
     assert.equal(updateCall.payload.amount_paid, 1740)
+  })
+
+  test('reconcile rescan of an older session on a fully paid estimate does not update', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+    process.env.CRON_SECRET = 'cron_secret'
+
+    const state = getTestState()
+    state.stripe.sessionsListPages = [{
+      data: [{
+        id: 'cs_deposit_A',
+        created: 1735689600,
+        payment_status: 'paid',
+        amount_total: 50000,
+        metadata: { estimateId: 'estimate_done', estimateNumber: 'EST-DONE', userId: 'user_1' },
+      }],
+      has_more: false,
+    }]
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'estimates' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return {
+          data: {
+            id: 'estimate_done', user_id: 'user_1', estimate_number: 'EST-DONE', status: 'paid',
+            payment_completed_at: '2025-01-02T00:00:00.000Z',
+            total_amount: 1740, amount_paid: 1740, last_payment_session_id: 'cs_balance_B',
+          },
+          error: null,
+        }
+      }
+      return { data: [], error: null }
+    }
+
+    const res = await stripeReconcileGet(new Request('http://localhost/api/webhooks/stripe/reconcile?lookbackHours=24', {
+      method: 'GET',
+      headers: { authorization: 'Bearer cron_secret' },
+    }))
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.matched, 1)
+    assert.equal(data.updated, 0)
+    assert.equal(
+      state.supabase.queryCalls.some((q) => q.table === 'estimates' && q.action === 'update'),
+      false
+    )
   })
 
   test('skips reconcile when session metadata is missing userId', async () => {

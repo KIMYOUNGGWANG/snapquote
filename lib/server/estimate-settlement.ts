@@ -38,17 +38,27 @@ export async function applyCheckoutSettlement(
 
     if (paymentStatus !== 'paid') return { ok: true, applied: false, fullyPaid: false }
 
-    // ponytail: 마지막 세션 id 하나로만 중복을 막는다. 같은 견적에 결제 3건 이상이 순서가 뒤섞여 재시도되면 중복 가능 → 필요해지면 결제 원장 테이블로 옮긴다.
+    // ponytail: 마지막 세션 id 하나로만 중복을 막는다. 완납 전에 부분 결제 2건 이상이 섞여 재처리되면 중복 가능 → 필요해지면 결제 원장 테이블로 옮긴다.
     if (estimate.last_payment_session_id === sessionId) {
         return { ok: true, applied: false, fullyPaid: false }
+    }
+
+    // 이미 완납이면 과거 세션(reconcile 재스캔, 웹훅 재시도)이 다시 들어와도 금액을 더하지 않는다.
+    const total = toAmount(estimate.total_amount)
+    const alreadyPaid = toAmount(estimate.amount_paid)
+    if (
+        isFullyPaid(total, alreadyPaid)
+        || (estimate.status === 'paid' && toCents(alreadyPaid) >= toCents(total))
+    ) {
+        return { ok: true, applied: false, fullyPaid: true }
     }
 
     if (typeof amountTotalCents !== 'number' || !Number.isFinite(amountTotalCents)) {
         return { ok: false, message: 'Paid checkout session is missing amount_total.' }
     }
 
-    const newAmountPaid = (toCents(toAmount(estimate.amount_paid)) + Math.round(amountTotalCents)) / 100
-    const fullyPaid = isFullyPaid(toAmount(estimate.total_amount), newAmountPaid)
+    const newAmountPaid = (toCents(alreadyPaid) + Math.round(amountTotalCents)) / 100
+    const fullyPaid = isFullyPaid(total, newAmountPaid)
 
     const update = supabase
         .from('estimates')
