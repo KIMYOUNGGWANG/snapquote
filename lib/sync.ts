@@ -9,6 +9,7 @@ import {
     hasCustomerPortalEstimatePatchChanged,
     hasQuickBooksEstimatePatchChanged,
     mapCloudCustomerPortalLinkToLocalPatch,
+    mapClearedAttachmentsToCloudPatch,
     mapLocalEstimateAttachmentsToCloudRow,
     mapLocalEstimateItemToCloudRow,
     mapLocalEstimateSectionToCloudRow,
@@ -506,8 +507,12 @@ async function pushEstimateToCloud(userId: string, estimate: LocalEstimate) {
             })
         assertSupabaseMutation(upsertAttachments, "Failed to store estimate attachments")
     } else {
-        const deleteAttachments = await supabase.from('estimate_attachments').delete().eq('estimate_id', estimate.id)
-        assertSupabaseMutation(deleteAttachments, "Failed to refresh estimate attachments")
+        // Never delete the row: it may hold a completion report written from another device.
+        const clearAttachments = await supabase
+            .from('estimate_attachments')
+            .update(mapClearedAttachmentsToCloudPatch(now))
+            .eq('estimate_id', estimate.id)
+        assertSupabaseMutation(clearAttachments, "Failed to refresh estimate attachments")
     }
 
     // 5. Update local flag

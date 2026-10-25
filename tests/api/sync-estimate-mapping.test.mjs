@@ -12,6 +12,7 @@ import {
   mapCloudEstimateToLocal,
   mapCloudCustomerPortalLinkToLocalPatch,
   mapCloudQuickBooksLinkToLocalPatch,
+  mapClearedAttachmentsToCloudPatch,
   mapLocalEstimateAttachmentsToCloudRow,
   mapLocalEstimateItemToCloudRow,
   mapLocalEstimateSectionToCloudRow,
@@ -473,6 +474,9 @@ describe('sync estimate cloud mapping', () => {
       { completedAt: 'x', summary: 's', photos: [1], items: [] },
       { completedAt: 'x', summary: 's', photos: [], items: [{ itemId: 'a', done: 'yes', photoIndexes: [] }] },
       { completedAt: 'x', summary: 's', photos: [], items: [{ itemId: 'a', done: true, photoIndexes: ['0'] }] },
+      { completedAt: 'x', summary: 's', photos: ['p'], items: [{ itemId: 'a', done: true, photoIndexes: [1] }] },
+      { completedAt: 'x', summary: 's', photos: ['p'], items: [{ itemId: 'a', done: true, photoIndexes: [-1] }] },
+      { completedAt: 'x', summary: 's', photos: ['p'], items: [{ itemId: 'a', done: true, photoIndexes: [0.5] }] },
       { completedAt: 'x', summary: 's', photos: [] },
     ]
     for (const completion of bad) {
@@ -527,5 +531,17 @@ describe('sync estimate cloud mapping', () => {
     assert.equal(applyCloudAmountPaidToLocalEstimate(local, { amount_paid: 500 }), local)
     assert.equal(applyCloudAmountPaidToLocalEstimate(local, { amount_paid: null }), local)
     assert.equal(applyCloudAmountPaidToLocalEstimate(local, undefined), local)
+  })
+
+  test('clearing attachments never touches the completion column', () => {
+    const patch = mapClearedAttachmentsToCloudPatch('2026-06-01T10:00:00.000Z')
+    assert.deepEqual(patch, {
+      photos: [],
+      audio_url: null,
+      original_transcript: null,
+      scope_assumptions_confirmed_at: null,
+      updated_at: '2026-06-01T10:00:00.000Z',
+    })
+    assert.equal('completion' in patch, false)
   })
 })

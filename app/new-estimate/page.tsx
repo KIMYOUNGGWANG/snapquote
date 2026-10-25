@@ -2615,6 +2615,8 @@ function NewEstimatePageContent() {
         const taxAmount = subtotal * (taxRate / 100)
         const totalAmount = subtotal + taxAmount
         const draftMeta = getOrCreateDraftMeta()
+        // The composer rebuilds the record from scratch; keep fields it doesn't edit.
+        const storedEstimate = (await getEstimates()).find((entry) => entry.id === draftMeta.id)
         const attachmentPhotos = images.length > 0 ? await Promise.all(images.map(fileToDataUrl)) : []
         const scopeAssumptionsConfirmedAtForPayload = hasConfirmedScopeAssumptions
             ? scopeAssumptionsConfirmedAt || new Date().toISOString()
@@ -2646,6 +2648,8 @@ function NewEstimatePageContent() {
             sentAt: status === "sent" ? (teamEstimateContext?.sentAt || new Date().toISOString()) : undefined,
             status,
             paymentCompletedAt: teamEstimateContext?.paymentCompletedAt,
+            ...(storedEstimate?.amountPaid !== undefined ? { amountPaid: storedEstimate.amountPaid } : {}),
+            ...(storedEstimate?.completion ? { completion: storedEstimate.completion } : {}),
             paymentLink: includePaymentLink && paymentLink ? paymentLink : undefined,
             paymentLinkId: includePaymentLink && paymentLinkId ? paymentLinkId : undefined,
             paymentLinkType: includePaymentLink && paymentLinkType ? paymentLinkType : undefined,

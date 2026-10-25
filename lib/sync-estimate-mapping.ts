@@ -362,6 +362,18 @@ export function mapLocalEstimateAttachmentsToCloudRow(
     }
 }
 
+// Used when local has no attachment state: wipes the legacy columns but must never touch
+// `completion` (write-once report that another device may have stored).
+export function mapClearedAttachmentsToCloudPatch(updatedAt: string) {
+    return {
+        photos: [] as string[],
+        audio_url: null,
+        original_transcript: null,
+        scope_assumptions_confirmed_at: null,
+        updated_at: updatedAt,
+    }
+}
+
 export function mapLocalEstimateToCloudRow(
     userId: string,
     clientId: string | null,
@@ -444,7 +456,9 @@ function isJobCompletion(value: unknown): value is JobCompletion {
             return typeof itemId === "string" &&
                 typeof done === "boolean" &&
                 Array.isArray(photoIndexes) &&
-                photoIndexes.every((index) => typeof index === "number" && Number.isFinite(index))
+                photoIndexes.every((index) =>
+                    typeof index === "number" && Number.isInteger(index) && index >= 0 && index < photos.length
+                )
         })
 }
 

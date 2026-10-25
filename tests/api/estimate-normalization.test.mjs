@@ -3,6 +3,7 @@ import { describe, test } from 'node:test'
 
 import {
   normalizeEstimateItem,
+  normalizeEstimateSection,
   normalizeEstimatePayload,
   normalizePhotoEstimateAnalysis,
 } from '@/lib/estimates/normalize'
@@ -99,5 +100,19 @@ describe('estimate normalization helpers', () => {
     assert.equal(allItems.length, 2)
     assert.deepEqual(allItems.map((item) => item.description), ['Permit', 'Install fixture'])
     assert.equal(allItems.reduce((sum, item) => sum + lineTotal(item), 0), 300)
+  })
+
+  test('preserves the addedOnSite section flag through normalization', () => {
+    const items = [{ description: 'Extra outlet', quantity: 1, unit_price: 50 }]
+
+    assert.equal(normalizeEstimateSection({ id: 's1', name: 'Added on site', addedOnSite: true, items }, 0).addedOnSite, true)
+    assert.equal('addedOnSite' in normalizeEstimateSection({ id: 's2', name: 'Other', items }, 1), false)
+    assert.equal('addedOnSite' in normalizeEstimateSection({ id: 's3', name: 'Other', addedOnSite: 'yes', items }, 2), false)
+
+    const estimate = normalizeEstimatePayload({
+      items: [],
+      sections: [{ id: 's1', name: 'Added on site', addedOnSite: true, items }],
+    })
+    assert.equal(estimate.sections?.[0].addedOnSite, true)
   })
 })
