@@ -3,6 +3,7 @@ import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import { isEstimatePaidLike } from '@/lib/estimate-payment-state'
 import { recordOpsAlert } from '@/lib/ops-alerts'
+import { applyCheckoutSettlement } from '@/lib/server/estimate-settlement'
 import { resolveEstimateForSettlement } from '@/lib/server/payment-estimate-ownership'
 
 function getCheckoutSessionPaidAt(session: Stripe.Checkout.Session): string {
@@ -163,39 +164,43 @@ export async function POST(req: Request) {
         const targetEstimate = settlementResolution.estimate
         console.log(`💰 Payment succeeded for estimate: ${targetEstimate.id}`)
 
-        const paymentCompletedAt = targetEstimate.payment_completed_at || getCheckoutSessionPaidAt(session)
-        const syncedAt = new Date().toISOString()
-        let statusTransitioned = !isEstimatePaidLike(targetEstimate)
+        const wasPaidLike = isEstimatePaidLike(targetEstimate)
 
-        const { data: updatedEstimate, error } = await supabase
-            .from('estimates')
-            .update({
-                status: 'paid',
-                payment_completed_at: paymentCompletedAt,
-                last_payment_session_id: session.id,
-                updated_at: syncedAt,
-            })
-            .eq('id', targetEstimate.id)
-            .select('id')
-            .maybeSingle()
+        const settlement = await applyCheckoutSettlement(supabase, {
+            estimate: {
+                id: targetEstimate.id,
+                total_amount: targetEstimate.total_amount ?? null,
+                amount_paid: targetEstimate.amount_paid ?? null,
+                last_payment_session_id: targetEstimate.last_payment_session_id ?? null,
+                status: targetEstimate.status ?? null,
+                payment_completed_at: targetEstimate.payment_completed_at ?? null,
+            },
+            sessionId: session.id,
+            amountTotalCents: typeof session.amount_total === 'number' ? session.amount_total : null,
+            paymentStatus: session.payment_status ?? null,
+            paidAt: getCheckoutSessionPaidAt(session),
+        })
 
-        if (error) {
-            console.error('Failed to update estimate status:', error)
+        if (!settlement.ok) {
+            console.error('Failed to update estimate payment:', settlement.message)
             await recordOpsAlert({
                 source: 'stripe_webhook',
                 severity: 'error',
                 alertKey: 'stripe_webhook_status_update_failed',
-                message: 'Failed to update estimate status to paid',
+                message: 'Failed to record Stripe payment on estimate',
                 context: {
                     eventId: event.id,
                     targetEstimateId: targetEstimate.id,
-                    error: error.message,
+                    error: settlement.message,
                 },
             })
             return new NextResponse('Database Error', { status: 500 })
         }
 
-        statusTransitioned = statusTransitioned && Boolean(updatedEstimate?.id)
+        // Async payment methods complete the session before the money arrives.
+        if (session.payment_status !== 'paid') return new NextResponse('Received', { status: 200 })
+
+        const statusTransitioned = settlement.applied && settlement.fullyPaid && !wasPaidLike
 
         // Non-blocking analytics event emit for payment conversion tracking.
         const { error: analyticsError } = await supabase

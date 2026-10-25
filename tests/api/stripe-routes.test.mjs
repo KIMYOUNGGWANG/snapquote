@@ -76,6 +76,8 @@ describe('POST /api/webhooks/stripe', () => {
         object: {
           id: 'cs_123',
           created: 1735689600,
+          payment_status: 'paid',
+          amount_total: 100000,
           metadata: {
             estimateId: 'estimate_1',
             estimateNumber: 'EST-1',
@@ -93,6 +95,9 @@ describe('POST /api/webhooks/stripe', () => {
             user_id: 'user_1',
             estimate_number: 'EST-1',
             status: 'sent',
+            total_amount: 1000,
+            amount_paid: 0,
+            last_payment_session_id: null,
           },
           error: null,
         }
@@ -154,6 +159,8 @@ describe('POST /api/webhooks/stripe', () => {
         object: {
           id: 'cs_async_paid',
           created: 1735689900,
+          payment_status: 'paid',
+          amount_total: 50000,
           metadata: {},
           payment_intent: 'pi_async_paid',
         },
@@ -175,6 +182,9 @@ describe('POST /api/webhooks/stripe', () => {
             user_id: 'user_async',
             estimate_number: 'EST-ASYNC-1',
             status: 'sent',
+            total_amount: 500,
+            amount_paid: 0,
+            last_payment_session_id: null,
           },
           error: null,
         }
@@ -239,6 +249,8 @@ describe('POST /api/webhooks/stripe', () => {
         object: {
           id: 'cs_paid_like',
           created: 1735689600,
+          payment_status: 'paid',
+          amount_total: 20000,
           metadata: {
             estimateId: 'estimate_paid_like',
             estimateNumber: 'EST-PAID-LIKE',
@@ -257,6 +269,9 @@ describe('POST /api/webhooks/stripe', () => {
             estimate_number: 'EST-PAID-LIKE',
             status: 'sent',
             payment_completed_at: paidAt,
+            total_amount: 200,
+            amount_paid: 0,
+            last_payment_session_id: null,
           },
           error: null,
         }
@@ -299,6 +314,113 @@ describe('POST /api/webhooks/stripe', () => {
     )
     assert.ok(analyticsCall)
     assert.equal(analyticsCall.payload[0].metadata.status_transitioned, false)
+  })
+
+  describe('partial payments', () => {
+    function setupWebhook({ session, estimate }) {
+      process.env.STRIPE_SECRET_KEY = 'sk_test'
+      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test'
+      process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+      process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+
+      const state = getTestState()
+      state.stripe.constructEvent = () => ({
+        id: 'evt_partial',
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            created: 1735689600,
+            metadata: { estimateId: 'estimate_partial', estimateNumber: 'EST-P', userId: 'user_1' },
+            ...session,
+          },
+        },
+      })
+      state.supabase.queryResolver = async (query) => {
+        if (query.table === 'estimates' && query.action === 'select' && query.mode === 'maybeSingle') {
+          return {
+            data: { id: 'estimate_partial', user_id: 'user_1', estimate_number: 'EST-P', status: 'sent', ...estimate },
+            error: null,
+          }
+        }
+        if (query.table === 'estimates' && query.action === 'update' && query.mode === 'maybeSingle') {
+          return { data: { id: 'estimate_partial' }, error: null }
+        }
+        return { data: [], error: null }
+      }
+      return state
+    }
+
+    const send = () => stripeWebhook(new Request('http://localhost/api/webhooks/stripe', {
+      method: 'POST',
+      body: JSON.stringify({ fake: true }),
+      headers: { 'stripe-signature': 'sig_test' },
+    }))
+    const findUpdate = (state) => state.supabase.queryCalls.find(
+      (query) => query.table === 'estimates' && query.action === 'update'
+    )
+
+    test('deposit payment below total keeps estimate sent and records amount_paid', async () => {
+      const state = setupWebhook({
+        session: { id: 'cs_deposit', payment_status: 'paid', amount_total: 50000 },
+        estimate: { total_amount: 1740, amount_paid: 0, last_payment_session_id: null },
+      })
+
+      const res = await send()
+      assert.equal(res.status, 200)
+
+      const updateCall = findUpdate(state)
+      assert.ok(updateCall)
+      assert.equal(updateCall.payload.amount_paid, 500)
+      assert.equal(updateCall.payload.last_payment_session_id, 'cs_deposit')
+      assert.equal('status' in updateCall.payload, false)
+      assert.deepEqual(updateCall.filters.find((f) => f.op === 'is'), { op: 'is', column: 'last_payment_session_id', value: null })
+
+      const analyticsCall = state.supabase.queryCalls.find((query) => query.table === 'analytics_events')
+      assert.equal(analyticsCall.payload[0].metadata.status_transitioned, false)
+    })
+
+    test('balance payment completing total marks estimate paid', async () => {
+      const state = setupWebhook({
+        session: { id: 'cs_balance', payment_status: 'paid', amount_total: 124000 },
+        estimate: { total_amount: 1740, amount_paid: 500, last_payment_session_id: 'cs_deposit' },
+      })
+
+      const res = await send()
+      assert.equal(res.status, 200)
+
+      const updateCall = findUpdate(state)
+      assert.equal(updateCall.payload.status, 'paid')
+      assert.equal(updateCall.payload.amount_paid, 1740)
+      assert.equal(updateCall.payload.payment_completed_at, '2025-01-01T00:00:00.000Z')
+      assert.deepEqual(updateCall.filters.find((f) => f.op === 'eq' && f.column === 'last_payment_session_id'), {
+        op: 'eq', column: 'last_payment_session_id', value: 'cs_deposit',
+      })
+
+      const analyticsCall = state.supabase.queryCalls.find((query) => query.table === 'analytics_events')
+      assert.equal(analyticsCall.payload[0].metadata.status_transitioned, true)
+    })
+
+    test('same session delivered twice is applied once', async () => {
+      const state = setupWebhook({
+        session: { id: 'cs_deposit', payment_status: 'paid', amount_total: 50000 },
+        estimate: { total_amount: 1740, amount_paid: 500, last_payment_session_id: 'cs_deposit' },
+      })
+
+      const res = await send()
+      assert.equal(res.status, 200)
+      assert.equal(findUpdate(state), undefined)
+    })
+
+    test('unpaid async checkout completion is ignored', async () => {
+      const state = setupWebhook({
+        session: { id: 'cs_unpaid', payment_status: 'unpaid', amount_total: 174000 },
+        estimate: { total_amount: 1740, amount_paid: 0, last_payment_session_id: null },
+      })
+
+      const res = await send()
+      assert.equal(res.status, 200)
+      assert.equal(findUpdate(state), undefined)
+    })
   })
 
   test('skips settlement when Stripe metadata userId does not match estimate owner', async () => {
@@ -600,6 +722,7 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
             id: 'cs_paid_1',
             created: 1735689600,
             payment_status: 'paid',
+            amount_total: 100000,
             metadata: {
               estimateId: 'estimate_paid_1',
               estimateNumber: 'EST-PAID-1',
@@ -618,14 +741,17 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
             id: 'estimate_paid_1',
             user_id: 'user_1',
             estimate_number: 'EST-PAID-1',
+            total_amount: 1000,
+            amount_paid: 0,
+            last_payment_session_id: null,
           },
           error: null,
         }
       }
 
-      if (query.table === 'estimates' && query.action === 'update' && query.mode === 'execute') {
+      if (query.table === 'estimates' && query.action === 'update' && query.mode === 'maybeSingle') {
         return {
-          data: [{ id: 'estimate_paid_1' }],
+          data: { id: 'estimate_paid_1' },
           error: null,
         }
       }
@@ -681,6 +807,7 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
             id: 'cs_paid_like_reconcile',
             created: 1735689600,
             payment_status: 'paid',
+            amount_total: 20000,
             metadata: {
               estimateId: 'estimate_paid_like_reconcile',
               estimateNumber: 'EST-PAID-LIKE-RECONCILE',
@@ -701,13 +828,16 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
             estimate_number: 'EST-PAID-LIKE-RECONCILE',
             status: 'sent',
             payment_completed_at: paidAt,
+            total_amount: 200,
+            amount_paid: 0,
+            last_payment_session_id: null,
           },
           error: null,
         }
       }
 
-      if (query.table === 'estimates' && query.action === 'update' && query.mode === 'execute') {
-        return { data: [{ id: 'estimate_paid_like_reconcile' }], error: null }
+      if (query.table === 'estimates' && query.action === 'update' && query.mode === 'maybeSingle') {
+        return { data: { id: 'estimate_paid_like_reconcile' }, error: null }
       }
 
       if (query.table === 'analytics_events' && query.action === 'upsert') {
@@ -745,6 +875,100 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
     )
     assert.ok(analyticsCall)
     assert.equal(analyticsCall.payload[0].metadata.status_transitioned, false)
+  })
+
+  test('reconcile records a deposit below total without marking the estimate paid', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+    process.env.CRON_SECRET = 'cron_secret'
+
+    const state = getTestState()
+    state.stripe.sessionsListPages = [{
+      data: [{
+        id: 'cs_deposit_reconcile',
+        created: 1735689600,
+        payment_status: 'paid',
+        amount_total: 50000,
+        metadata: { estimateId: 'estimate_dep', estimateNumber: 'EST-DEP', userId: 'user_1' },
+      }],
+      has_more: false,
+    }]
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'estimates' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return {
+          data: {
+            id: 'estimate_dep', user_id: 'user_1', estimate_number: 'EST-DEP', status: 'sent',
+            total_amount: 1740, amount_paid: 0, last_payment_session_id: null,
+          },
+          error: null,
+        }
+      }
+      if (query.table === 'estimates' && query.action === 'update' && query.mode === 'maybeSingle') {
+        return { data: { id: 'estimate_dep' }, error: null }
+      }
+      return { data: [], error: null }
+    }
+
+    const res = await stripeReconcileGet(new Request('http://localhost/api/webhooks/stripe/reconcile?lookbackHours=24', {
+      method: 'GET',
+      headers: { authorization: 'Bearer cron_secret' },
+    }))
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.matched, 1)
+    assert.equal(data.updated, 0)
+    const updateCall = state.supabase.queryCalls.find((q) => q.table === 'estimates' && q.action === 'update')
+    assert.equal(updateCall.payload.amount_paid, 500)
+    assert.equal('status' in updateCall.payload, false)
+  })
+
+  test('reconcile marks estimate paid when the balance payment completes the total', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+    process.env.CRON_SECRET = 'cron_secret'
+
+    const state = getTestState()
+    state.stripe.sessionsListPages = [{
+      data: [{
+        id: 'cs_balance_reconcile',
+        created: 1735689600,
+        payment_status: 'paid',
+        amount_total: 124000,
+        metadata: { estimateId: 'estimate_bal', estimateNumber: 'EST-BAL', userId: 'user_1' },
+      }],
+      has_more: false,
+    }]
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === 'estimates' && query.action === 'select' && query.mode === 'maybeSingle') {
+        return {
+          data: {
+            id: 'estimate_bal', user_id: 'user_1', estimate_number: 'EST-BAL', status: 'sent',
+            total_amount: 1740, amount_paid: 500, last_payment_session_id: 'cs_deposit_reconcile',
+          },
+          error: null,
+        }
+      }
+      if (query.table === 'estimates' && query.action === 'update' && query.mode === 'maybeSingle') {
+        return { data: { id: 'estimate_bal' }, error: null }
+      }
+      return { data: [], error: null }
+    }
+
+    const res = await stripeReconcileGet(new Request('http://localhost/api/webhooks/stripe/reconcile?lookbackHours=24', {
+      method: 'GET',
+      headers: { authorization: 'Bearer cron_secret' },
+    }))
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.matched, 1)
+    assert.equal(data.updated, 1)
+    const updateCall = state.supabase.queryCalls.find((q) => q.table === 'estimates' && q.action === 'update')
+    assert.equal(updateCall.payload.status, 'paid')
+    assert.equal(updateCall.payload.amount_paid, 1740)
   })
 
   test('skips reconcile when session metadata is missing userId', async () => {
@@ -806,6 +1030,7 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
           {
             id: 'cs_paid_error',
             payment_status: 'paid',
+            amount_total: 100000,
             metadata: {
               estimateId: 'estimate_paid_error',
               estimateNumber: 'EST-PAID-ERR',
@@ -824,14 +1049,17 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
             id: 'estimate_paid_error',
             user_id: 'user_1',
             estimate_number: 'EST-PAID-ERR',
+            total_amount: 1000,
+            amount_paid: 0,
+            last_payment_session_id: null,
           },
           error: null,
         }
       }
 
-      if (query.table === 'estimates' && query.action === 'update' && query.mode === 'execute') {
+      if (query.table === 'estimates' && query.action === 'update' && query.mode === 'maybeSingle') {
         return {
-          data: [],
+          data: null,
           error: { message: 'update failed' },
         }
       }

@@ -3,6 +3,7 @@ import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import { isEstimatePaidLike } from '@/lib/estimate-payment-state'
 import { recordOpsAlert } from '@/lib/ops-alerts'
+import { applyCheckoutSettlement } from '@/lib/server/estimate-settlement'
 import { resolveEstimateForSettlement } from '@/lib/server/payment-estimate-ownership'
 
 const DEFAULT_LOOKBACK_HOURS = 72
@@ -203,30 +204,32 @@ async function reconcilePaidSessions(req: Request) {
 
             const targetEstimate = settlementResolution.estimate
             stats.matched += 1
-            const statusTransitioned = !isEstimatePaidLike(targetEstimate)
-            const paymentCompletedAt = targetEstimate.payment_completed_at || getCheckoutSessionPaidAt(session)
-            const syncedAt = new Date().toISOString()
+            const wasPaidLike = isEstimatePaidLike(targetEstimate)
 
-            const { data: updatedRows, error: updateError } = await supabase
-                .from('estimates')
-                .update({
-                    status: 'paid',
-                    payment_completed_at: paymentCompletedAt,
-                    last_payment_session_id: session.id,
-                    updated_at: syncedAt,
-                })
-                .eq('id', targetEstimate.id)
-                .select('id')
+            const settlement = await applyCheckoutSettlement(supabase, {
+                estimate: {
+                    id: targetEstimate.id,
+                    total_amount: targetEstimate.total_amount ?? null,
+                    amount_paid: targetEstimate.amount_paid ?? null,
+                    last_payment_session_id: targetEstimate.last_payment_session_id ?? null,
+                    status: targetEstimate.status ?? null,
+                    payment_completed_at: targetEstimate.payment_completed_at ?? null,
+                },
+                sessionId: session.id,
+                amountTotalCents: typeof session.amount_total === 'number' ? session.amount_total : null,
+                paymentStatus: session.payment_status,
+                paidAt: getCheckoutSessionPaidAt(session),
+            })
 
-            if (updateError) {
+            if (!settlement.ok) {
                 stats.errors += 1
-                console.error('Stripe reconcile: status update failed', updateError)
+                console.error('Stripe reconcile: payment update failed', settlement.message)
                 continue
             }
 
-            const didUpdateEstimate = (updatedRows?.length || 0) > 0
+            const statusTransitioned = settlement.applied && settlement.fullyPaid && !wasPaidLike
 
-            if (didUpdateEstimate && statusTransitioned) {
+            if (statusTransitioned) {
                 stats.updated += 1
             } else {
                 stats.alreadyPaid += 1
@@ -243,7 +246,7 @@ async function reconcilePaidSessions(req: Request) {
                     external_id: `reconcile:${session.id}`,
                     metadata: {
                         checkout_session_id: session.id,
-                        status_transitioned: didUpdateEstimate && statusTransitioned,
+                        status_transitioned: statusTransitioned,
                     },
                 }], {
                     onConflict: 'external_id',
