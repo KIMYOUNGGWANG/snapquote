@@ -6,6 +6,7 @@ import {
     buildOpenAiGenerateUserContent,
 } from "@/lib/ai/generate-provider-parts"
 import { requireGeminiText } from "@/lib/ai/gemini"
+import { resolveGenerateProvider } from "@/lib/ai/generate-provider"
 import { parsePotentialJsonContent } from "@/lib/ai/json"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { parseJsonRequest } from "@/lib/server/request-validation"
@@ -28,23 +29,10 @@ const openai = new OpenAI({
 
 const OPENAI_GENERATE_MODEL = process.env.OPENAI_GENERATE_MODEL?.trim() || "gpt-4o"
 const GEMINI_GENERATE_MODEL = process.env.GEMINI_GENERATE_MODEL?.trim() || "gemini-2.5-flash"
-const GENERATE_PROVIDER = process.env.GENERATE_AI_PROVIDER?.trim().toLowerCase() || "auto"
 const GENERATE_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000
 const GENERATE_RATE_LIMIT_MAX = 20
 const ANONYMOUS_GENERATE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 const PRO_TIERS = new Set(["pro", "team"])
-
-function resolveGenerateProvider(): "openai" | "gemini" {
-    if (GENERATE_PROVIDER === "openai") {
-        return "openai"
-    }
-
-    if (GENERATE_PROVIDER === "gemini") {
-        return "gemini"
-    }
-
-    return process.env.GEMINI_API_KEY?.trim() ? "gemini" : "openai"
-}
 
 async function generateWithGemini(params: {
     systemPrompt: string

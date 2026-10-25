@@ -35,6 +35,22 @@ export const generateRequestSchema = z.object({
     photoContext: z.string({ error: "Invalid photo context" }).max(MAX_GENERATE_PHOTO_CONTEXT_LENGTH, "Invalid photo context").optional(),
 }).strict()
 
+const completionReportItemSchema = z.object({
+    itemId: z.string({ error: "Invalid completion item" }).min(1, "Invalid completion item").max(200, "Invalid completion item"),
+    description: z.string({ error: "Invalid completion item" }).max(1_000, "Invalid completion item"),
+}).strict()
+
+const completionReportPhotoSchema = z
+    .string({ error: "Invalid photo payload" })
+    .startsWith("data:image/", "Invalid photo payload")
+    .max(400_000, "Invalid photo payload")
+
+export const completionReportRequestSchema = z.object({
+    items: z.array(completionReportItemSchema, { error: "Invalid completion items" }).min(1, "Invalid completion items").max(300, "Invalid completion items"),
+    photos: z.array(completionReportPhotoSchema, { error: "Invalid photos input" }).min(1, "Invalid photos input").max(6, "Invalid photos input"),
+    note: z.string({ error: "Invalid note input" }).max(2_000, "Invalid note input").optional(),
+}).strict()
+
 export const parseReceiptFormSchema = z.object({
     file: z.custom<File>((value) => value instanceof File, {
         error: "No file provided",
