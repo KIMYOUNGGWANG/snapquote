@@ -209,6 +209,7 @@ async function reconcilePaidSessions(req: Request) {
             const settlement = await applyCheckoutSettlement(supabase, {
                 estimate: {
                     id: targetEstimate.id,
+                user_id: targetEstimate.user_id,
                     total_amount: targetEstimate.total_amount ?? null,
                     amount_paid: targetEstimate.amount_paid ?? null,
                     last_payment_session_id: targetEstimate.last_payment_session_id ?? null,

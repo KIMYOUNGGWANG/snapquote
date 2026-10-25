@@ -169,6 +169,7 @@ export async function POST(req: Request) {
         const settlement = await applyCheckoutSettlement(supabase, {
             estimate: {
                 id: targetEstimate.id,
+        user_id: targetEstimate.user_id,
                 total_amount: targetEstimate.total_amount ?? null,
                 amount_paid: targetEstimate.amount_paid ?? null,
                 last_payment_session_id: targetEstimate.last_payment_session_id ?? null,
@@ -199,6 +200,21 @@ export async function POST(req: Request) {
 
         // Async payment methods complete the session before the money arrives.
         if (session.payment_status !== 'paid') return new NextResponse('Received', { status: 200 })
+
+        if (settlement.applied && !((targetEstimate.total_amount ?? 0) > 0)) {
+            await recordOpsAlert({
+                source: 'stripe_webhook',
+                severity: 'warning',
+                alertKey: 'stripe_settlement_missing_total',
+                message: 'Paid Stripe session settled against an estimate without a total_amount',
+                context: {
+                    eventId: event.id,
+                    sessionId: session.id,
+                    targetEstimateId: targetEstimate.id,
+                    totalAmount: targetEstimate.total_amount ?? null,
+                },
+            })
+        }
 
         const statusTransitioned = settlement.applied && settlement.fullyPaid && !wasPaidLike
 

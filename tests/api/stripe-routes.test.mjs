@@ -20,6 +20,40 @@ function clearRelevantEnv() {
   }
 }
 
+// Minimal stateful fake of the estimates row + analytics_events unique external_id.
+function createSettlementDb(initial) {
+  const row = { user_id: 'user_1', status: 'sent', payment_completed_at: null, ...initial }
+  const ledger = new Set()
+  const filterValue = (query, column, op) => query.filters.find((f) => f.column === column && f.op === op)
+
+  const resolver = async (query) => {
+    if (query.table === 'estimates' && query.action === 'select' && query.mode === 'maybeSingle') {
+      return { data: { ...row }, error: null }
+    }
+    if (query.table === 'analytics_events' && query.action === 'insert') {
+      const key = query.payload.external_id
+      if (ledger.has(key)) return { data: null, error: { code: '23505', message: 'duplicate key' } }
+      ledger.add(key)
+      return { data: [], error: null }
+    }
+    if (query.table === 'analytics_events' && query.action === 'delete') {
+      ledger.delete(filterValue(query, 'external_id', 'eq')?.value)
+      return { data: [], error: null }
+    }
+    if (query.table === 'estimates' && query.action === 'update' && query.mode === 'maybeSingle') {
+      const isNull = filterValue(query, 'last_payment_session_id', 'is')
+      const eqPrev = filterValue(query, 'last_payment_session_id', 'eq')
+      const matches = isNull ? row.last_payment_session_id === null : row.last_payment_session_id === eqPrev?.value
+      if (!matches) return { data: null, error: null }
+      Object.assign(row, query.payload)
+      return { data: { id: row.id }, error: null }
+    }
+    return { data: [], error: null }
+  }
+
+  return { row, ledger, resolver }
+}
+
 beforeEach(() => {
   resetTestState()
   clearRelevantEnv()
@@ -375,7 +409,7 @@ describe('POST /api/webhooks/stripe', () => {
       assert.equal('status' in updateCall.payload, false)
       assert.deepEqual(updateCall.filters.find((f) => f.op === 'is'), { op: 'is', column: 'last_payment_session_id', value: null })
 
-      const analyticsCall = state.supabase.queryCalls.find((query) => query.table === 'analytics_events')
+      const analyticsCall = state.supabase.queryCalls.find((query) => query.table === 'analytics_events' && query.action === 'upsert')
       assert.equal(analyticsCall.payload[0].metadata.status_transitioned, false)
     })
 
@@ -396,7 +430,7 @@ describe('POST /api/webhooks/stripe', () => {
         op: 'eq', column: 'last_payment_session_id', value: 'cs_deposit',
       })
 
-      const analyticsCall = state.supabase.queryCalls.find((query) => query.table === 'analytics_events')
+      const analyticsCall = state.supabase.queryCalls.find((query) => query.table === 'analytics_events' && query.action === 'upsert')
       assert.equal(analyticsCall.payload[0].metadata.status_transitioned, true)
     })
 
@@ -422,7 +456,7 @@ describe('POST /api/webhooks/stripe', () => {
       assert.equal(findUpdate(state), undefined)
     })
 
-    test('unpaid async checkout completion is ignored', async () => {
+    test('unpaid checkout completion writes no analytics or estimate rows', async () => {
       const state = setupWebhook({
         session: { id: 'cs_unpaid', payment_status: 'unpaid', amount_total: 174000 },
         estimate: { total_amount: 1740, amount_paid: 0, last_payment_session_id: null },
@@ -430,7 +464,65 @@ describe('POST /api/webhooks/stripe', () => {
 
       const res = await send()
       assert.equal(res.status, 200)
-      assert.equal(findUpdate(state), undefined)
+      assert.deepEqual(
+        state.supabase.queryCalls.filter((query) => query.action !== 'select'),
+        []
+      )
+    })
+
+    test('lost race deletes ledger row and webhook returns 500', async () => {
+      const state = setupWebhook({
+        session: { id: 'cs_race', payment_status: 'paid', amount_total: 50000 },
+        estimate: { total_amount: 1740, amount_paid: 0, last_payment_session_id: null },
+      })
+      const base = state.supabase.queryResolver
+      state.supabase.queryResolver = async (query) => {
+        if (query.table === 'estimates' && query.action === 'update') return { data: null, error: null }
+        return base(query)
+      }
+
+      const res = await send()
+      assert.equal(res.status, 500)
+
+      const insertCall = state.supabase.queryCalls.find((q) => q.table === 'analytics_events' && q.action === 'insert')
+      assert.equal(insertCall.payload.external_id, 'payment_settlement:cs_race')
+      const deleteCall = state.supabase.queryCalls.find((q) => q.table === 'analytics_events' && q.action === 'delete')
+      assert.ok(deleteCall)
+      assert.deepEqual(deleteCall.filters, [{ op: 'eq', column: 'external_id', value: 'payment_settlement:cs_race' }])
+      assert.equal(state.opsAlerts.calls.at(-1)?.alertKey, 'stripe_webhook_status_update_failed')
+    })
+
+    test('paid session without amount_total returns 500 and records ops alert', async () => {
+      const state = setupWebhook({
+        session: { id: 'cs_no_amount', payment_status: 'paid' },
+        estimate: { total_amount: 1740, amount_paid: 0, last_payment_session_id: null },
+      })
+
+      const res = await send()
+      assert.equal(res.status, 500)
+      assert.equal(state.opsAlerts.calls.at(-1)?.alertKey, 'stripe_webhook_status_update_failed')
+      assert.deepEqual(
+        state.supabase.queryCalls.filter((query) => query.action !== 'select'),
+        []
+      )
+    })
+
+    test('missing total_amount records ops alert', async () => {
+      const state = setupWebhook({
+        session: { id: 'cs_no_total', payment_status: 'paid', amount_total: 50000 },
+        estimate: { total_amount: null, amount_paid: 0, last_payment_session_id: null },
+      })
+
+      const res = await send()
+      assert.equal(res.status, 200)
+
+      const updateCall = findUpdate(state)
+      assert.equal(updateCall.payload.amount_paid, 500)
+      assert.equal('status' in updateCall.payload, false)
+      assert.equal(
+        state.opsAlerts.calls.some((call) => call.alertKey === 'stripe_settlement_missing_total'),
+        true
+      )
     })
   })
 
@@ -1026,6 +1118,59 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
       state.supabase.queryCalls.some((q) => q.table === 'estimates' && q.action === 'update'),
       false
     )
+  })
+
+  test('reconcile rescan after two partial webhook payments does not inflate amount_paid', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+    process.env.CRON_SECRET = 'cron_secret'
+
+    const state = getTestState()
+    const db = createSettlementDb({
+      id: 'estimate_two', estimate_number: 'EST-TWO',
+      total_amount: 1740, amount_paid: 0, last_payment_session_id: null,
+    })
+    state.supabase.queryResolver = db.resolver
+
+    const makeSession = (id) => ({
+      id,
+      created: 1735689600,
+      payment_status: 'paid',
+      amount_total: 50000,
+      metadata: { estimateId: 'estimate_two', estimateNumber: 'EST-TWO', userId: 'user_1' },
+    })
+
+    for (const id of ['cs_A1', 'cs_A2']) {
+      state.stripe.constructEvent = () => ({
+        id: `evt_${id}`,
+        type: 'checkout.session.completed',
+        data: { object: makeSession(id) },
+      })
+      const res = await stripeWebhook(new Request('http://localhost/api/webhooks/stripe', {
+        method: 'POST',
+        body: '{}',
+        headers: { 'stripe-signature': 'sig_test' },
+      }))
+      assert.equal(res.status, 200)
+    }
+    assert.equal(db.row.amount_paid, 1000)
+    assert.equal(db.row.last_payment_session_id, 'cs_A2')
+
+    for (let run = 0; run < 2; run += 1) {
+      state.stripe.sessionsListPages = [{ data: [makeSession('cs_A2'), makeSession('cs_A1')], has_more: false }]
+      const res = await stripeReconcileGet(new Request('http://localhost/api/webhooks/stripe/reconcile?lookbackHours=24', {
+        method: 'GET',
+        headers: { authorization: 'Bearer cron_secret' },
+      }))
+      const data = await res.json()
+      assert.equal(res.status, 200)
+      assert.equal(data.errors, 0)
+    }
+
+    assert.equal(db.row.amount_paid, 1000)
+    assert.equal(db.row.status, 'sent')
   })
 
   test('skips reconcile when session metadata is missing userId', async () => {
