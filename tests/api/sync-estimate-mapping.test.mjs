@@ -12,6 +12,7 @@ import {
   mapCloudQuickBooksLinkToLocalPatch,
   mapLocalEstimateAttachmentsToCloudRow,
   mapLocalEstimateItemToCloudRow,
+  mapLocalEstimateSectionToCloudRow,
   mapLocalEstimateSectionItemToCloudRow,
   mapLocalEstimateToCloudRow,
   selectLatestCloudCustomerPortalLink,
@@ -433,5 +434,70 @@ describe('sync estimate cloud mapping', () => {
       first_followed_up_at: '2026-05-24T09:30:00.000Z',
       last_followed_up_at: '2026-05-25T09:30:00.000Z',
     })
+  })
+
+  test('cloud amount_paid maps to local amountPaid', () => {
+    assert.equal(mapCloudEstimateToLocal({ id: 'e1', amount_paid: '250.5' }).amountPaid, 250.5)
+    assert.equal(mapCloudEstimateToLocal({ id: 'e1', amount_paid: 0 }).amountPaid, 0)
+    assert.equal(mapCloudEstimateToLocal({ id: 'e1' }).amountPaid, undefined)
+  })
+
+  test('local upsert row never includes amount_paid', () => {
+    const row = mapLocalEstimateToCloudRow('user-1', null, {
+      id: 'e1', estimateNumber: 'EST-1', items: [], summary_note: '', clientName: 'A', clientAddress: '',
+      taxRate: 5, taxAmount: 0, totalAmount: 100, createdAt: '2026-05-24T08:00:00.000Z',
+      updatedAt: '2026-05-24T08:00:00.000Z', status: 'sent', amountPaid: 40,
+    })
+    assert.equal('amount_paid' in row, false)
+  })
+
+  test('completion round-trips through attachments row', () => {
+    const completion = {
+      completedAt: '2026-06-01T10:00:00.000Z',
+      summary: 'Replaced the trap and tested for leaks.',
+      photos: ['data:image/jpeg;base64,aaa'],
+      items: [{ itemId: 'item-1', done: true, photoIndexes: [0] }, { itemId: 'item-2', done: false, photoIndexes: [] }],
+    }
+    const row = mapLocalEstimateAttachmentsToCloudRow('e1', undefined, { completion })
+    assert.deepEqual(row?.completion, completion)
+
+    const local = mapCloudEstimateToLocal({ id: 'e1', estimate_attachments: [{ photos: [], completion: row.completion }] })
+    assert.deepEqual(local.completion, completion)
+  })
+
+  test('malformed cloud completion is dropped', () => {
+    const bad = [
+      'nope',
+      { completedAt: 'x', summary: 's', photos: [1], items: [] },
+      { completedAt: 'x', summary: 's', photos: [], items: [{ itemId: 'a', done: 'yes', photoIndexes: [] }] },
+      { completedAt: 'x', summary: 's', photos: [], items: [{ itemId: 'a', done: true, photoIndexes: ['0'] }] },
+      { completedAt: 'x', summary: 's', photos: [] },
+    ]
+    for (const completion of bad) {
+      assert.equal(mapCloudEstimateToLocal({ id: 'e1', estimate_attachments: { photos: [], completion } }).completion, undefined)
+    }
+  })
+
+  test('addedOnSite section flag round-trips as added_on_site', () => {
+    const section = { id: 's1', name: 'Added on site', addedOnSite: true, items: [] }
+    const row = mapLocalEstimateSectionToCloudRow('e1', section, 2, { updatedAt: 'now' })
+    assert.deepEqual(row, {
+      estimate_id: 'e1', local_id: 's1', division_code: null, name: 'Added on site',
+      sort_order: 2, added_on_site: true, updated_at: 'now',
+    })
+    assert.equal(mapLocalEstimateSectionToCloudRow('e1', { id: 's2', name: 'X', items: [] }, 0).added_on_site, false)
+
+    const local = mapCloudEstimateToLocal({
+      id: 'e1',
+      estimate_sections: [{ local_id: 's1', name: 'Added on site', added_on_site: true, sort_order: 0,
+        estimate_section_items: [{ local_id: 'i1', description: 'Extra', quantity: 1, unit_price: 5, total: 5 }] }],
+    })
+    assert.equal(local.sections[0].addedOnSite, true)
+  })
+
+  test('missing completion column maps to undefined', () => {
+    const local = mapCloudEstimateToLocal({ id: 'e1', estimate_attachments: [{ photos: ['data:image/png;base64,a'] }] })
+    assert.equal(local.completion, undefined)
+    assert.equal(local.attachments.photos.length, 1)
   })
 })

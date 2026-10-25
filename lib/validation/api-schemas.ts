@@ -120,6 +120,7 @@ const teamEstimateSectionSchema = z.object({
     id: z.string({ error: "Invalid estimate section" }).trim().min(1, "Invalid estimate section").max(120, "Invalid estimate section"),
     name: z.string({ error: "Invalid estimate section" }).trim().min(1, "Invalid estimate section").max(160, "Invalid estimate section"),
     divisionCode: z.string({ error: "Invalid estimate section" }).trim().max(20, "Invalid estimate section").optional(),
+    addedOnSite: z.boolean({ error: "Invalid estimate section" }).optional(),
     items: z.array(teamEstimateItemSchema, { error: "Invalid estimate section" }).max(200, "Invalid estimate section"),
 }).strict()
 

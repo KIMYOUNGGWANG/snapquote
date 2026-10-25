@@ -21,6 +21,7 @@ export type TeamEstimateSection = {
     id: string
     name: string
     divisionCode?: string
+    addedOnSite?: boolean
     items: TeamEstimateItem[]
 }
 
@@ -149,6 +150,7 @@ function mapEstimateSection(input: Record<string, unknown>, index: number): Team
         id: toSafeString(input.id).trim() || `section-${index + 1}`,
         name: toSafeString(input.name).trim() || `Section ${index + 1}`,
         ...(toSafeString(input.divisionCode).trim() ? { divisionCode: toSafeString(input.divisionCode).trim() } : {}),
+        ...(input.addedOnSite === true ? { addedOnSite: true } : {}),
         items: rawItems
             .filter((value): value is Record<string, unknown> => value !== null && typeof value === "object")
             .map((value, itemIndex) => mapEstimateItem(value, itemIndex))
@@ -179,6 +181,7 @@ function mapCloudEstimateToDetail(estimate: Record<string, any>): TeamEstimateDe
             id: section?.local_id || section?.id,
             name: section?.name,
             divisionCode: section?.division_code,
+            addedOnSite: section?.added_on_site,
             items: Array.isArray(section?.estimate_section_items)
                 ? section.estimate_section_items.map((item: any) => ({
                     id: item?.local_id || item?.id,
@@ -353,6 +356,7 @@ export async function resolveTeamEstimateAccess(
                 division_code,
                 name,
                 sort_order,
+                added_on_site,
                 estimate_section_items (
                     id,
                     local_id,
@@ -721,6 +725,7 @@ export async function saveTeamEstimateFromPayload(
                 division_code: section.divisionCode || null,
                 name: section.name,
                 sort_order: index,
+                added_on_site: section.addedOnSite === true,
                 updated_at: now,
             })))
             .select("id, local_id")

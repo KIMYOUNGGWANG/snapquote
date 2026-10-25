@@ -534,6 +534,7 @@ describe("Team estimate editing routes", () => {
           id: "section_1",
           name: "Finish Work",
           divisionCode: "09",
+          addedOnSite: true,
           items: [
             {
               id: "section_item_local_1",
@@ -573,6 +574,12 @@ describe("Team estimate editing routes", () => {
     assert.equal(clientUpdateCall.payload.email, "dispatch@harbordental.test")
     assert.equal(clientUpdateCall.payload.phone, "+14165550999")
     assert.equal(clientUpdateCall.payload.notes, "Confirm parking access before arrival.")
+
+    const sectionInsertCall = state.supabase.queryCalls.find(
+      (query) => query.table === "estimate_sections" && query.action === "insert"
+    )
+    assert.ok(sectionInsertCall)
+    assert.equal(sectionInsertCall.payload[0].added_on_site, true)
   })
 
   test("PATCH /api/team/estimates/:estimateId preserves payment-completed sent edits as paid", async () => {

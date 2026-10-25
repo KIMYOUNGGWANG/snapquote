@@ -29,12 +29,26 @@ export interface EstimateAttachments {
     scopeAssumptionsConfirmedAt?: string // Field review timestamp for thin AI scope assumptions
 }
 
+export interface JobCompletionItem {
+    itemId: string
+    done: boolean
+    photoIndexes: number[]
+}
+
+export interface JobCompletion {
+    completedAt: string
+    summary: string
+    photos: string[]
+    items: JobCompletionItem[]
+}
+
 // Section/Division for large construction projects (CSI Divisions)
 export interface EstimateSection {
     id: string
     divisionCode?: string      // e.g., "03" for Concrete, "16" for Electrical
     name: string               // e.g., "Concrete Work", "Electrical"
     items: EstimateItem[]      // Items within this section (Parts + Labor mixed)
+    addedOnSite?: boolean      // Work added on site after the quote was approved
 }
 
 export interface UpsellOption {
@@ -104,6 +118,8 @@ export interface LocalEstimate {
     lastFollowUpChannel?: 'email' | 'sms' | 'automation'
     paymentCompletedAt?: string
     lastPaymentSessionId?: string
+    amountPaid?: number        // Server-owned (Stripe webhook); never pushed from the client
+    completion?: JobCompletion // Job completion report (synced via estimate_attachments.completion)
     quickbooksInvoiceId?: string
     quickbooksCustomerId?: string
     quickbooksDocNumber?: string

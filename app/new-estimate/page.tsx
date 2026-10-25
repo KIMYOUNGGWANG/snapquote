@@ -2828,6 +2828,7 @@ function NewEstimatePageContent() {
                 id: section.id,
                 name: section.name,
                 divisionCode: section.divisionCode,
+                addedOnSite: section.addedOnSite,
                 items: section.items.map((item) => ({
                     id: item.id,
                     itemNumber: item.itemNumber,

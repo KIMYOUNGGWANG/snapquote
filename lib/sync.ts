@@ -10,6 +10,7 @@ import {
     mapCloudCustomerPortalLinkToLocalPatch,
     mapLocalEstimateAttachmentsToCloudRow,
     mapLocalEstimateItemToCloudRow,
+    mapLocalEstimateSectionToCloudRow,
     mapLocalEstimateSectionItemToCloudRow,
     mapLocalEstimateToCloudRow,
     mapCloudEstimateToLocal,
@@ -205,6 +206,7 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
                     division_code,
                     name,
                     sort_order,
+                    added_on_site,
                     estimate_section_items (
                         local_id,
                         item_number,
@@ -220,7 +222,8 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
                     photos,
                     audio_url,
                     original_transcript,
-                    scope_assumptions_confirmed_at
+                    scope_assumptions_confirmed_at,
+                    completion
                 ),
                 clients (name, address, email, phone, notes)
             `)
@@ -451,14 +454,9 @@ async function pushEstimateToCloud(userId: string, estimate: LocalEstimate) {
     if (estimate.sections && estimate.sections.length > 0) {
         const { data: insertedSections, error: sectionInsertError } = await supabase
             .from('estimate_sections')
-            .insert(estimate.sections.map((s, idx) => ({
-                estimate_id: estimate.id,
-                local_id: s.id,
-                division_code: s.divisionCode ?? null,
-                name: s.name,
-                sort_order: idx,
-                updated_at: now
-            })))
+            .insert(estimate.sections.map((s, idx) =>
+                mapLocalEstimateSectionToCloudRow(estimate.id, s, idx, { updatedAt: now })
+            ))
             .select('id, local_id')
 
         if (sectionInsertError) throw sectionInsertError
@@ -490,7 +488,10 @@ async function pushEstimateToCloud(userId: string, estimate: LocalEstimate) {
     }
 
     // 4. Refresh Attachments
-    const attachmentRow = mapLocalEstimateAttachmentsToCloudRow(estimate.id, estimate.attachments, { updatedAt: now })
+    const attachmentRow = mapLocalEstimateAttachmentsToCloudRow(estimate.id, estimate.attachments, {
+        updatedAt: now,
+        completion: estimate.completion,
+    })
 
     if (attachmentRow) {
         const upsertAttachments = await supabase

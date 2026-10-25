@@ -4,6 +4,7 @@ import type {
     EstimateItem,
     EstimateSection,
     EstimateUnit,
+    JobCompletion,
     LocalEstimate,
 } from "./estimates-storage"
 import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
@@ -26,6 +27,7 @@ type CloudEstimateSectionRow = {
     division_code?: unknown
     name?: unknown
     sort_order?: unknown
+    added_on_site?: unknown
     estimate_section_items?: unknown
 }
 
@@ -34,6 +36,7 @@ type CloudEstimateAttachmentRow = {
     audio_url?: unknown
     original_transcript?: unknown
     scope_assumptions_confirmed_at?: unknown
+    completion?: unknown
 }
 
 export type CloudQuickBooksInvoiceLinkRow = {
@@ -74,6 +77,7 @@ export type CloudEstimateRow = {
     superseded_at?: unknown
     first_followed_up_at?: unknown
     last_followed_up_at?: unknown
+    amount_paid?: unknown
     clients?: {
         name?: unknown
         address?: unknown
@@ -123,6 +127,17 @@ export type CloudEstimateAttachmentUpsertRow = {
     audio_url: string | null
     original_transcript: string | null
     scope_assumptions_confirmed_at: string | null
+    completion?: JobCompletion
+    updated_at?: string
+}
+
+export type CloudEstimateSectionInsertRow = {
+    estimate_id: string
+    local_id: string
+    division_code: string | null
+    name: string
+    sort_order: number
+    added_on_site: boolean
     updated_at?: string
 }
 
@@ -301,10 +316,27 @@ export function mapLocalEstimateSectionItemToCloudRow(
     }
 }
 
+export function mapLocalEstimateSectionToCloudRow(
+    estimateId: string,
+    section: EstimateSection,
+    sortOrder: number,
+    options: { updatedAt?: string } = {}
+): CloudEstimateSectionInsertRow {
+    return {
+        estimate_id: estimateId,
+        local_id: section.id,
+        division_code: section.divisionCode ?? null,
+        name: section.name,
+        sort_order: sortOrder,
+        added_on_site: section.addedOnSite === true,
+        ...(options.updatedAt ? { updated_at: options.updatedAt } : {}),
+    }
+}
+
 export function mapLocalEstimateAttachmentsToCloudRow(
     estimateId: string,
     attachments: EstimateAttachments | undefined,
-    options: { updatedAt?: string } = {}
+    options: { updatedAt?: string; completion?: JobCompletion } = {}
 ): CloudEstimateAttachmentUpsertRow | null {
     const photos = attachments?.photos?.filter((photo) => typeof photo === "string" && photo.trim() !== "") || []
     const audioUrl = attachments?.audioUrl?.trim() || null
@@ -314,7 +346,8 @@ export function mapLocalEstimateAttachmentsToCloudRow(
         photos.length > 0 ||
         Boolean(audioUrl) ||
         Boolean(originalTranscript) ||
-        Boolean(scopeAssumptionsConfirmedAt)
+        Boolean(scopeAssumptionsConfirmedAt) ||
+        Boolean(options.completion)
 
     if (!hasAttachmentState) return null
 
@@ -324,6 +357,7 @@ export function mapLocalEstimateAttachmentsToCloudRow(
         audio_url: audioUrl,
         original_transcript: originalTranscript,
         scope_assumptions_confirmed_at: scopeAssumptionsConfirmedAt,
+        ...(options.completion ? { completion: options.completion } : {}),
         ...(options.updatedAt ? { updated_at: options.updatedAt } : {}),
     }
 }
@@ -392,6 +426,34 @@ function extractAttachmentRow(value: unknown): CloudEstimateAttachmentRow | null
     return value && typeof value === "object" ? value as CloudEstimateAttachmentRow : null
 }
 
+function isStringArray(value: unknown): value is string[] {
+    return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+}
+
+function isJobCompletion(value: unknown): value is JobCompletion {
+    if (!value || typeof value !== "object") return false
+    const { completedAt, summary, photos, items } = value as Record<string, unknown>
+
+    return typeof completedAt === "string" &&
+        typeof summary === "string" &&
+        isStringArray(photos) &&
+        Array.isArray(items) &&
+        items.every((item) => {
+            if (!item || typeof item !== "object") return false
+            const { itemId, done, photoIndexes } = item as Record<string, unknown>
+            return typeof itemId === "string" &&
+                typeof done === "boolean" &&
+                Array.isArray(photoIndexes) &&
+                photoIndexes.every((index) => typeof index === "number" && Number.isFinite(index))
+        })
+}
+
+// Old rows have no completion column; malformed jsonb is dropped rather than trusted.
+function normalizeCloudCompletion(value: unknown): JobCompletion | undefined {
+    const completion = extractAttachmentRow(value)?.completion
+    return isJobCompletion(completion) ? completion : undefined
+}
+
 function normalizeCloudAttachments(value: unknown): EstimateAttachments | undefined {
     const attachmentRow = extractAttachmentRow(value)
     if (!attachmentRow) return undefined
@@ -425,6 +487,7 @@ function normalizeCloudSections(value: unknown): EstimateSection[] | undefined {
                 id: toSafeString(section.local_id).trim() || toSafeString(section.id).trim() || `section-${sectionIndex + 1}`,
                 divisionCode: toSafeString(section.division_code).trim() || undefined,
                 name: toSafeString(section.name).trim() || `Section ${sectionIndex + 1}`,
+                ...(section.added_on_site === true ? { addedOnSite: true } : {}),
                 items: rawItems
                     .filter((item): item is CloudEstimateItemRow => item !== null && typeof item === "object")
                     .map((item, itemIndex) => normalizeCloudEstimateItem(item, itemIndex))
@@ -449,6 +512,9 @@ export function mapCloudEstimateToLocal(cloudEstimate: CloudEstimateRow): LocalE
         : cloudEstimate.status === "sent"
             ? "sent"
             : "draft"
+
+    const amountPaid = cloudEstimate.amount_paid == null ? undefined : toSafeNumber(cloudEstimate.amount_paid)
+    const completion = normalizeCloudCompletion(cloudEstimate.estimate_attachments)
 
     return {
         id: toSafeString(cloudEstimate.id).trim(),
@@ -482,6 +548,8 @@ export function mapCloudEstimateToLocal(cloudEstimate: CloudEstimateRow): LocalE
         items,
         sections: normalizeCloudSections(cloudEstimate.estimate_sections),
         attachments: normalizeCloudAttachments(cloudEstimate.estimate_attachments),
+        ...(amountPaid !== undefined ? { amountPaid } : {}),
+        ...(completion ? { completion } : {}),
     }
 }
 
