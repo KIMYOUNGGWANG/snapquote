@@ -51,6 +51,10 @@ export const completionReportRequestSchema = z.object({
     note: z.string({ error: "Invalid note input" }).max(2_000, "Invalid note input").optional(),
 }).strict()
 
+export const completionFinalizeRequestSchema = z.object({
+    alreadyReceived: z.number({ error: "Invalid amount received" }).finite("Invalid amount received").min(0, "Invalid amount received").max(1_000_000, "Invalid amount received"),
+}).strict()
+
 export const parseReceiptFormSchema = z.object({
     file: z.custom<File>((value) => value instanceof File, {
         error: "No file provided",
