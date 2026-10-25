@@ -1,0 +1,216 @@
+// Browser orchestration for the job completion report (AI match, finalize, send).
+import { withAuthHeaders } from "@/lib/auth-headers"
+import {
+    createCustomerPortalLinkForEstimate,
+    getCustomerPortalEstimateUpdates,
+} from "@/lib/customer-portal-client"
+import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
+import { saveEstimate, type JobCompletion, type LocalEstimate } from "@/lib/estimates-storage"
+import {
+    applyExtraWork,
+    buildCompletionEmailSubject,
+    sanitizeCompletionMatches,
+    type CompletionMatchResult,
+    type ExtraWorkLine,
+} from "@/lib/job-completion"
+import { supabase } from "@/lib/supabase"
+import { syncEstimates } from "@/lib/sync"
+
+const AI_TIMEOUT_MS = 60_000
+
+export type CompletionMatchOutcome =
+    | ({ kind: "matched" } & CompletionMatchResult)
+    | { kind: "limit"; message: string }
+    | { kind: "failed" }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+function readErrorMessage(data: unknown, fallback: string): string {
+    if (!isRecord(data)) return fallback
+    if (typeof data.error === "string" && data.error.trim()) return data.error.trim()
+    if (isRecord(data.error) && typeof data.error.message === "string" && data.error.message.trim()) {
+        return data.error.message.trim()
+    }
+    return fallback
+}
+
+/** AI photo matching. Any failure (502, timeout, offline) falls back to an all-"?" review. */
+export async function requestCompletionMatches(input: {
+    items: { itemId: string; description: string }[]
+    photos: string[]
+    note?: string
+}): Promise<CompletionMatchOutcome> {
+    if (typeof navigator !== "undefined" && !navigator.onLine) return { kind: "failed" }
+
+    try {
+        const response = await fetch("/api/completion-report", {
+            method: "POST",
+            headers: await withAuthHeaders({ "content-type": "application/json" }),
+            body: JSON.stringify({
+                items: input.items.slice(0, 300).map((item) => ({
+                    itemId: item.itemId,
+                    description: item.description.slice(0, 1000),
+                })),
+                photos: input.photos,
+                note: input.note?.trim() ? input.note.trim().slice(0, 2000) : undefined,
+            }),
+            signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+        })
+        const data: unknown = await response.json().catch(() => null)
+
+        if (response.status === 402) {
+            return { kind: "limit", message: readErrorMessage(data, "Free plan includes 2 completion reports per month.") }
+        }
+        if (!response.ok) return { kind: "failed" }
+
+        return {
+            kind: "matched",
+            ...sanitizeCompletionMatches(data, input.items.map((item) => item.itemId), input.photos.length),
+        }
+    } catch (error) {
+        console.warn("Completion report AI matching failed:", error)
+        return { kind: "failed" }
+    }
+}
+
+type FinalizeResponse = {
+    amountPaid: number
+    balanceDue: number
+    paymentLink?: string
+    paymentLinkId?: string
+}
+
+async function postFinalize(estimateId: string, alreadyReceived: number): Promise<FinalizeResponse> {
+    const response = await fetch(`/api/estimates/${encodeURIComponent(estimateId)}/completion`, {
+        method: "POST",
+        headers: await withAuthHeaders({ "content-type": "application/json" }),
+        body: JSON.stringify({ alreadyReceived }),
+    })
+    const data: unknown = await response.json().catch(() => null)
+    if (!response.ok || !isRecord(data) || data.ok !== true) {
+        throw new Error(readErrorMessage(data, "Couldn't save the payment details. Try again."))
+    }
+    if (typeof data.amountPaid !== "number" || typeof data.balanceDue !== "number") {
+        throw new Error("Completion response was incomplete.")
+    }
+
+    return {
+        amountPaid: data.amountPaid,
+        balanceDue: data.balanceDue,
+        paymentLink: typeof data.paymentLink === "string" ? data.paymentLink : undefined,
+        paymentLinkId: typeof data.paymentLinkId === "string" ? data.paymentLinkId : undefined,
+    }
+}
+
+/** Status is server-owned: read what the finalize route decided instead of inferring it. */
+async function fetchServerPaymentStatus(estimateId: string): Promise<Pick<LocalEstimate, "status" | "paymentCompletedAt">> {
+    const { data, error } = await supabase
+        .from("estimates")
+        .select("status, payment_completed_at")
+        .eq("id", estimateId)
+        .maybeSingle()
+    if (error || !isRecord(data)) {
+        throw new Error("Couldn't confirm the payment status. Try again.")
+    }
+
+    const paymentCompletedAt = typeof data.payment_completed_at === "string" && data.payment_completed_at.trim()
+        ? data.payment_completed_at
+        : undefined
+    const status = isEstimatePaidLike({ status: data.status, paymentCompletedAt })
+        ? "paid"
+        : data.status === "sent" ? "sent" : "draft"
+
+    return { status, paymentCompletedAt }
+}
+
+/**
+ * One send: save extra work -> push -> finalize (amount received + balance link) -> portal snapshot -> save locally.
+ * `completion` is stored last, so a stored completion means the report was finalized (resend never re-finalizes).
+ */
+export async function finalizeJobCompletion(
+    estimate: LocalEstimate,
+    input: { completion: JobCompletion; extraWork: ExtraWorkLine[]; alreadyReceived: number }
+): Promise<{ estimate: LocalEstimate; portalUrl: string; balanceDue: number }> {
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+        throw new Error("You're offline. Connect to send the report.")
+    }
+
+    // 1. Extra work + recomputed totals, saved locally.
+    const withExtraWork: LocalEstimate = {
+        ...applyExtraWork(estimate, input.extraWork),
+        updatedAt: new Date().toISOString(),
+        synced: false,
+    }
+    await saveEstimate(withExtraWork)
+
+    // 2. Push so the server finalizes against the new total.
+    const sync = await syncEstimates()
+    if (sync.status !== "synced") {
+        throw new Error(sync.status === "offline"
+            ? "You're offline. Connect to send the report."
+            : "Sign in to send the report.")
+    }
+
+    // 3. Record what was received and create the balance link.
+    const finalized = await postFinalize(estimate.id, input.alreadyReceived)
+    const serverStatus = await fetchServerPaymentStatus(estimate.id)
+    const finalizedEstimate: LocalEstimate = {
+        ...withExtraWork,
+        ...serverStatus,
+        amountPaid: finalized.amountPaid,
+        paymentLink: finalized.paymentLink,
+        paymentLinkId: finalized.paymentLinkId,
+        paymentLinkType: finalized.paymentLink ? "custom" : undefined,
+        completion: input.completion,
+    }
+
+    // 4. Refresh the portal snapshot without resetting the customer's approval.
+    const portal = await createCustomerPortalLinkForEstimate(finalizedEstimate, {
+        completion: { amountPaid: finalized.amountPaid, balanceDue: finalized.balanceDue },
+    })
+    const portalUrl = portal.shareUrl
+    if (!portalUrl) throw new Error("Customer link was not returned. Try again.")
+
+    // 5. Store locally, then push the completion in the background.
+    const saved: LocalEstimate = {
+        ...finalizedEstimate,
+        ...getCustomerPortalEstimateUpdates(portal),
+        updatedAt: new Date().toISOString(),
+        synced: false,
+    }
+    await saveEstimate(saved)
+    void syncEstimates().catch((error: unknown) => console.warn("Completion sync deferred:", error))
+
+    return { estimate: saved, portalUrl, balanceDue: finalized.balanceDue }
+}
+
+export async function sendCompletionEmail(input: {
+    estimateNumber: string
+    email: string
+    message: string
+    clientName?: string
+    businessName?: string
+}): Promise<"sent" | "mailto"> {
+    const response = await fetch("/api/send-email", {
+        method: "POST",
+        headers: await withAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+            email: input.email.trim(),
+            subject: buildCompletionEmailSubject(input.estimateNumber),
+            message: input.message,
+            clientName: input.clientName,
+            businessName: input.businessName,
+        }),
+    })
+    const data: unknown = await response.json().catch(() => null)
+    if (!response.ok) throw new Error(readErrorMessage(data, "Failed to send email. Please try again."))
+
+    if (isRecord(data) && data.method === "mailto" && typeof data.mailtoUrl === "string") {
+        window.open(data.mailtoUrl, "_blank")
+        return "mailto"
+    }
+    if (isRecord(data) && data.success === true) return "sent"
+    throw new Error(readErrorMessage(data, "Failed to send email. Please try again."))
+}

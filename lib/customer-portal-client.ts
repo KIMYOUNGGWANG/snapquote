@@ -29,6 +29,7 @@ export type CustomerPortalLinkOptions = {
     resetCustomerDecision?: boolean
     paymentLinkOverride?: string
     paymentLinkTypeOverride?: "full" | "deposit" | "custom"
+    completion?: { amountPaid: number; balanceDue: number }
 }
 
 function asOptionalHttpUrl(value: string | undefined): string | undefined {
@@ -44,9 +45,7 @@ function asOptionalHttpUrl(value: string | undefined): string | undefined {
 
 export function buildCustomerQuoteSnapshot(
     estimate: LocalEstimate,
-    options: Pick<CustomerPortalLinkOptions, "paymentLinkOverride" | "paymentLinkTypeOverride"> & {
-        completion?: { amountPaid: number; balanceDue: number }
-    } = {}
+    options: Pick<CustomerPortalLinkOptions, "paymentLinkOverride" | "paymentLinkTypeOverride" | "completion"> = {}
 ): CustomerQuoteSnapshotInput {
     const items = getAllItemsFromEstimate(estimate).map((item, index) => ({
         id: item.id,
@@ -99,8 +98,16 @@ export function buildCustomerQuoteSnapshot(
                 total: lineTotal(item),
             })),
         })),
+        // Pick fields explicitly: the snapshot schema is strict and rejects stray keys.
         completion: estimate.completion && options.completion
-            ? { ...estimate.completion, ...options.completion }
+            ? {
+                completedAt: estimate.completion.completedAt,
+                summary: estimate.completion.summary,
+                photos: estimate.completion.photos,
+                items: estimate.completion.items.map(({ itemId, done, photoIndexes }) => ({ itemId, done, photoIndexes })),
+                amountPaid: options.completion.amountPaid,
+                balanceDue: options.completion.balanceDue,
+            }
             : undefined,
         createdAt: estimate.createdAt,
         sentAt: estimate.sentAt,

@@ -1,0 +1,163 @@
+import assert from 'node:assert/strict'
+import { describe, test } from 'node:test'
+
+import {
+  applyExtraWork,
+  buildCompletionMessage,
+  buildExtraWorkSection,
+  buildReviewItems,
+  canCompleteJob,
+} from '../../lib/job-completion.ts'
+import { buildCustomerQuoteSnapshot } from '../../lib/customer-portal-client.ts'
+
+function makeEstimate(overrides = {}) {
+  return {
+    id: 'est-1',
+    estimateNumber: 'EST-1042',
+    items: [
+      { id: 'item-1', itemNumber: 1, category: 'LABOR', description: 'Remove old drain', quantity: 1, unit: 'LS', unit_price: 1000, total: 1000 },
+    ],
+    summary_note: '',
+    clientName: 'Rivera',
+    clientAddress: '1 Main',
+    taxRate: 13,
+    taxAmount: 130,
+    totalAmount: 1130,
+    createdAt: '2026-10-01T00:00:00.000Z',
+    updatedAt: '2026-10-01T00:00:00.000Z',
+    status: 'sent',
+    customerPortalStatus: 'approved',
+    ...overrides,
+  }
+}
+
+describe('buildExtraWorkSection', () => {
+  test('builds an "Added on site" section with one LS service line per entry', () => {
+    const section = buildExtraWorkSection([
+      { description: '  Extra valve ', amount: 120 },
+      { description: 'Haul away', amount: 45.5 },
+    ])
+
+    assert.equal(section.name, 'Added on site')
+    assert.equal(section.addedOnSite, true)
+    assert.equal(typeof section.id, 'string')
+    assert.equal(section.items.length, 2)
+    assert.deepEqual(
+      section.items.map(({ itemNumber, category, description, quantity, unit, unit_price, total }) => ({ itemNumber, category, description, quantity, unit, unit_price, total })),
+      [
+        { itemNumber: 1, category: 'SERVICE', description: 'Extra valve', quantity: 1, unit: 'LS', unit_price: 120, total: 120 },
+        { itemNumber: 2, category: 'SERVICE', description: 'Haul away', quantity: 1, unit: 'LS', unit_price: 45.5, total: 45.5 },
+      ]
+    )
+    assert.notEqual(section.items[0].id, section.items[1].id)
+  })
+
+  test('skips blank or non-positive lines', () => {
+    const section = buildExtraWorkSection([
+      { description: '   ', amount: 50 },
+      { description: 'Free check', amount: 0 },
+      { description: 'Real', amount: 10 },
+    ])
+    assert.deepEqual(section.items.map((item) => item.description), ['Real'])
+  })
+})
+
+describe('canCompleteJob', () => {
+  test('approved sent quote can be completed', () => {
+    assert.equal(canCompleteJob(makeEstimate()), true)
+  })
+
+  test('sent quote that is not approved cannot be completed', () => {
+    assert.equal(canCompleteJob(makeEstimate({ customerPortalStatus: 'viewed' })), false)
+    assert.equal(canCompleteJob(makeEstimate({ customerPortalStatus: undefined })), false)
+  })
+
+  test('deposit-paid legacy quote can be completed', () => {
+    assert.equal(canCompleteJob(makeEstimate({ status: 'paid', paymentLinkType: 'deposit', customerPortalStatus: undefined })), true)
+  })
+
+  test('fully paid quote cannot be completed', () => {
+    assert.equal(canCompleteJob(makeEstimate({ status: 'paid', paymentLinkType: 'full' })), false)
+    assert.equal(canCompleteJob(makeEstimate({ status: 'paid', paymentLinkType: undefined })), false)
+  })
+
+  test('drafts cannot be completed', () => {
+    assert.equal(canCompleteJob(makeEstimate({ status: 'draft' })), false)
+  })
+})
+
+describe('applyExtraWork', () => {
+  test('adds the section and recomputes tax and total with the same tax rate', () => {
+    const next = applyExtraWork(makeEstimate(), [{ description: 'Extra valve', amount: 100 }])
+
+    assert.equal(next.sections.length, 1)
+    assert.equal(next.sections[0].addedOnSite, true)
+    assert.equal(next.items.length, 2)
+    assert.equal(next.taxAmount, 143)
+    assert.equal(next.totalAmount, 1243)
+  })
+
+  test('replaces an earlier added-on-site section instead of stacking it', () => {
+    const first = applyExtraWork(makeEstimate(), [{ description: 'Extra valve', amount: 100 }])
+    const second = applyExtraWork(first, [{ description: 'Haul away', amount: 50 }])
+
+    assert.equal(second.sections.filter((section) => section.addedOnSite).length, 1)
+    assert.deepEqual(second.items.map((item) => item.description), ['Remove old drain', 'Haul away'])
+    assert.equal(second.totalAmount, 1186.5)
+  })
+
+  test('returns the estimate untouched when there is no extra work', () => {
+    const estimate = makeEstimate({ totalAmount: 1130.004 })
+    assert.equal(applyExtraWork(estimate, []), estimate)
+  })
+})
+
+describe('buildReviewItems', () => {
+  test('marks only high-confidence items with photos as done', () => {
+    const items = buildReviewItems(['a', 'b', 'c', 'd'], [
+      { itemId: 'a', photoIndexes: [0], confidence: 'high' },
+      { itemId: 'b', photoIndexes: [], confidence: 'high' },
+      { itemId: 'c', photoIndexes: [1], confidence: 'low' },
+    ])
+
+    assert.deepEqual(items, [
+      { itemId: 'a', done: true, photoIndexes: [0] },
+      { itemId: 'b', done: false, photoIndexes: [] },
+      { itemId: 'c', done: false, photoIndexes: [1] },
+      { itemId: 'd', done: false, photoIndexes: [] },
+    ])
+  })
+})
+
+describe('buildCompletionMessage', () => {
+  test('asks for the balance when one is due', () => {
+    assert.equal(
+      buildCompletionMessage('https://snapquote.test/q/abc', 1240),
+      'Your job is done. See photos and pay the balance here: https://snapquote.test/q/abc'
+    )
+  })
+
+  test('only shares photos when nothing is due', () => {
+    assert.equal(
+      buildCompletionMessage('https://snapquote.test/q/abc', 0),
+      'Your job is done. See the photos here: https://snapquote.test/q/abc'
+    )
+  })
+})
+
+describe('buildCustomerQuoteSnapshot completion', () => {
+  test('carries only the schema fields of the completion', () => {
+    const estimate = makeEstimate({
+      completion: {
+        completedAt: '2026-10-25T10:00:00.000Z',
+        summary: 'Done',
+        photos: [],
+        items: [{ itemId: 'item-1', done: true, photoIndexes: [] }],
+        stray: 'nope',
+      },
+    })
+
+    const snapshot = buildCustomerQuoteSnapshot(estimate, { completion: { amountPaid: 500, balanceDue: 630 } })
+    assert.deepEqual(Object.keys(snapshot.completion).sort(), ['amountPaid', 'balanceDue', 'completedAt', 'items', 'photos', 'summary'])
+  })
+})

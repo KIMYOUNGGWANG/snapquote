@@ -14,6 +14,7 @@ const ConfirmDialog = dynamic(() => import("@/components/confirm-dialog").then(m
 const PDFPreviewModal = dynamic(() => import("@/components/pdf-preview-modal").then(mod => mod.PDFPreviewModal), { ssr: false })
 const FollowUpModal = dynamic(() => import("@/components/follow-up-modal").then(mod => mod.FollowUpModal), { ssr: false })
 const SmsModal = dynamic(() => import("@/components/sms-modal").then(mod => mod.SmsModal), { ssr: false })
+const JobCompletionSheet = dynamic(() => import("@/components/job-completion/job-completion-sheet").then(mod => mod.JobCompletionSheet), { ssr: false })
 import { Badge } from "@/components/ui/badge"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
@@ -51,6 +52,7 @@ import {
 import { isOpenCustomerChangeRequest, isSupersededCustomerChangeRequest } from "@/lib/customer-revisions"
 import { isEstimateReadyForFollowUp } from "@/lib/follow-up-service"
 import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
+import { canCompleteJob } from "@/lib/job-completion"
 
 type TabType = 'drafts' | 'sent' | 'paid'
 type HistoryDeepLinkAction = "follow-up" | "sms"
@@ -304,6 +306,7 @@ function HistoryPageContent() {
     const [previewEstimate, setPreviewEstimate] = useState<LocalEstimate | null>(null)
     const [followUpEstimate, setFollowUpEstimate] = useState<LocalEstimate | null>(null)
     const [smsEstimate, setSmsEstimate] = useState<LocalEstimate | null>(null)
+    const [completionEstimate, setCompletionEstimate] = useState<LocalEstimate | null>(null)
     const [businessProfile, setBusinessProfile] = useState<BusinessInfo | undefined>(undefined)
     const [downloadingEstimateId, setDownloadingEstimateId] = useState<string | null>(null)
     const [historyActionIssue, setHistoryActionIssue] = useState<HistoryActionIssue | null>(null)
@@ -2089,6 +2092,12 @@ function HistoryPageContent() {
                     const canCreatePaymentLinkPrimary = isApprovedSentQuote
                         && !effectivePaymentLink
                         && !isLocalOnlyMode
+                    // A stored completion means the report was finalized: offer a resend, never a second finalize.
+                    const completionAction = !isAuthenticated
+                        ? null
+                        : estimate.completion
+                            ? (estimate.customerPortalUrl && !estimateIsPaidLike ? "resend" : null)
+                            : canCompleteJob(estimate) ? "complete" : null
                     const paymentStatusLabel = estimate.paymentLink?.trim()
                         ? "Payment link attached"
                         : businessProfile?.payment_link?.trim()
@@ -2487,6 +2496,18 @@ function HistoryPageContent() {
                                         className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap"
                                         data-testid="history-estimate-primary-actions"
                                     >
+                                        {completionAction && (
+                                            <Button
+                                                variant="default"
+                                                size="sm"
+                                                className="w-full sm:w-auto"
+                                                onClick={() => setCompletionEstimate(estimate)}
+                                                data-testid="history-mark-job-complete-action"
+                                            >
+                                                <CheckCircle2 className="mr-1 h-3 w-3" />
+                                                {completionAction === "resend" ? "Resend report" : "Mark job complete"}
+                                            </Button>
+                                        )}
                                         {items.length > 0 && (
                                             <>
                                                 <Button
@@ -2876,6 +2897,16 @@ function HistoryPageContent() {
                         customerPortalStatus={smsEstimate.customerPortalStatus}
                         approvalLinkStatus={canSendCustomerFollowUp(smsEstimate) ? "included" : "signin"}
                         onSend={(toPhoneNumber, message) => handleSendSms(smsEstimate, toPhoneNumber, message)}
+                    />
+                )
+            }
+            {
+                completionEstimate && (
+                    <JobCompletionSheet
+                        estimate={completionEstimate}
+                        businessName={businessProfile?.business_name}
+                        onClose={() => setCompletionEstimate(null)}
+                        onChanged={loadData}
                     />
                 )
             }
