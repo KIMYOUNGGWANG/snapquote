@@ -180,6 +180,61 @@ describe('POST /api/estimates/[estimateId]/completion', () => {
     assert.equal(updates[0].payload.payment_link_id, null)
   })
 
+  test('finalize with received >= total marks estimate paid', async () => {
+    const state = getTestState()
+    const updates = mockDb(state, baseEstimate())
+
+    const res = await post({ alreadyReceived: 1740 })
+
+    assert.equal(res.status, 200)
+    assert.equal(updates[0].payload.status, 'paid')
+    assert.match(updates[0].payload.payment_completed_at, /^\d{4}-\d{2}-\d{2}T/)
+  })
+
+  test('finalize keeps an existing payment_completed_at when marking paid', async () => {
+    const state = getTestState()
+    const updates = mockDb(
+      state,
+      baseEstimate({ status: 'paid', payment_link_type: 'deposit', payment_completed_at: '2026-10-20T00:00:00Z' })
+    )
+
+    const res = await post({ alreadyReceived: 1740 })
+
+    assert.equal(res.status, 200)
+    assert.equal(updates[0].payload.status, 'paid')
+    assert.equal(updates[0].payload.payment_completed_at, '2026-10-20T00:00:00Z')
+  })
+
+  test('finalize with total 0 keeps status and creates no link', async () => {
+    const state = getTestState()
+    const updates = mockDb(state, baseEstimate({ total_amount: 0 }))
+
+    const res = await post({ alreadyReceived: 0 })
+
+    assert.equal(res.status, 200)
+    assert.equal('status' in updates[0].payload, false)
+    assert.equal('payment_completed_at' in updates[0].payload, false)
+  })
+
+  test('finalize idempotency key depends on stored link id and balance', async () => {
+    const keys = []
+    for (const [linkId, received] of [['plink_a', 500], ['plink_b', 500], ['plink_a', 500], ['plink_a', 600]]) {
+      resetTestState()
+      setEnv()
+      const state = getTestState()
+      mockDb(state, baseEstimate({ payment_link_id: linkId }))
+      state.stripe.paymentLinksCreate = async (payload, options) => {
+        keys.push(options.idempotencyKey)
+        return { id: 'plink_new', url: 'https://pay.stripe.com/new' }
+      }
+      assert.equal((await post({ alreadyReceived: received })).status, 200)
+    }
+
+    assert.notEqual(keys[0], keys[1])
+    assert.equal(keys[0], keys[2])
+    assert.notEqual(keys[0], keys[3])
+  })
+
   test('finalize reopens deposit-paid estimate to sent', async () => {
     const state = getTestState()
     const updates = mockDb(

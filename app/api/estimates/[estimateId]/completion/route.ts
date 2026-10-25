@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server"
+import { createHash } from "node:crypto"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 import { createEstimatePaymentLink, deactivatePaymentLink } from "@/lib/server/stripe-payment-link"
-import { computeBalanceDue, toCents } from "@/lib/estimates/balance"
+import { computeBalanceDue, isFullyPaid, toCents } from "@/lib/estimates/balance"
 import { completionFinalizeRequestSchema } from "@/lib/validation/api-schemas"
 
 type FinalizeEstimateRow = {
@@ -11,6 +12,7 @@ type FinalizeEstimateRow = {
     user_id: string
     estimate_number: string | null
     status: string | null
+    payment_completed_at: string | null
     total_amount: number | null
     payment_link_id: string | null
     payment_link_type: string | null
@@ -63,7 +65,7 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
 
     const { data, error: loadError } = await supabase
         .from("estimates")
-        .select("id, user_id, estimate_number, status, total_amount, payment_link_id, payment_link_type, clients(name)")
+        .select("id, user_id, estimate_number, status, payment_completed_at, total_amount, payment_link_id, payment_link_type, clients(name)")
         .eq("id", estimateId)
         .eq("user_id", auth.userId)
         .maybeSingle()
@@ -92,6 +94,10 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
             estimateNumber: estimate.estimate_number?.trim() || "",
             customerName: estimate.clients?.name?.trim().slice(0, 120) || "",
             amount: balanceDue,
+            // Fresh key when the stored link changed (A -> B -> A); same key for an exact retry.
+            idempotencyKey: `payment_link_balance:${createHash("sha256")
+                .update([auth.userId, estimate.id, toCents(balanceDue), previousLinkId || "none"].join("|"))
+                .digest("hex")}`,
         })
         if (!created.ok) {
             return NextResponse.json(
@@ -107,6 +113,13 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
         await deactivatePaymentLink({ userId: auth.userId, paymentLinkId: previousLinkId })
     }
 
+    // Contractor confirmed full receipt: server marks it paid (total 0 never counts).
+    const statusFields = isFullyPaid(totalAmount, alreadyReceived)
+        ? { status: "paid", payment_completed_at: estimate.payment_completed_at || new Date().toISOString() }
+        : reopeningDeposit && balanceDue > 0
+            ? { status: "sent", payment_completed_at: null }
+            : {}
+
     const { error: updateError } = await supabase
         .from("estimates")
         .update({
@@ -115,7 +128,7 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
             payment_link_id: newLink?.id ?? null,
             payment_link_type: newLink ? "custom" : null,
             updated_at: new Date().toISOString(),
-            ...(reopeningDeposit ? { status: "sent", payment_completed_at: null } : {}),
+            ...statusFields,
         })
         .eq("id", estimate.id)
         .eq("user_id", auth.userId)
