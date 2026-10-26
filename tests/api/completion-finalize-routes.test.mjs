@@ -58,11 +58,13 @@ const baseEstimate = (overrides = {}) => ({
   ...overrides,
 })
 
-const post = (body, id = ESTIMATE_ID) =>
+const postRaw = (body, id = ESTIMATE_ID) =>
   finalize(
     jsonRequest(`http://localhost/api/estimates/${id}/completion`, body, { headers: bearerHeader() }),
     { params: Promise.resolve({ estimateId: id }) }
   )
+// Defaults match baseEstimate(): what the sheet showed when it opened.
+const post = (body, id = ESTIMATE_ID) => postRaw({ expectedAmountPaid: 0, expectedTotal: 1740, ...body }, id)
 
 beforeEach(() => {
   resetTestState()
@@ -218,7 +220,7 @@ describe('POST /api/estimates/[estimateId]/completion', () => {
     const state = getTestState()
     const updates = mockDb(state, baseEstimate({ total_amount: 0 }))
 
-    const res = await post({ alreadyReceived: 0 })
+    const res = await post({ alreadyReceived: 0, expectedTotal: 0 })
     const data = await res.json()
 
     assert.equal(res.status, 200)
@@ -259,7 +261,7 @@ describe('POST /api/estimates/[estimateId]/completion', () => {
       })
     )
 
-    const res = await post({ alreadyReceived: 500 })
+    const res = await post({ alreadyReceived: 500, expectedAmountPaid: 500 })
     const data = await res.json()
 
     assert.equal(res.status, 200)
@@ -287,6 +289,68 @@ describe('POST /api/estimates/[estimateId]/completion', () => {
     assert.equal((await post({ alreadyReceived: 1_000_001 })).status, 400)
     assert.equal((await post({ alreadyReceived: '5' })).status, 400)
     assert.equal((await post({ alreadyReceived: 5, status: 'paid' })).status, 400)
+    assert.equal((await postRaw({ alreadyReceived: 5, expectedTotal: 1740 })).status, 400)
+    assert.equal((await postRaw({ alreadyReceived: 5, expectedAmountPaid: 0 })).status, 400)
+    assert.equal((await post({ alreadyReceived: 5, expectedAmountPaid: 1_000_001 })).status, 400)
+    assert.equal((await post({ alreadyReceived: 5, expectedAmountPaid: -1 })).status, 400)
+    assert.equal(state.stripe.instances.length, 0)
+  })
+
+  test('finalize returns 409 with server amounts when a payment landed after the sheet opened', async () => {
+    const state = getTestState()
+    // Webhook recorded $500 while the contractor had the sheet open with $0.
+    const updates = mockDb(state, baseEstimate({ amount_paid: 500, payment_link_id: 'plink_old' }))
+
+    const res = await post({ alreadyReceived: 0, expectedAmountPaid: 0 })
+    const data = await res.json()
+
+    assert.equal(res.status, 409)
+    assert.equal(data.error.code, 'COMPLETION_STATE_CHANGED')
+    assert.match(data.error.message, /Payments changed/)
+    assert.equal(data.amountPaid, 500)
+    assert.equal(data.totalAmount, 1740)
+    assert.equal(updates.length, 0)
+    assert.equal(state.stripe.instances.length, 0)
+  })
+
+  test('finalize compares expected amounts in cents', async () => {
+    const state = getTestState()
+    const updates = mockDb(state, baseEstimate({ amount_paid: '500.10', total_amount: '1740.20' }))
+    state.stripe.paymentLinksCreate = async () => ({ id: 'plink_new', url: 'https://pay.stripe.com/new' })
+
+    const res = await post({ alreadyReceived: 500.1, expectedAmountPaid: 500.1, expectedTotal: 1740.2 })
+
+    assert.equal(res.status, 200)
+    assert.equal(updates.length, 1)
+  })
+
+  test('finalize returns 409 when the server total differs from the reviewed total', async () => {
+    const state = getTestState()
+    const updates = mockDb(state, baseEstimate({ total_amount: 1900 }))
+
+    const res = await post({ alreadyReceived: 0, expectedTotal: 1740 })
+    const data = await res.json()
+
+    assert.equal(res.status, 409)
+    assert.equal(data.error.code, 'COMPLETION_STATE_CHANGED')
+    assert.equal(data.totalAmount, 1900)
+    assert.equal(data.amountPaid, 0)
+    assert.equal(updates.length, 0)
+    assert.equal(state.stripe.instances.length, 0)
+  })
+
+  test('finalize returns 409 when the stored total is missing', async () => {
+    const state = getTestState()
+    const updates = mockDb(state, baseEstimate({ total_amount: null }))
+
+    const res = await post({ alreadyReceived: 0, expectedTotal: 0 })
+    const data = await res.json()
+
+    assert.equal(res.status, 409)
+    assert.equal(data.error.code, 'COMPLETION_STATE_CHANGED')
+    assert.equal(data.totalAmount, null)
+    assert.equal(updates.length, 0)
+    assert.equal(state.stripe.instances.length, 0)
   })
 
   test("finalize rejects another user's estimate with 404", async () => {

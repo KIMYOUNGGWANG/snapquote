@@ -70,6 +70,8 @@ type Mocks = {
     smsDeduped?: boolean
     completionReportCalls: number
     finalizeUpdatedAt?: string
+    /** Next finalize answers 409 COMPLETION_STATE_CHANGED with these server values (a webhook payment landed). */
+    finalizeConflict?: { amountPaid: number; totalAmount: number }
     /** Cloud row served by the sync pull once AI matching ran (simulates another device's edit). */
     cloudEditOnMatch?: JsonRecord
     cloudRows: JsonRecord[]
@@ -117,6 +119,15 @@ async function routeApp(page: Page, options: Partial<Mocks> = {}): Promise<Mocks
     await page.route("**/api/estimates/*/completion", async (route) => {
         const body = route.request().postDataJSON() as JsonRecord
         mocks.finalizeCalls.push(body)
+        if (mocks.finalizeConflict) {
+            const conflict = mocks.finalizeConflict
+            mocks.finalizeConflict = undefined
+            await route.fulfill(json({
+                error: { code: "COMPLETION_STATE_CHANGED", message: "Payments changed since you opened this job. Review the updated amounts." },
+                ...conflict,
+            }, 409))
+            return
+        }
         const received = typeof body.alreadyReceived === "number" ? body.alreadyReceived : 0
         const pushed = mocks.estimateUpserts.filter((row) => row.id === "estimate-job-complete").at(-1)
         const total = typeof pushed?.total_amount === "number" ? pushed.total_amount : 1740
@@ -315,7 +326,8 @@ test("approved quote: photos, AI review, extra work, one send, SMS carries the p
     await expect(smsDialog.locator("#sms-message")).toHaveValue(`Your job is done. See photos and pay the balance here: ${PORTAL_URL}`)
     await page.screenshot({ path: path.join(SCREENS_DIR, "task9-sms.png"), animations: "disabled" })
 
-    expect(mocks.finalizeCalls).toEqual([{ alreadyReceived: 500 }])
+    // expectedAmountPaid is the default the sheet showed; expectedTotal is the reviewed total with extra work.
+    expect(mocks.finalizeCalls).toEqual([{ alreadyReceived: 500, expectedAmountPaid: 500, expectedTotal: 1840 }])
     // The last push before finalize carries the extra work (page load pushes the original first).
     const pushed = mocks.estimateUpserts.filter((row) => row.id === "estimate-job-complete").at(-1)
     expect(pushed?.total_amount).toBe(1840)
@@ -665,4 +677,39 @@ test("a total changed on another device stops the send before finalize", async (
     expect(stored?.totalAmount).toBe(2000)
     expect(stored?.completion).toBeUndefined()
     expect(stored?.pendingCompletion).toBeUndefined()
+})
+
+test("a payment that landed after the sheet opened: finalize stops and refreshes the amounts in place", async ({ page }) => {
+    const mocks = await routeApp(page, {
+        completionReport: { status: 200, body: { ok: true, summary: "", items: [] } },
+        finalizeConflict: { amountPaid: 900, totalAmount: 1740 },
+    })
+    await seedEstimates(page, [makeEstimate()])
+    await openCompletionSheet(page)
+
+    await addPhotos(page, ["drain.png"])
+    await page.getByTestId("completion-match-button").click()
+    await expect(page.getByTestId("completion-already-received")).toHaveValue("500")
+    await page.getByTestId("completion-send-button").click()
+
+    await expect(page.getByTestId("completion-send-error")).toContainText("Payments changed since you opened this job. Review the updated amounts.")
+    await expect(page.getByTestId("completion-already-received")).toHaveValue("900")
+    await expect(page.getByTestId("completion-balance")).toHaveText("$840.00")
+    await expect(page.getByTestId("completion-send-button")).toHaveText("Send & request $840.00")
+    expect(mocks.shareLinkPosts).toHaveLength(0)
+    const afterConflict = await readEstimate(page, "estimate-job-complete")
+    expect(afterConflict?.amountPaid).toBe(900)
+    expect(afterConflict?.pendingCompletion).toBeUndefined()
+    await page.getByTestId("completion-send-error").scrollIntoViewIfNeeded()
+    await page.screenshot({ path: path.join(SCREENS_DIR, "final-payments-changed.png"), animations: "disabled" })
+
+    // Same sheet, no reopen: the retry confirms against the refreshed server value.
+    await page.getByTestId("completion-send-button").click()
+    const smsDialog = page.getByRole("dialog", { name: "Text completion report" })
+    await expect(smsDialog).toBeVisible()
+    expect(mocks.finalizeCalls).toHaveLength(2)
+    expect(mocks.finalizeCalls[1]).toEqual({ alreadyReceived: 900, expectedAmountPaid: 900, expectedTotal: 1740 })
+    const completion = (mocks.shareLinkPosts.at(-1)?.estimate as JsonRecord).completion as JsonRecord
+    expect(completion.amountPaid).toBe(900)
+    expect(completion.balanceDue).toBe(840)
 })

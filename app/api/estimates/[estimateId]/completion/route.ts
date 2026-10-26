@@ -13,7 +13,8 @@ type FinalizeEstimateRow = {
     estimate_number: string | null
     status: string | null
     payment_completed_at: string | null
-    total_amount: number | null
+    total_amount: number | string | null
+    amount_paid: number | string | null
     payment_link_id: string | null
     payment_link_type: string | null
     clients: { name: string | null } | null
@@ -23,8 +24,10 @@ function errorResponse(message: string, status: number) {
     return NextResponse.json({ error: { message, code: status } }, { status })
 }
 
-function toMoney(value: unknown): number {
-    return typeof value === "number" && Number.isFinite(value) ? value : 0
+// numeric columns can arrive as strings from PostgREST.
+function toMoneyOrNull(value: unknown): number | null {
+    const amount = typeof value === "string" && value.trim() ? Number(value) : value
+    return typeof amount === "number" && Number.isFinite(amount) ? amount : null
 }
 
 export async function POST(req: Request, context: { params: Promise<{ estimateId: string }> }) {
@@ -65,7 +68,7 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
 
     const { data, error: loadError } = await supabase
         .from("estimates")
-        .select("id, user_id, estimate_number, status, payment_completed_at, total_amount, payment_link_id, payment_link_type, clients(name)")
+        .select("id, user_id, estimate_number, status, payment_completed_at, total_amount, amount_paid, payment_link_id, payment_link_type, clients(name)")
         .eq("id", estimateId)
         .eq("user_id", auth.userId)
         .maybeSingle()
@@ -81,7 +84,26 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
         return errorResponse("This estimate can't be completed in its current state.", 409)
     }
 
-    const totalAmount = toMoney(estimate.total_amount)
+    // A webhook payment (or another device's total edit) landed after the sheet opened: stop before Stripe
+    // so the stale "Already received" default never overwrites amount_paid.
+    const storedTotal = toMoneyOrNull(estimate.total_amount)
+    const storedAmountPaid = toMoneyOrNull(estimate.amount_paid) ?? 0
+    if (
+        storedTotal === null
+        || toCents(storedTotal) !== toCents(parsed.data.expectedTotal)
+        || toCents(storedAmountPaid) !== toCents(parsed.data.expectedAmountPaid)
+    ) {
+        return NextResponse.json({
+            error: {
+                code: "COMPLETION_STATE_CHANGED",
+                message: "Payments changed since you opened this job. Review the updated amounts.",
+            },
+            amountPaid: storedAmountPaid,
+            totalAmount: storedTotal,
+        }, { status: 409 })
+    }
+
+    const totalAmount = storedTotal
     const balanceDue = computeBalanceDue(totalAmount, alreadyReceived)
     const previousLinkId = estimate.payment_link_id?.trim() || ""
 

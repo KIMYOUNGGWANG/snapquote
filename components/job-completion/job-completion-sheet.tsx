@@ -39,6 +39,7 @@ import {
     type ExtraWorkLine,
 } from "@/lib/job-completion"
 import {
+    CompletionPaymentsChangedError,
     ensureCompletionPortalUrl,
     finalizeJobCompletion,
     getStoredEstimate,
@@ -153,6 +154,8 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
         .flatMap((section) => section.items)
         .map((item) => ({ key: item.id, description: item.description, amount: String(item.total) })))
     const [alreadyReceived, setAlreadyReceived] = useState(() => String(estimate.amountPaid ?? 0))
+    // The server amount behind the default above: finalize is rejected if amount_paid moved since.
+    const [expectedAmountPaid, setExpectedAmountPaid] = useState(() => estimate.amountPaid ?? 0)
     const [selectedPhoto, setSelectedPhoto] = useState<SelectedPhoto | null>(null)
     const [sending, setSending] = useState(false)
     const [sendError, setSendError] = useState("")
@@ -329,6 +332,11 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
             result = await finalizeJobCompletion(estimate, input, options)
         } catch (error) {
             setSendError(getErrorMessage(error, "Couldn't send the report. Try again."))
+            if (error instanceof CompletionPaymentsChangedError) {
+                // Refresh the default (and the balance it drives) in place; the next send confirms against it.
+                setAlreadyReceived(String(error.amountPaid))
+                setExpectedAmountPaid(error.amountPaid)
+            }
             // Finalize may have run before the failure: switch to resume so a retry never re-finalizes.
             const stored = await getStoredEstimate(estimate.id).catch(() => undefined)
             if (stored?.pendingCompletion) {
@@ -361,13 +369,17 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
             },
             extraWork: extraWorkLines,
             alreadyReceived: receivedValue,
+            expectedAmountPaid,
         })
     }
 
     // Inputs are ignored on resume: the stored pending completion is used.
     const handleResume = () => {
         if (!pending || !online || sending) return
-        void runFinalize({ completion: pending.completion, extraWork: [], alreadyReceived: pending.amountPaid }, { resume: true })
+        void runFinalize(
+            { completion: pending.completion, extraWork: [], alreadyReceived: pending.amountPaid, expectedAmountPaid: pending.amountPaid },
+            { resume: true }
+        )
     }
 
     const readyMessage = ready ? buildCompletionMessage(ready.portalUrl, ready.balanceDue, { reminder: isResend }) : ""

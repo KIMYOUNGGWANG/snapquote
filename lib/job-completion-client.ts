@@ -77,7 +77,6 @@ export async function requestCompletionMatches(input: {
 }
 
 type FinalizeResponse = {
-    totalAmount?: number
     amountPaid: number
     balanceDue: number
     paymentLink?: string
@@ -103,13 +102,36 @@ export class CompletionTotalsChangedError extends Error {
     }
 }
 
-async function postFinalize(estimateId: string, alreadyReceived: number): Promise<FinalizeResponse> {
+/** The server's amount_paid or total moved since the sheet opened: finalize stopped before Stripe. */
+export class CompletionPaymentsChangedError extends Error {
+    readonly amountPaid: number
+
+    constructor(amountPaid: number) {
+        super("Payments changed since you opened this job. Review the updated amounts.")
+        this.name = "CompletionPaymentsChangedError"
+        this.amountPaid = amountPaid
+    }
+}
+
+async function postFinalize(
+    estimateId: string,
+    body: { alreadyReceived: number; expectedAmountPaid: number; expectedTotal: number }
+): Promise<FinalizeResponse> {
     const response = await fetch(`/api/estimates/${encodeURIComponent(estimateId)}/completion`, {
         method: "POST",
         headers: await withAuthHeaders({ "content-type": "application/json" }),
-        body: JSON.stringify({ alreadyReceived }),
+        body: JSON.stringify(body),
     })
     const data: unknown = await response.json().catch(() => null)
+    if (
+        response.status === 409
+        && isRecord(data)
+        && isRecord(data.error)
+        && data.error.code === "COMPLETION_STATE_CHANGED"
+        && typeof data.amountPaid === "number"
+    ) {
+        throw new CompletionPaymentsChangedError(data.amountPaid)
+    }
     if (!response.ok || !isRecord(data) || data.ok !== true) {
         throw new Error(readErrorMessage(data, "Couldn't save the payment details. Try again."))
     }
@@ -126,7 +148,6 @@ async function postFinalize(estimateId: string, alreadyReceived: number): Promis
         : data.status === "sent" ? "sent" : "draft"
 
     return {
-        totalAmount: typeof data.totalAmount === "number" ? data.totalAmount : undefined,
         amountPaid: data.amountPaid,
         balanceDue: data.balanceDue,
         paymentLink: typeof data.paymentLink === "string" ? data.paymentLink : undefined,
@@ -149,7 +170,8 @@ export async function getStoredEstimate(estimateId: string): Promise<LocalEstima
  */
 export async function finalizeJobCompletion(
     estimate: LocalEstimate,
-    input: { completion: JobCompletion; extraWork: ExtraWorkLine[]; alreadyReceived: number },
+    // expectedAmountPaid: the server amount the sheet showed as its default (not the contractor's edit).
+    input: { completion: JobCompletion; extraWork: ExtraWorkLine[]; alreadyReceived: number; expectedAmountPaid: number },
     options: { resume?: boolean } = {}
 ): Promise<{ estimate: LocalEstimate; portalUrl: string; balanceDue: number }> {
     if (typeof navigator !== "undefined" && !navigator.onLine) {
@@ -182,10 +204,23 @@ export async function finalizeJobCompletion(
         }
 
         // 3. Record what was received, create the balance link, and keep the server's answer locally at once.
-        const result = await postFinalize(estimate.id, input.alreadyReceived)
-        // Server total is the source of truth for the link; on a mismatch keep the row queued for sync.
-        const totalsMatch = result.totalAmount === undefined
-            || toCents(result.totalAmount) === toCents(withExtraWork.totalAmount)
+        // The server rejects (409) if amount_paid or the total moved, so a success always matches what was reviewed.
+        let result: FinalizeResponse
+        try {
+            result = await postFinalize(estimate.id, {
+                alreadyReceived: input.alreadyReceived,
+                expectedAmountPaid: input.expectedAmountPaid,
+                expectedTotal: withExtraWork.totalAmount,
+            })
+        } catch (error) {
+            if (error instanceof CompletionPaymentsChangedError) {
+                // amount_paid is server-owned: take the server's value without marking a local edit.
+                // ponytail: the total is not copied — local items define it and the retry's push re-aligns it.
+                const stored = await getStoredEstimate(estimate.id)
+                if (stored) await saveEstimate({ ...stored, amountPaid: error.amountPaid })
+            }
+            throw error
+        }
         finalized = {
             ...withExtraWork,
             status: result.status,
@@ -197,7 +232,7 @@ export async function finalizeJobCompletion(
             pendingCompletion: { completion: input.completion, amountPaid: result.amountPaid, balanceDue: result.balanceDue },
             // Server's own updated_at: LWW then sees local == cloud and neither pushes nor pulls this row.
             updatedAt: result.updatedAt ?? new Date().toISOString(),
-            synced: Boolean(result.updatedAt) && totalsMatch,
+            synced: Boolean(result.updatedAt),
         }
         await saveEstimate(finalized)
     }

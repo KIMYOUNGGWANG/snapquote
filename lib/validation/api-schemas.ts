@@ -53,6 +53,9 @@ export const completionReportRequestSchema = z.object({
 
 export const completionFinalizeRequestSchema = z.object({
     alreadyReceived: z.number({ error: "Invalid amount received" }).finite("Invalid amount received").min(0, "Invalid amount received").max(1_000_000, "Invalid amount received"),
+    // What the sheet showed when it opened: the server rejects the finalize if either moved since.
+    expectedAmountPaid: z.number().finite().min(0).max(1_000_000),
+    expectedTotal: z.number().finite().min(0),
 }).strict()
 
 export const parseReceiptFormSchema = z.object({
