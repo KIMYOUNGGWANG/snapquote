@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import { getEstimates, saveEstimate, LocalEstimate } from './estimates-storage' // Correct imports
 import { resolveLwwSyncAction } from './sync-resolution'
+import { createCoalescedRunner } from './sync-single-flight'
 import {
     applyCloudAmountPaidToLocalEstimate,
     applyCloudCustomerPortalLinkToLocalEstimate,
@@ -157,7 +158,16 @@ async function resolveClientId(userId: string, estimate: LocalEstimate): Promise
     return newClient?.id || null
 }
 
-export async function syncEstimates(): Promise<SyncEstimatesResult> {
+// Overlapping syncs interleave pushEstimateToCloud's delete+reinsert (duplicate items) and let an
+// older snapshot overwrite newer local writes. Coalesce calls within a tab; the Web Lock serializes
+// tabs, which all sync on the same `online` event and share IndexedDB.
+export const syncEstimates = createCoalescedRunner(async () =>
+    typeof navigator !== "undefined" && "locks" in navigator
+        ? await navigator.locks.request("snapquote-sync-estimates", runSyncEstimates)
+        : runSyncEstimates()
+)
+
+async function runSyncEstimates(): Promise<SyncEstimatesResult> {
     if (typeof navigator !== "undefined" && !navigator.onLine) {
         return {
             status: "offline",
