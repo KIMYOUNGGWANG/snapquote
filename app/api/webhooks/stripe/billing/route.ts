@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import Stripe from "stripe"
 import { recordOpsAlert } from "@/lib/ops-alerts"
+import { errorMessage, readField } from "@/lib/unknown-fields"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 import {
     getSubscriptionPriceId,
@@ -111,20 +112,20 @@ async function resolveStateFromSubscription(
     }
 }
 
+// Stripe API 버전에 따라 필드 위치·이름이 달라서 SDK 타입 밖의 필드를 unknown으로 읽는다.
 function getSubscriptionCurrentPeriodEndUnix(subscription: Stripe.Subscription): number | null {
-    const raw = (subscription as any).current_period_end ?? (subscription as any).currentPeriodEnd
+    const raw = readField(subscription, "current_period_end") ?? readField(subscription, "currentPeriodEnd")
     return typeof raw === "number" && Number.isFinite(raw) ? raw : null
 }
 
 function getSubscriptionCancelAtPeriodEnd(subscription: Stripe.Subscription): boolean {
-    const raw = (subscription as any).cancel_at_period_end ?? (subscription as any).cancelAtPeriodEnd
+    const raw = readField(subscription, "cancel_at_period_end") ?? readField(subscription, "cancelAtPeriodEnd")
     return Boolean(raw)
 }
 
 function getInvoiceSubscriptionId(invoice: Stripe.Invoice): string {
-    const raw =
-        (invoice as any).subscription ??
-        (invoice as any).parent?.subscription_details?.subscription
+    const subscriptionDetails = readField(readField(invoice, "parent"), "subscription_details")
+    const raw = readField(invoice, "subscription") ?? readField(subscriptionDetails, "subscription")
     return toStripeId(raw)
 }
 
@@ -176,15 +177,15 @@ export async function POST(req: Request) {
     let event: Stripe.Event
     try {
         event = stripe.webhooks.constructEvent(body, signature, webhookSecret)
-    } catch (error: any) {
+    } catch (error: unknown) {
         await recordOpsAlert({
             source: "stripe_billing_webhook",
             severity: "warning",
             alertKey: "stripe_billing_webhook_signature_verification_failed",
             message: "Stripe billing webhook signature verification failed",
-            context: { error: error?.message || "unknown" },
+            context: { error: errorMessage(error) || "unknown" },
         })
-        return new NextResponse(`Webhook Error: ${error?.message || "invalid signature"}`, { status: 400 })
+        return new NextResponse(`Webhook Error: ${errorMessage(error) || "invalid signature"}`, { status: 400 })
     }
 
     try {
@@ -316,7 +317,7 @@ export async function POST(req: Request) {
         }
 
         return new NextResponse("Received", { status: 200 })
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Stripe billing webhook error:", error)
         await recordOpsAlert({
             source: "stripe_billing_webhook",
@@ -325,7 +326,7 @@ export async function POST(req: Request) {
             message: "Unhandled Stripe billing webhook failure",
             context: {
                 eventType: event.type,
-                error: error?.message || "unknown",
+                error: errorMessage(error) || "unknown",
             },
         })
         return new NextResponse("Webhook handler error", { status: 500 })

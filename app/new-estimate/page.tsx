@@ -1071,7 +1071,7 @@ function NewEstimatePageContent() {
         router.push(`/login?${params.toString()}`)
     }, [router])
 
-    const loadDraftIntoComposer = useCallback((draft: Record<string, any>, options?: { tutorial?: boolean; toastMessage?: string; preserveDraftMeta?: boolean }) => {
+    const loadDraftIntoComposer = useCallback((draft: Record<string, unknown>, options?: { tutorial?: boolean; toastMessage?: string; preserveDraftMeta?: boolean }) => {
         const draftId = typeof draft.id === "string" ? draft.id : ""
         const estimateNumber = typeof draft.estimateNumber === "string" ? draft.estimateNumber : ""
         if (options?.preserveDraftMeta && draftId && estimateNumber) {
@@ -1361,7 +1361,7 @@ function NewEstimatePageContent() {
                     return
                 }
 
-                loadDraftIntoComposer(savedDraft, {
+                loadDraftIntoComposer({ ...savedDraft }, {
                     preserveDraftMeta: true,
                     toastMessage: shouldSuppressDraftToast ? undefined : "Draft loaded. Edits will update the saved estimate.",
                 })

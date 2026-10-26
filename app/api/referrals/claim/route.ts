@@ -11,6 +11,7 @@ import {
     toOptionalIsoString,
 } from "@/lib/server/referrals"
 import { isPaidSubscriptionStatus } from "@/lib/server/stripe-billing"
+import { readField } from "@/lib/unknown-fields"
 
 function hasActiveStripeSubscription(profile: Record<string, unknown> | null | undefined): boolean {
     const subscriptionId =
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
         )
     }
 
-    let body: any
+    let body: unknown
     try {
         body = await req.json()
     } catch {
@@ -48,8 +49,8 @@ export async function POST(req: Request) {
         )
     }
 
-    const token = normalizeReferralToken(body?.token)
-    const source = asTrimmedReferralSource(body?.source)
+    const token = normalizeReferralToken(readField(body, "token"))
+    const source = asTrimmedReferralSource(readField(body, "source"))
     if (!REFERRAL_TOKEN_PATTERN.test(token)) {
         return NextResponse.json(
             { error: { message: "Invalid token", code: 400 } },

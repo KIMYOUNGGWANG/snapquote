@@ -7,6 +7,7 @@ import {
     getStripeConnectProfile,
     upsertStripeConnectProfile,
 } from "@/lib/server/stripe-connect"
+import { errorMessage, errorType } from "@/lib/unknown-fields"
 
 function toAccountFlags(account: Stripe.Account | Stripe.DeletedAccount) {
     if ("deleted" in account && account.deleted) {
@@ -99,10 +100,10 @@ export async function GET(req: Request) {
             chargesEnabled: flags.chargesEnabled,
             payoutsEnabled: flags.payoutsEnabled,
         })
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Stripe Connect status error:", error)
 
-        if (error.type === "StripeAuthenticationError") {
+        if (errorType(error) === "StripeAuthenticationError") {
             return NextResponse.json(
                 { error: "Invalid Stripe API key. Please check your configuration." },
                 { status: 401 }
@@ -110,7 +111,7 @@ export async function GET(req: Request) {
         }
 
         return NextResponse.json(
-            { error: error.message || "Failed to load Stripe Connect status." },
+            { error: errorMessage(error) || "Failed to load Stripe Connect status." },
             { status: 500 }
         )
     }

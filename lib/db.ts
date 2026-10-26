@@ -11,7 +11,7 @@ interface SnapQuoteDB extends DBSchema {
         value: {
             id: string;
             estimateNumber: string;
-            items: any[];
+            items: EstimateItem[];
             summary_note: string;
             clientName: string;
             clientAddress: string;
@@ -43,6 +43,7 @@ interface SnapQuoteDB extends DBSchema {
             lastFollowUpChannel?: 'email' | 'sms' | 'automation';
             paymentCompletedAt?: string;
             lastPaymentSessionId?: string;
+            sentAt?: string;
         };
         indexes: { 'by-date': string; 'by-status': string };  // Added by-status
     };

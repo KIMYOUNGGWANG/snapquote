@@ -4,6 +4,7 @@ import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { resolveCallerEstimateForPaymentLink } from "@/lib/server/payment-estimate-ownership"
 import { createEstimatePaymentLink } from "@/lib/server/stripe-payment-link"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
+import { errorMessage } from "@/lib/unknown-fields"
 
 const UUID_PATTERN =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -114,7 +115,7 @@ export async function POST(req: Request) {
         console.error("Stripe Payment Link error:", error)
 
         return NextResponse.json(
-            { error: (error instanceof Error && error.message) || "Failed to create payment link" },
+            { error: errorMessage(error) || "Failed to create payment link" },
             { status: 500 }
         )
     }

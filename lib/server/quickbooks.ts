@@ -1,5 +1,6 @@
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 import { resolveEffectivePlanTier } from "@/lib/server/effective-plan"
+import { readField } from "@/lib/unknown-fields"
 
 type ServiceSupabaseClient = NonNullable<ReturnType<typeof createServiceSupabaseClient>>
 
@@ -53,7 +54,7 @@ function toPositiveNumber(value: unknown, fallback: number): number {
     return fallback
 }
 
-function parseQuickBooksStatus(invoice: Record<string, any> | null | undefined): "open" | "paid" | "unknown" {
+function parseQuickBooksStatus(invoice: Record<string, unknown> | null | undefined): "open" | "paid" | "unknown" {
     if (!invoice) return "unknown"
     const balance = toPositiveNumber(invoice.Balance, NaN)
     if (Number.isFinite(balance)) {
@@ -345,7 +346,7 @@ export async function findQuickBooksCustomerByDisplayName(input: {
     displayName: string
 }) {
     const query = `select * from Customer where DisplayName = '${escapeQuickBooksQueryValue(input.displayName)}' maxresults 1`
-    return quickBooksFetch<{ QueryResponse?: { Customer?: Array<Record<string, any>> } }>({
+    return quickBooksFetch<{ QueryResponse?: { Customer?: Array<Record<string, unknown>> } }>({
         realmId: input.realmId,
         accessToken: input.accessToken,
         path: `/query?query=${encodeURIComponent(query)}`,
@@ -358,7 +359,7 @@ export async function createQuickBooksCustomer(input: {
     displayName: string
     address?: string
 }) {
-    return quickBooksFetch<{ Customer?: Record<string, any> }>({
+    return quickBooksFetch<{ Customer?: Record<string, unknown> }>({
         realmId: input.realmId,
         accessToken: input.accessToken,
         path: "/customer",
@@ -379,7 +380,7 @@ export async function resolveQuickBooksServiceItemRef(input: {
     accessToken: string
 }): Promise<{ value: string; name?: string }> {
     const query = "select * from Item where Type = 'Service' maxresults 1"
-    const result = await quickBooksFetch<{ QueryResponse?: { Item?: Array<Record<string, any>> } }>({
+    const result = await quickBooksFetch<{ QueryResponse?: { Item?: Array<Record<string, unknown>> } }>({
         realmId: input.realmId,
         accessToken: input.accessToken,
         path: `/query?query=${encodeURIComponent(query)}`,
@@ -405,7 +406,7 @@ export async function getQuickBooksInvoice(input: {
     accessToken: string
     invoiceId: string
 }) {
-    return quickBooksFetch<{ Invoice?: Record<string, any> }>({
+    return quickBooksFetch<{ Invoice?: Record<string, unknown> }>({
         realmId: input.realmId,
         accessToken: input.accessToken,
         path: `/invoice/${encodeURIComponent(input.invoiceId)}`,
@@ -426,7 +427,7 @@ export async function createQuickBooksInvoice(input: {
         total: number
     }>
     taxAmount?: number
-}): Promise<{ ok: true; invoice: Record<string, any> } | { ok: false; status: number; error: string }> {
+}): Promise<{ ok: true; invoice: Record<string, unknown> } | { ok: false; status: number; error: string }> {
     const lines = input.items.map((item) => ({
         DetailType: "SalesItemLineDetail",
         Amount: Number(item.total.toFixed(2)),
@@ -452,7 +453,7 @@ export async function createQuickBooksInvoice(input: {
         })
     }
 
-    const result = await quickBooksFetch<{ Invoice?: Record<string, any> }>({
+    const result = await quickBooksFetch<{ Invoice?: Record<string, unknown> }>({
         realmId: input.realmId,
         accessToken: input.accessToken,
         path: "/invoice",
@@ -530,10 +531,10 @@ export async function countQuickBooksSyncedInvoices(
     }
 }
 
-export function summarizeQuickBooksInvoice(invoice: Record<string, any> | null | undefined) {
+export function summarizeQuickBooksInvoice(invoice: Record<string, unknown> | null | undefined) {
     return {
         invoiceId: toTrimmedString(invoice?.Id, 64),
-        customerId: toTrimmedString(invoice?.CustomerRef?.value, 64) || null,
+        customerId: toTrimmedString(readField(invoice?.CustomerRef, "value"), 64) || null,
         docNumber: toTrimmedString(invoice?.DocNumber, 64) || null,
         status: parseQuickBooksStatus(invoice),
     }

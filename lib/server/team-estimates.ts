@@ -1,6 +1,7 @@
 import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 import { getWorkspaceMembershipByUser } from "@/lib/server/team-workspace"
+import { readArray, readField, readString } from "@/lib/unknown-fields"
 
 type ServiceSupabaseClient = NonNullable<ReturnType<typeof createServiceSupabaseClient>>
 
@@ -158,42 +159,40 @@ function mapEstimateSection(input: Record<string, unknown>, index: number): Team
     }
 }
 
-function mapCloudEstimateToDetail(estimate: Record<string, any>): TeamEstimateDetail {
-    const rawFlatItems = Array.isArray(estimate.estimate_items) ? estimate.estimate_items : []
-    const rawSections = Array.isArray(estimate.estimate_sections) ? estimate.estimate_sections : []
+function mapCloudEstimateToDetail(estimate: Record<string, unknown>): TeamEstimateDetail {
+    const rawFlatItems = readArray(estimate, "estimate_items")
+    const rawSections = readArray(estimate, "estimate_sections")
     const paymentCompletedAt = toSafeString(estimate.payment_completed_at).trim()
 
     const items = rawFlatItems.map((item, index) =>
         mapEstimateItem({
-            id: item?.id,
-            itemNumber: item?.item_number,
-            category: item?.category,
-            description: item?.description,
-            quantity: item?.quantity,
-            unit: item?.unit,
-            unit_price: item?.unit_price,
-            total: item?.total,
+            id: readField(item, "id"),
+            itemNumber: readField(item, "item_number"),
+            category: readField(item, "category"),
+            description: readField(item, "description"),
+            quantity: readField(item, "quantity"),
+            unit: readField(item, "unit"),
+            unit_price: readField(item, "unit_price"),
+            total: readField(item, "total"),
         }, index)
     )
 
     const sections = rawSections.map((section, sectionIndex) =>
         mapEstimateSection({
-            id: section?.local_id || section?.id,
-            name: section?.name,
-            divisionCode: section?.division_code,
-            addedOnSite: section?.added_on_site,
-            items: Array.isArray(section?.estimate_section_items)
-                ? section.estimate_section_items.map((item: any) => ({
-                    id: item?.local_id || item?.id,
-                    itemNumber: item?.item_number,
-                    category: item?.category,
-                    description: item?.description,
-                    quantity: item?.quantity,
-                    unit: item?.unit,
-                    unit_price: item?.unit_price,
-                    total: item?.total,
-                }))
-                : [],
+            id: readField(section, "local_id") || readField(section, "id"),
+            name: readField(section, "name"),
+            divisionCode: readField(section, "division_code"),
+            addedOnSite: readField(section, "added_on_site"),
+            items: readArray(section, "estimate_section_items").map((item: unknown) => ({
+                id: readField(item, "local_id") || readField(item, "id"),
+                itemNumber: readField(item, "item_number"),
+                category: readField(item, "category"),
+                description: readField(item, "description"),
+                quantity: readField(item, "quantity"),
+                unit: readField(item, "unit"),
+                unit_price: readField(item, "unit_price"),
+                total: readField(item, "total"),
+            })),
         }, sectionIndex)
     ).filter((section) => section.items.length > 0)
 
@@ -201,14 +200,14 @@ function mapCloudEstimateToDetail(estimate: Record<string, any>): TeamEstimateDe
         estimateId: toSafeString(estimate.id),
         estimateNumber: toSafeString(estimate.estimate_number),
         ownerUserId: toSafeString(estimate.user_id),
-        ...(toSafeString(estimate?.profiles?.business_name).trim()
-            ? { ownerBusinessName: toSafeString(estimate.profiles.business_name).trim() }
+        ...(toSafeString(readField(estimate.profiles, "business_name")).trim()
+            ? { ownerBusinessName: toSafeString(readField(estimate.profiles, "business_name")).trim() }
             : {}),
-        clientName: toSafeString(estimate?.clients?.name).trim() || "Walk-in Client",
-        clientAddress: toSafeString(estimate?.clients?.address).trim(),
-        ...(toSafeString(estimate?.clients?.email).trim() ? { clientEmail: toSafeString(estimate.clients.email).trim() } : {}),
-        ...(toSafeString(estimate?.clients?.phone).trim() ? { clientPhone: toSafeString(estimate.clients.phone).trim() } : {}),
-        ...(toSafeString(estimate?.clients?.notes).trim() ? { clientNotes: toSafeString(estimate.clients.notes).trim() } : {}),
+        clientName: toSafeString(readField(estimate.clients, "name")).trim() || "Walk-in Client",
+        clientAddress: toSafeString(readField(estimate.clients, "address")).trim(),
+        ...(toSafeString(readField(estimate.clients, "email")).trim() ? { clientEmail: toSafeString(readField(estimate.clients, "email")).trim() } : {}),
+        ...(toSafeString(readField(estimate.clients, "phone")).trim() ? { clientPhone: toSafeString(readField(estimate.clients, "phone")).trim() } : {}),
+        ...(toSafeString(readField(estimate.clients, "notes")).trim() ? { clientNotes: toSafeString(readField(estimate.clients, "notes")).trim() } : {}),
         summary_note: toSafeString(estimate.ai_summary),
         status: normalizePaidLikeStatus({ status: estimate.status, paymentCompletedAt }),
         taxRate: toMoney(estimate.tax_rate),
@@ -303,7 +302,7 @@ async function getWorkspaceMemberUserIds(
 
     const userIds = Array.isArray(members.data)
         ? members.data
-            .map((member: any) => (typeof member?.user_id === "string" ? member.user_id : ""))
+            .map((member: unknown) => readString(member, "user_id"))
             .filter(Boolean)
         : []
 
@@ -315,7 +314,7 @@ export async function resolveTeamEstimateAccess(
     userId: string,
     estimateId: string
 ): Promise<
-    | { ok: true; workspaceId: string; estimate: Record<string, any> }
+    | { ok: true; workspaceId: string; estimate: Record<string, unknown> }
     | { ok: false; status: number; error: string }
 > {
     const membership = await getWorkspaceMembershipByUser(supabase, userId)

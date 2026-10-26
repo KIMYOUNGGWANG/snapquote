@@ -6,6 +6,7 @@ import {
     createServiceSupabaseClient,
     getStripeConnectProfile,
 } from "@/lib/server/stripe-connect"
+import { errorMessage, errorType } from "@/lib/unknown-fields"
 
 export async function POST(req: Request) {
     const auth = await requireAuthenticatedUser(req)
@@ -65,10 +66,10 @@ export async function POST(req: Request) {
 
         const link = await stripe.accounts.createLoginLink(accountId)
         return NextResponse.json({ url: link.url })
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Stripe dashboard link error:", error)
 
-        if (error.type === "StripeAuthenticationError") {
+        if (errorType(error) === "StripeAuthenticationError") {
             return NextResponse.json(
                 { error: "Invalid Stripe API key. Please check your configuration." },
                 { status: 401 }
@@ -76,7 +77,7 @@ export async function POST(req: Request) {
         }
 
         return NextResponse.json(
-            { error: error.message || "Failed to create Stripe dashboard link." },
+            { error: errorMessage(error) || "Failed to create Stripe dashboard link." },
             { status: 500 }
         )
     }

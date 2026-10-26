@@ -13,6 +13,7 @@ import {
     normalizeRelativePath,
     resolvePlanTierByPriceId,
 } from "@/lib/server/stripe-billing"
+import { errorType } from "@/lib/unknown-fields"
 
 interface BillingProfileRow {
     stripe_customer_id: string | null
@@ -262,7 +263,7 @@ export async function POST(req: Request) {
             customerId,
             planTier: selectedPlanTier,
         })
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Stripe Billing checkout error:", error)
 
         if (isSchemaMismatchError(error, [
@@ -273,7 +274,7 @@ export async function POST(req: Request) {
             return billingSchemaErrorResponse()
         }
 
-        const stripeType = typeof error?.type === "string" ? error.type : ""
+        const stripeType = errorType(error)
         const status = stripeType === "StripeAuthenticationError" ? 401 : 500
         const message = status === 401
             ? "Stripe authentication failed"

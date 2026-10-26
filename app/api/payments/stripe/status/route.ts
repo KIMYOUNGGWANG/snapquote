@@ -3,6 +3,7 @@ import Stripe from "stripe"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
+import { errorMessage, errorType } from "@/lib/unknown-fields"
 
 const UUID_PATTERN =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -177,10 +178,10 @@ export async function GET(req: Request) {
             ok: true,
             paid: false,
         })
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Stripe payment status lookup error:", error)
 
-        if (error.type === "StripeAuthenticationError") {
+        if (errorType(error) === "StripeAuthenticationError") {
             return NextResponse.json(
                 { error: "Invalid Stripe API key. Please check your configuration." },
                 { status: 401 }
@@ -188,7 +189,7 @@ export async function GET(req: Request) {
         }
 
         return NextResponse.json(
-            { error: error.message || "Failed to check payment status" },
+            { error: errorMessage(error) || "Failed to check payment status" },
             { status: 500 }
         )
     }

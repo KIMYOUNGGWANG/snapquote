@@ -3,6 +3,7 @@ import Stripe from "stripe"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
+import { errorType } from "@/lib/unknown-fields"
 
 export async function POST(req: Request) {
     const auth = await requireAuthenticatedUser(req)
@@ -76,10 +77,10 @@ export async function POST(req: Request) {
         })
 
         return NextResponse.json({ url: session.url })
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Stripe Billing portal error:", error)
 
-        const stripeType = typeof error?.type === "string" ? error.type : ""
+        const stripeType = errorType(error)
         const status = stripeType === "StripeAuthenticationError" ? 401 : 500
         const message = status === 401
             ? "Stripe authentication failed"

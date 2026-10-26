@@ -3,11 +3,14 @@ import { createHash } from "node:crypto"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
+import { errorMessage } from "@/lib/unknown-fields"
 
 const E164_PHONE_PATTERN = /^\+[1-9]\d{7,14}$/
 const ESTIMATE_ID_PATTERN = /^[a-zA-Z0-9:_-]{1,128}$/
 const MAX_MESSAGE_LENGTH = 1200
 const MAX_IDEMPOTENCY_KEY_LENGTH = 255
+
+type ServiceSupabaseClient = NonNullable<ReturnType<typeof createServiceSupabaseClient>>
 
 type SendSmsPayload = {
     toPhoneNumber: string
@@ -93,7 +96,7 @@ function normalizeClaimSmsSendCreditRow(value: unknown): ClaimSmsSendCreditRow |
 }
 
 async function claimSmsSendCredit(
-    supabase: any,
+    supabase: ServiceSupabaseClient,
     input: {
         userId: string
         payload: SendSmsPayload
@@ -123,7 +126,7 @@ async function claimSmsSendCredit(
 }
 
 async function finalizeSmsSendSuccess(
-    supabase: any,
+    supabase: ServiceSupabaseClient,
     input: {
         userId: string
         messageRowId: string
@@ -155,7 +158,7 @@ async function finalizeSmsSendSuccess(
 }
 
 async function finalizeSmsSendFailure(
-    supabase: any,
+    supabase: ServiceSupabaseClient,
     input: {
         userId: string
         messageRowId: string
@@ -372,16 +375,16 @@ export async function POST(req: Request) {
             ),
             status: finalized.data?.status || providerResult.status,
         })
-    } catch (error: any) {
+    } catch (error: unknown) {
         await finalizeSmsSendFailure(supabase, {
             userId: auth.userId,
             messageRowId: claimData.message_row_id,
             idempotencyKey,
-            lastError: error?.message || "Failed to send SMS",
+            lastError: errorMessage(error) || "Failed to send SMS",
         })
         console.error("Send SMS error:", error)
         return NextResponse.json(
-            { error: error?.message || "Failed to send SMS" },
+            { error: errorMessage(error) || "Failed to send SMS" },
             { status: 500 }
         )
     }

@@ -216,7 +216,7 @@ export async function updateEstimateStatus(id: string, status: 'draft' | 'sent' 
     const estimate = await db.get('estimates', id)
     if (estimate) {
         const nowIso = new Date().toISOString()
-        const next: any = {
+        const next = {
             ...estimate,
             status,
             updatedAt: nowIso,

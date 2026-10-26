@@ -9,6 +9,7 @@ import {
     getOrCreateReferralToken,
     toOptionalIsoString,
 } from "@/lib/server/referrals"
+import { readField, readString } from "@/lib/unknown-fields"
 
 type ReferralEventName = "landing_visit" | "quote_share_click" | "signup_start"
 
@@ -103,20 +104,20 @@ export async function GET(req: Request) {
     const shareUrl = buildReferralShareUrl(shareOrigin, tokenResult.token)
     const shareMessages = buildReferralShareMessages(shareUrl)
     const recentClaims = Array.isArray(claimsResult.data)
-        ? claimsResult.data.map((claim: any) => ({
-              claimId: typeof claim?.id === "string" ? claim.id : "",
-              createdAt: typeof claim?.created_at === "string" ? claim.created_at : new Date().toISOString(),
-              referrerRewardMode:
-                  claim?.referrer_reward_mode === "pro_trial" || claim?.referrer_reward_mode === "pending_credit"
-                      ? claim.referrer_reward_mode
-                      : "none",
-              ...(toOptionalIsoString(claim?.referrer_reward_ends_at)
-                  ? { referrerRewardEndsAt: claim.referrer_reward_ends_at.trim() }
-                  : {}),
-              ...(toOptionalIsoString(claim?.referred_reward_ends_at)
-                  ? { referredRewardEndsAt: claim.referred_reward_ends_at.trim() }
-                  : {}),
-          }))
+        ? claimsResult.data.map((claim: unknown) => {
+              const createdAt = readField(claim, "created_at")
+              const rewardMode = readField(claim, "referrer_reward_mode")
+              const referrerRewardEndsAt = toOptionalIsoString(readField(claim, "referrer_reward_ends_at"))
+              const referredRewardEndsAt = toOptionalIsoString(readField(claim, "referred_reward_ends_at"))
+              return {
+                  claimId: readString(claim, "id"),
+                  createdAt: typeof createdAt === "string" ? createdAt : new Date().toISOString(),
+                  referrerRewardMode:
+                      rewardMode === "pro_trial" || rewardMode === "pending_credit" ? rewardMode : "none",
+                  ...(referrerRewardEndsAt ? { referrerRewardEndsAt } : {}),
+                  ...(referredRewardEndsAt ? { referredRewardEndsAt } : {}),
+              }
+          })
         : []
 
     return NextResponse.json({
