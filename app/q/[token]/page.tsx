@@ -269,15 +269,14 @@ export default async function CustomerQuotePage({ params }: CustomerQuotePagePro
                         jobComplete={Boolean(completion)}
                     />
 
-                    {/* The completion report already says what happens next. */}
-                    {completion ? null : (
-                        <CustomerQuoteNextStep
-                            initialStatus={quote.status}
-                            paymentComplete={paymentComplete}
-                            paymentTerms={estimate.paymentTerms}
-                            closingNote={estimate.closingNote}
-                        />
-                    )}
+                    <CustomerQuoteNextStep
+                        initialStatus={quote.status}
+                        paymentComplete={paymentComplete}
+                        paymentTerms={estimate.paymentTerms}
+                        closingNote={estimate.closingNote}
+                        // The completion report already says what happens next.
+                        hideStatus={Boolean(completion)}
+                    />
                 </aside>
             </div>
         </main>

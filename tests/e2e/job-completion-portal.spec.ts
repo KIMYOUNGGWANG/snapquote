@@ -90,7 +90,10 @@ async function openPortal(page: Page, next: NextFixture, snapshot: JsonRecord, s
 }
 
 test("portal: unpaid completion shows balance, checklist, extra work, and the quote once", async ({ page, next }) => {
-    await openPortal(page, next, makePortalSnapshot())
+    await openPortal(page, next, makePortalSnapshot({
+        paymentTerms: "Balance due within 7 days of completion.",
+        closingNote: "Thanks for choosing Rivera Plumbing.",
+    }))
 
     const completion = page.getByTestId("customer-job-completion")
     await expect(completion.getByRole("heading", { name: "Your job is done" })).toBeVisible()
@@ -113,7 +116,10 @@ test("portal: unpaid completion shows balance, checklist, extra work, and the qu
     await expect(page.getByTestId("customer-quote-added-on-site-total")).toHaveText("$100.00")
     await expect(page.getByTestId("customer-quote-subtotal")).toHaveText("$1,840.00")
     await expect(page.getByTestId("customer-quote-total")).toHaveText("$2,079.20")
-    await expect(page.getByTestId("customer-quote-next-step")).toHaveCount(0)
+    // The status copy is gone, but the contractor's terms and closing note stay.
+    await expect(page.getByTestId("customer-quote-next-step-title")).toHaveCount(0)
+    await expect(page.getByTestId("customer-quote-terms")).toContainText("Balance due within 7 days of completion.")
+    await expect(page.getByTestId("customer-quote-closing-note")).toHaveText("Thanks for choosing Rivera Plumbing.")
     await expect(page.getByTestId("customer-quote-approve-button")).toHaveCount(0)
     // Mobile: only the report's button; the sidebar one is hidden below lg.
     await expect(page.getByRole("link", { name: "Pay balance" })).toHaveCount(1)
