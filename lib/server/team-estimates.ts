@@ -624,7 +624,6 @@ export async function saveTeamEstimateFromPayload(
             taxAmount: number
             totalAmount: number
             sentAt?: string
-            paymentCompletedAt?: string
             items: TeamEstimateItem[]
             sections?: TeamEstimateSection[]
         }
@@ -660,24 +659,18 @@ export async function saveTeamEstimateFromPayload(
     }
 
     const now = new Date().toISOString()
-    const paymentCompletedAt = input.payload.paymentCompletedAt?.trim() || toSafeString(access.estimate.payment_completed_at).trim()
-    const status = normalizePaidLikeStatus({
-        status: input.payload.status,
-        paymentCompletedAt,
-    })
+    // Payment state is server-owned (webhook, finalize): a Team save may only send a draft. Writing the editor's
+    // possibly stale status or paymentCompletedAt would undo a payment or a reopen that landed after it loaded.
+    const sendsDraft = normalizePaidLikeStatus(access.estimate) === "draft" && input.payload.status === "sent"
     const updateResult = await supabase
         .from("estimates")
         .update({
             client_id: clientResolution.clientId,
             ai_summary: input.payload.summary_note,
-            status,
             tax_rate: input.payload.taxRate,
             tax_amount: input.payload.taxAmount,
             total_amount: input.payload.totalAmount,
-            sent_at: status === "sent" || status === "paid"
-                ? (input.payload.sentAt || access.estimate.sent_at || now)
-                : null,
-            payment_completed_at: paymentCompletedAt || null,
+            ...(sendsDraft ? { status: "sent", sent_at: input.payload.sentAt || now } : {}),
             updated_at: now,
         })
         .eq("id", input.estimateId)

@@ -4,6 +4,7 @@ import { describe, test } from 'node:test'
 import { resolveLwwSyncAction } from '../../lib/sync-resolution.ts'
 import {
   applyCloudAmountPaidToLocalEstimate,
+  applyCloudPaymentStateToLocalEstimate,
   preserveLocalOnlyCompletionState,
   applyCloudCustomerPortalLinkToLocalEstimate,
   applyCloudQuickBooksLinkToLocalEstimate,
@@ -400,6 +401,7 @@ describe('sync estimate cloud mapping', () => {
       paymentLinkId: 'plink_revision_1',
       paymentLinkType: 'full',
       paymentCompletedAt: '2026-05-24T12:00:00.000Z',
+      paymentStateVersion: 4,
       lastPaymentSessionId: 'cs_revision_paid_1',
       revisionOfEstimateId: 'estimate-cloud-original',
       revisionOfEstimateNumber: 'EST-2605-900',
@@ -429,6 +431,7 @@ describe('sync estimate cloud mapping', () => {
       payment_link_id: 'plink_revision_1',
       payment_link_type: 'full',
       payment_completed_at: '2026-05-24T12:00:00.000Z',
+      payment_state_version: 4,
       revision_of_estimate_id: 'estimate-cloud-original',
       revision_of_estimate_number: 'EST-2605-900',
       revision_requested_at: '2026-05-23T09:00:00.000Z',
@@ -455,6 +458,56 @@ describe('sync estimate cloud mapping', () => {
     assert.equal('amount_paid' in row, false)
     assert.equal('last_payment_session_id' in row, false)
     assert.equal('last_polled_payment_session_id' in row, false)
+  })
+
+  describe('server-owned payment state after a push', () => {
+    const staleLocal = {
+      id: 'e1', estimateNumber: 'EST-1', items: [], summary_note: 'edited offline', clientName: 'A', clientAddress: '',
+      taxRate: 5, taxAmount: 0, totalAmount: 100, createdAt: '2026-05-24T08:00:00.000Z',
+      updatedAt: '2026-05-25T08:00:00.000Z', sentAt: '2026-05-24T09:00:00.000Z', status: 'sent',
+      paymentLink: 'https://pay.example.test/full', paymentLinkId: 'plink_full', paymentLinkType: 'full',
+      paymentStateVersion: 1,
+    }
+
+    test('push and pull carry payment_state_version; a never-pulled estimate pushes version 0', () => {
+      assert.equal(mapLocalEstimateToCloudRow('user-1', null, staleLocal).payment_state_version, 1)
+      assert.equal(mapLocalEstimateToCloudRow('user-1', null, { ...staleLocal, paymentStateVersion: undefined }).payment_state_version, 0)
+      assert.equal(mapCloudEstimateToLocal({ id: 'e1', payment_state_version: 3 }).paymentStateVersion, 3)
+    })
+
+    test('a stale sent push keeps the webhook paid state locally', () => {
+      // The trigger kept the stored payment state; this is what the upsert returned.
+      const synced = applyCloudPaymentStateToLocalEstimate(staleLocal, {
+        status: 'paid', sent_at: '2026-05-24T09:00:00.000Z', payment_completed_at: '2026-05-24T20:00:00.000Z',
+        payment_link: 'https://pay.example.test/full', payment_link_id: 'plink_full', payment_link_type: 'full',
+        payment_state_version: 2,
+      })
+      assert.equal(synced.status, 'paid')
+      assert.equal(synced.paymentCompletedAt, '2026-05-24T20:00:00.000Z')
+      assert.equal(synced.paymentStateVersion, 2)
+      assert.equal(synced.summary_note, 'edited offline')
+    })
+
+    test('a stale push keeps the finalize balance link instead of the old link', () => {
+      const synced = applyCloudPaymentStateToLocalEstimate(staleLocal, {
+        status: 'sent', sent_at: '2026-05-24T09:00:00.000Z', payment_completed_at: null,
+        payment_link: 'https://pay.example.test/balance', payment_link_id: 'plink_balance', payment_link_type: 'custom',
+        payment_state_version: 2,
+      })
+      assert.equal(synced.paymentLink, 'https://pay.example.test/balance')
+      assert.equal(synced.paymentLinkId, 'plink_balance')
+      assert.equal(synced.paymentLinkType, 'custom')
+    })
+
+    test('an accepted push leaves the estimate object untouched', () => {
+      const accepted = applyCloudPaymentStateToLocalEstimate(staleLocal, {
+        status: 'sent', sent_at: '2026-05-24T09:00:00.000Z', payment_completed_at: null,
+        payment_link: 'https://pay.example.test/full', payment_link_id: 'plink_full', payment_link_type: 'full',
+        payment_state_version: 1,
+      })
+      assert.equal(accepted, staleLocal)
+      assert.equal(applyCloudPaymentStateToLocalEstimate(staleLocal, null), staleLocal)
+    })
   })
 
   test('completion round-trips through attachments row', () => {

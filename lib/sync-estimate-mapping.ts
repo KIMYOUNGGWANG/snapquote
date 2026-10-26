@@ -70,6 +70,7 @@ export type CloudEstimateRow = {
     payment_link_id?: unknown
     payment_link_type?: unknown
     payment_completed_at?: unknown
+    payment_state_version?: unknown
     last_payment_session_id?: unknown
     revision_of_estimate_id?: unknown
     revision_of_estimate_number?: unknown
@@ -176,6 +177,7 @@ export type CloudEstimateUpsertRow = {
     payment_link_id: string | null
     payment_link_type: "full" | "deposit" | "custom" | null
     payment_completed_at: string | null
+    payment_state_version: number
     revision_of_estimate_id: string | null
     revision_of_estimate_number: string | null
     revision_requested_at: string | null
@@ -417,6 +419,7 @@ export function mapLocalEstimateToCloudRow(
         payment_link_id: paymentLinkId,
         payment_link_type: paymentLinkType,
         payment_completed_at: paymentCompletedAt,
+        payment_state_version: estimate.paymentStateVersion ?? 0,
         revision_of_estimate_id: revisionOfEstimateId,
         revision_of_estimate_number: revisionOfEstimateNumber,
         revision_requested_at: revisionRequestedAt,
@@ -511,6 +514,37 @@ function normalizeCloudSections(value: unknown): EstimateSection[] | undefined {
     return sections.length > 0 ? sections : undefined
 }
 
+export type CloudPaymentStateRow = Pick<
+    CloudEstimateRow,
+    "status" | "sent_at" | "payment_completed_at" | "payment_link" | "payment_link_id" | "payment_link_type" | "payment_state_version"
+>
+
+export const CLOUD_PAYMENT_STATE_COLUMNS =
+    "status, sent_at, payment_completed_at, payment_link, payment_link_id, payment_link_type, payment_state_version"
+
+type LocalPaymentState = Pick<
+    LocalEstimate,
+    "status" | "sentAt" | "paymentCompletedAt" | "paymentLink" | "paymentLinkId" | "paymentLinkType" | "paymentStateVersion"
+>
+
+function mapCloudPaymentStateToLocal(cloudEstimate: CloudPaymentStateRow): LocalPaymentState {
+    const paymentCompletedAt = toSafeString(cloudEstimate.payment_completed_at).trim() || undefined
+
+    return {
+        status: isEstimatePaidLike({ status: cloudEstimate.status, paymentCompletedAt })
+            ? "paid"
+            : cloudEstimate.status === "sent"
+                ? "sent"
+                : "draft",
+        sentAt: toSafeString(cloudEstimate.sent_at) || undefined,
+        paymentCompletedAt,
+        paymentLink: toSafeString(cloudEstimate.payment_link).trim() || undefined,
+        paymentLinkId: toSafeString(cloudEstimate.payment_link_id).trim() || undefined,
+        paymentLinkType: toPaymentLinkType(cloudEstimate.payment_link_type),
+        paymentStateVersion: toSafeNumber(cloudEstimate.payment_state_version),
+    }
+}
+
 export function mapCloudEstimateToLocal(cloudEstimate: CloudEstimateRow): LocalEstimate {
     const items = Array.isArray(cloudEstimate.estimate_items)
         ? cloudEstimate.estimate_items
@@ -518,23 +552,13 @@ export function mapCloudEstimateToLocal(cloudEstimate: CloudEstimateRow): LocalE
             .map((item, index) => normalizeCloudEstimateItem(item, index))
             .filter((item) => item.description !== "")
         : []
-    const paymentCompletedAt = toSafeString(cloudEstimate.payment_completed_at).trim() || undefined
-    const status = isEstimatePaidLike({ status: cloudEstimate.status, paymentCompletedAt })
-        ? "paid"
-        : cloudEstimate.status === "sent"
-            ? "sent"
-            : "draft"
-
     const amountPaid = cloudEstimate.amount_paid == null ? undefined : toSafeNumber(cloudEstimate.amount_paid)
     const completion = normalizeCloudCompletion(cloudEstimate.estimate_attachments)
 
     return {
         id: toSafeString(cloudEstimate.id).trim(),
         estimateNumber: toSafeString(cloudEstimate.estimate_number).trim() || "EST-000",
-        paymentLink: toSafeString(cloudEstimate.payment_link).trim() || undefined,
-        paymentLinkId: toSafeString(cloudEstimate.payment_link_id).trim() || undefined,
-        paymentLinkType: toPaymentLinkType(cloudEstimate.payment_link_type),
-        paymentCompletedAt,
+        ...mapCloudPaymentStateToLocal(cloudEstimate),
         lastPaymentSessionId: toSafeString(cloudEstimate.last_payment_session_id).trim() || undefined,
         revisionOfEstimateId: toSafeString(cloudEstimate.revision_of_estimate_id).trim() || undefined,
         revisionOfEstimateNumber: toSafeString(cloudEstimate.revision_of_estimate_number).trim() || undefined,
@@ -554,9 +578,7 @@ export function mapCloudEstimateToLocal(cloudEstimate: CloudEstimateRow): LocalE
         summary_note: toSafeString(cloudEstimate.ai_summary),
         createdAt: toSafeString(cloudEstimate.created_at),
         updatedAt: toSafeString(cloudEstimate.updated_at) || toSafeString(cloudEstimate.created_at),
-        sentAt: toSafeString(cloudEstimate.sent_at) || undefined,
         synced: true,
-        status,
         items,
         sections: normalizeCloudSections(cloudEstimate.estimate_sections),
         attachments: normalizeCloudAttachments(cloudEstimate.estimate_attachments),
@@ -680,6 +702,19 @@ export function applyCloudAmountPaidToLocalEstimate(
 
     const amountPaid = toSafeNumber(cloudEstimate.amount_paid)
     return estimate.amountPaid === amountPaid ? estimate : { ...estimate, amountPaid }
+}
+
+// The upsert trigger keeps the cloud payment state when the push was stale: adopt what it returned.
+export function applyCloudPaymentStateToLocalEstimate(
+    estimate: LocalEstimate,
+    cloudEstimate: CloudPaymentStateRow | null | undefined
+): LocalEstimate {
+    if (!cloudEstimate) return estimate
+
+    const paymentState = mapCloudPaymentStateToLocal(cloudEstimate)
+    const changed = (Object.keys(paymentState) as Array<keyof LocalPaymentState>)
+        .some((key) => estimate[key] !== paymentState[key])
+    return changed ? { ...estimate, ...paymentState } : estimate
 }
 
 export function assertSupabaseMutation(

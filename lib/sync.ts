@@ -5,8 +5,10 @@ import { createCoalescedRunner } from './sync-single-flight'
 import {
     applyCloudAmountPaidToLocalEstimate,
     applyCloudCustomerPortalLinkToLocalEstimate,
+    applyCloudPaymentStateToLocalEstimate,
     applyCloudQuickBooksLinkToLocalEstimate,
     assertSupabaseMutation,
+    CLOUD_PAYMENT_STATE_COLUMNS,
     hasCustomerPortalEstimatePatchChanged,
     hasQuickBooksEstimatePatchChanged,
     mapCloudCustomerPortalLinkToLocalPatch,
@@ -316,15 +318,15 @@ async function runSyncEstimates(): Promise<SyncEstimatesResult> {
 
             if (!cloud) {
                 // Not on cloud yet? PUSH
-                await pushEstimateToCloud(user.id, local)
+                const pushed = await pushEstimateToCloud(user.id, local)
                 const quickBooksPatch = mapCloudQuickBooksLinkToLocalPatch(quickBooksLinkMap.get(local.id))
                 const customerPortalPatch = mapCloudCustomerPortalLinkToLocalPatch(customerPortalLinkMap.get(local.id))
                 if (
-                    hasQuickBooksEstimatePatchChanged(local, quickBooksPatch) ||
-                    hasCustomerPortalEstimatePatchChanged(local, customerPortalPatch)
+                    hasQuickBooksEstimatePatchChanged(pushed, quickBooksPatch) ||
+                    hasCustomerPortalEstimatePatchChanged(pushed, customerPortalPatch)
                 ) {
                     await saveEstimate({
-                        ...local,
+                        ...pushed,
                         ...(quickBooksPatch || {}),
                         ...(customerPortalPatch || {}),
                         synced: true,
@@ -344,14 +346,14 @@ async function runSyncEstimates(): Promise<SyncEstimatesResult> {
 
             if (syncAction === 'push') {
                 // Local is newer: PUSH
-                await pushEstimateToCloud(user.id, local)
+                const pushed = await pushEstimateToCloud(user.id, local)
                 const quickBooksPatch = mapCloudQuickBooksLinkToLocalPatch(quickBooksLinkMap.get(local.id))
                 const customerPortalPatch = mapCloudCustomerPortalLinkToLocalPatch(customerPortalLinkMap.get(local.id))
-                const withAmountPaid = applyCloudAmountPaidToLocalEstimate(local, cloud)
+                const withAmountPaid = applyCloudAmountPaidToLocalEstimate(pushed, cloud)
                 if (
-                    hasQuickBooksEstimatePatchChanged(local, quickBooksPatch) ||
-                    hasCustomerPortalEstimatePatchChanged(local, customerPortalPatch) ||
-                    withAmountPaid !== local
+                    hasQuickBooksEstimatePatchChanged(pushed, quickBooksPatch) ||
+                    hasCustomerPortalEstimatePatchChanged(pushed, customerPortalPatch) ||
+                    withAmountPaid !== pushed
                 ) {
                     await saveEstimate({
                         ...withAmountPaid,
@@ -444,14 +446,16 @@ async function runSyncEstimates(): Promise<SyncEstimatesResult> {
 /**
  * Pushes a local estimate to Supabase.
  */
-async function pushEstimateToCloud(userId: string, estimate: LocalEstimate) {
+async function pushEstimateToCloud(userId: string, estimate: LocalEstimate): Promise<LocalEstimate> {
     const clientId = await resolveClientId(userId, estimate)
     const now = new Date().toISOString()
 
     // 1. Upsert Estimate
-    const { error: estError } = await supabase
+    const { data: storedPaymentState, error: estError } = await supabase
         .from('estimates')
         .upsert(mapLocalEstimateToCloudRow(userId, clientId, estimate, { now }))
+        .select(CLOUD_PAYMENT_STATE_COLUMNS)
+        .single()
 
     if (estError) throw estError
 
@@ -530,5 +534,7 @@ async function pushEstimateToCloud(userId: string, estimate: LocalEstimate) {
     }
 
     // 5. Update local flag
-    await saveEstimate({ ...estimate, synced: true })
+    const pushed = { ...applyCloudPaymentStateToLocalEstimate(estimate, storedPaymentState), synced: true }
+    await saveEstimate(pushed)
+    return pushed
 }

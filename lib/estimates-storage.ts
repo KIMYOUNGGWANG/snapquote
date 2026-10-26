@@ -117,6 +117,7 @@ export interface LocalEstimate {
     lastFollowedUpAt?: string
     lastFollowUpChannel?: 'email' | 'sms' | 'automation'
     paymentCompletedAt?: string
+    paymentStateVersion?: number // Cloud payment_state_version last seen; a push from an older one keeps the server's payment state
     lastPaymentSessionId?: string // Server-owned (Stripe webhook); pulled from cloud, never pushed
     lastPolledPaymentSessionId?: string // Local-only: last Checkout Session the History poll saw, for its "nothing changed" guard
     amountPaid?: number        // Server-owned (Stripe webhook); never pushed from the client
