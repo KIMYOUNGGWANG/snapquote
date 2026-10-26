@@ -223,7 +223,6 @@ Deno.serve(async (req: Request) => {
 
             // Acknowledge send-complete time for follow-up tracking (stage timestamps).
             const estimateId = job.payload?.estimate_id
-            const stage = Number(followup_stage) === 2 ? 2 : 1
             if (estimateId) {
                 const sentAt = new Date().toISOString()
                 const update: Record<string, string> = {
