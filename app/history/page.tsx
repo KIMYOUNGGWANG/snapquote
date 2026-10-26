@@ -14,6 +14,7 @@ const ConfirmDialog = dynamic(() => import("@/components/confirm-dialog").then(m
 const PDFPreviewModal = dynamic(() => import("@/components/pdf-preview-modal").then(mod => mod.PDFPreviewModal), { ssr: false })
 const FollowUpModal = dynamic(() => import("@/components/follow-up-modal").then(mod => mod.FollowUpModal), { ssr: false })
 const SmsModal = dynamic(() => import("@/components/sms-modal").then(mod => mod.SmsModal), { ssr: false })
+const JobCompletionSheet = dynamic(() => import("@/components/job-completion/job-completion-sheet").then(mod => mod.JobCompletionSheet), { ssr: false })
 import { Badge } from "@/components/ui/badge"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
@@ -51,6 +52,7 @@ import {
 import { isOpenCustomerChangeRequest, isSupersededCustomerChangeRequest } from "@/lib/customer-revisions"
 import { isEstimateReadyForFollowUp } from "@/lib/follow-up-service"
 import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
+import { getCompletionAction } from "@/lib/job-completion"
 
 type TabType = 'drafts' | 'sent' | 'paid'
 type HistoryDeepLinkAction = "follow-up" | "sms"
@@ -60,6 +62,8 @@ type StripePaymentStatusResponse = {
     paid: boolean
     checkoutSessionId?: string
     paidAt?: string
+    estimateStatus?: "draft" | "sent" | "paid"
+    amountPaid?: number
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -302,6 +306,7 @@ function HistoryPageContent() {
     const [previewEstimate, setPreviewEstimate] = useState<LocalEstimate | null>(null)
     const [followUpEstimate, setFollowUpEstimate] = useState<LocalEstimate | null>(null)
     const [smsEstimate, setSmsEstimate] = useState<LocalEstimate | null>(null)
+    const [completionEstimate, setCompletionEstimate] = useState<LocalEstimate | null>(null)
     const [businessProfile, setBusinessProfile] = useState<BusinessInfo | undefined>(undefined)
     const [downloadingEstimateId, setDownloadingEstimateId] = useState<string | null>(null)
     const [historyActionIssue, setHistoryActionIssue] = useState<HistoryActionIssue | null>(null)
@@ -398,10 +403,24 @@ function HistoryPageContent() {
                 const result = await response.json() as StripePaymentStatusResponse
                 if (!result.ok || !result.paid) continue
 
+                // Only the server decides "paid"; a partial payment just records amountPaid.
+                const isServerPaid = result.estimateStatus === "paid"
+                const nextAmountPaid = typeof result.amountPaid === "number" ? result.amountPaid : estimate.amountPaid
+                // A partially paid estimate stays "sent" and is polled again: skip the write, toast and event when nothing changed.
+                if (
+                    !isServerPaid &&
+                    nextAmountPaid === estimate.amountPaid &&
+                    (result.checkoutSessionId === estimate.lastPolledPaymentSessionId
+                        || result.checkoutSessionId === estimate.lastPaymentSessionId)
+                ) continue
+
                 await updateEstimate(estimate.id, {
-                    status: "paid",
-                    paymentCompletedAt: result.paidAt || new Date().toISOString(),
-                    lastPaymentSessionId: result.checkoutSessionId,
+                    ...(isServerPaid
+                        ? { status: "paid" as const, paymentCompletedAt: result.paidAt || new Date().toISOString() }
+                        : {}),
+                    ...(typeof nextAmountPaid === "number" ? { amountPaid: nextAmountPaid } : {}),
+                    // last_payment_session_id is server-owned; writing it here would make the webhook skip this payment.
+                    lastPolledPaymentSessionId: result.checkoutSessionId,
                     synced: false,
                 })
 
@@ -413,7 +432,7 @@ function HistoryPageContent() {
                     channel: "stripe_status_poll",
                     metadata: {
                         checkoutSessionId: result.checkoutSessionId,
-                        status_transitioned: true,
+                        status_transitioned: isServerPaid,
                     },
                 })
             }
@@ -2075,6 +2094,8 @@ function HistoryPageContent() {
                     const canCreatePaymentLinkPrimary = isApprovedSentQuote
                         && !effectivePaymentLink
                         && !isLocalOnlyMode
+                    // Stored report -> resend; finalized but unsent -> resume; never a second finalize.
+                    const completionAction = isAuthenticated ? getCompletionAction(estimate) : null
                     const paymentStatusLabel = estimate.paymentLink?.trim()
                         ? "Payment link attached"
                         : businessProfile?.payment_link?.trim()
@@ -2473,6 +2494,18 @@ function HistoryPageContent() {
                                         className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap"
                                         data-testid="history-estimate-primary-actions"
                                     >
+                                        {completionAction && (
+                                            <Button
+                                                variant="default"
+                                                size="sm"
+                                                className="w-full sm:w-auto"
+                                                onClick={() => setCompletionEstimate(estimate)}
+                                                data-testid="history-mark-job-complete-action"
+                                            >
+                                                <CheckCircle2 className="mr-1 h-3 w-3" />
+                                                {completionAction === "resend" ? "Resend report" : completionAction === "resume" ? "Finish report" : "Mark job complete"}
+                                            </Button>
+                                        )}
                                         {items.length > 0 && (
                                             <>
                                                 <Button
@@ -2862,6 +2895,16 @@ function HistoryPageContent() {
                         customerPortalStatus={smsEstimate.customerPortalStatus}
                         approvalLinkStatus={canSendCustomerFollowUp(smsEstimate) ? "included" : "signin"}
                         onSend={(toPhoneNumber, message) => handleSendSms(smsEstimate, toPhoneNumber, message)}
+                    />
+                )
+            }
+            {
+                completionEstimate && (
+                    <JobCompletionSheet
+                        estimate={completionEstimate}
+                        businessName={businessProfile?.business_name}
+                        onClose={() => setCompletionEstimate(null)}
+                        onChanged={loadData}
                     />
                 )
             }

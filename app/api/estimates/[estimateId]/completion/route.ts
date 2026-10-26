@@ -1,0 +1,203 @@
+import { NextResponse } from "next/server"
+import { createHash } from "node:crypto"
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
+import { requireAuthenticatedUser } from "@/lib/server/route-auth"
+import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
+import { createEstimatePaymentLink, deactivatePaymentLink } from "@/lib/server/stripe-payment-link"
+import { computeBalanceDue, isFullyPaid, toCents } from "@/lib/estimates/balance"
+import { completionFinalizeRequestSchema } from "@/lib/validation/api-schemas"
+
+type FinalizeEstimateRow = {
+    id: string
+    user_id: string
+    estimate_number: string | null
+    status: string | null
+    payment_completed_at: string | null
+    total_amount: number | string | null
+    amount_paid: number | string | null
+    payment_link_id: string | null
+    payment_link_type: string | null
+    clients: { name: string | null } | null
+}
+
+function errorResponse(message: string, status: number) {
+    return NextResponse.json({ error: { message, code: status } }, { status })
+}
+
+// numeric columns can arrive as strings from PostgREST.
+function toMoneyOrNull(value: unknown): number | null {
+    const amount = typeof value === "string" && value.trim() ? Number(value) : value
+    return typeof amount === "number" && Number.isFinite(amount) ? amount : null
+}
+
+export async function POST(req: Request, context: { params: Promise<{ estimateId: string }> }) {
+    const auth = await requireAuthenticatedUser(req)
+    if (!auth.ok) return auth.response
+
+    const { estimateId: rawEstimateId } = await context.params
+    const estimateId = rawEstimateId.trim()
+    if (!estimateId || estimateId.length > 120) {
+        return errorResponse("Invalid estimate id", 400)
+    }
+
+    const rateLimit = await checkRateLimit({
+        key: `completion-finalize:${auth.userId}:${estimateId}:${getClientIp(req)}`,
+        limit: 20,
+        windowMs: 10 * 60 * 1000,
+    })
+    if (!rateLimit.allowed) {
+        return errorResponse("Too many requests", 429)
+    }
+
+    let body: unknown
+    try {
+        body = await req.json()
+    } catch {
+        return errorResponse("Invalid request payload", 400)
+    }
+    const parsed = completionFinalizeRequestSchema.safeParse(body)
+    if (!parsed.success) {
+        return errorResponse("Invalid amount received", 400)
+    }
+    const alreadyReceived = toCents(parsed.data.alreadyReceived) / 100
+
+    const supabase = createServiceSupabaseClient()
+    if (!supabase) {
+        return errorResponse("Supabase service configuration is missing", 500)
+    }
+
+    const { data, error: loadError } = await supabase
+        .from("estimates")
+        .select("id, user_id, estimate_number, status, payment_completed_at, total_amount, amount_paid, payment_link_id, payment_link_type, clients(name)")
+        .eq("id", estimateId)
+        .eq("user_id", auth.userId)
+        .maybeSingle()
+    if (loadError) return errorResponse("Failed to load estimate.", 500)
+
+    const estimate = data as FinalizeEstimateRow | null
+    if (!estimate || estimate.user_id !== auth.userId) {
+        return errorResponse("Estimate not found.", 404)
+    }
+
+    const reopeningDeposit = estimate.status === "paid" && estimate.payment_link_type === "deposit"
+    if (estimate.status !== "sent" && !reopeningDeposit) {
+        return errorResponse("This estimate can't be completed in its current state.", 409)
+    }
+
+    // A webhook payment (or another device's total edit) landed after the sheet opened: stop before Stripe
+    // so the stale "Already received" default never overwrites amount_paid.
+    const storedTotal = toMoneyOrNull(estimate.total_amount)
+    const storedAmountPaid = toMoneyOrNull(estimate.amount_paid) ?? 0
+    const stateChanged = (amountPaid: number, total: number | null) => NextResponse.json({
+        error: {
+            code: "COMPLETION_STATE_CHANGED",
+            message: "Payments changed since you opened this job. Review the updated amounts.",
+        },
+        amountPaid,
+        totalAmount: total,
+    }, { status: 409 })
+    if (
+        storedTotal === null
+        || toCents(storedTotal) !== toCents(parsed.data.expectedTotal)
+        || toCents(storedAmountPaid) !== toCents(parsed.data.expectedAmountPaid)
+    ) {
+        return stateChanged(storedAmountPaid, storedTotal)
+    }
+
+    const totalAmount = storedTotal
+    const balanceDue = computeBalanceDue(totalAmount, alreadyReceived)
+    const previousLinkId = estimate.payment_link_id?.trim() || ""
+
+    // Create the new link first so a failure leaves the old link working.
+    let newLink: { url: string; id: string } | null = null
+    if (balanceDue > 0) {
+        const created = await createEstimatePaymentLink({
+            userId: auth.userId,
+            estimateId: estimate.id,
+            estimateNumber: estimate.estimate_number?.trim() || "",
+            customerName: estimate.clients?.name?.trim().slice(0, 120) || "",
+            amount: balanceDue,
+            // Fresh key when the stored link or amount_paid changed (A -> B -> A, or a payment landed);
+            // same key for an exact retry.
+            idempotencyKey: `payment_link_balance:${createHash("sha256")
+                .update([
+                    auth.userId,
+                    estimate.id,
+                    toCents(balanceDue),
+                    previousLinkId || "none",
+                    toCents(storedAmountPaid),
+                ].join("|"))
+                .digest("hex")}`,
+        })
+        if (!created.ok) {
+            return NextResponse.json(
+                { error: { message: created.error, code: created.status, ...(created.code ? { reason: created.code } : {}) } },
+                { status: created.status }
+            )
+        }
+        newLink = created
+    }
+
+    // Contractor confirmed full receipt: server marks it paid (total 0 never counts).
+    const statusFields: { status?: string; payment_completed_at?: string | null } = isFullyPaid(totalAmount, alreadyReceived)
+        ? { status: "paid", payment_completed_at: estimate.payment_completed_at || new Date().toISOString() }
+        : reopeningDeposit && balanceDue > 0
+            ? { status: "sent", payment_completed_at: null }
+            : {}
+
+    const updatedAt = new Date().toISOString()
+    // Compare-and-set on amount_paid: a webhook payment that landed after the read must not be overwritten.
+    // The webhook settlement guards on amount_paid the same way, so whichever writes second retries.
+    const { data: saved, error: updateError } = await supabase
+        .from("estimates")
+        .update({
+            amount_paid: alreadyReceived,
+            payment_link: newLink?.url ?? null,
+            payment_link_id: newLink?.id ?? null,
+            payment_link_type: newLink ? "custom" : null,
+            updated_at: updatedAt,
+            ...statusFields,
+        })
+        .eq("id", estimate.id)
+        .eq("user_id", auth.userId)
+        .eq("amount_paid", estimate.amount_paid ?? 0)
+        .select("id")
+        .maybeSingle()
+    // Keep the new link live on a DB error: an exact retry gets it back through the idempotency key.
+    if (updateError) return errorResponse("Failed to save completion.", 500)
+
+    if (!saved?.id) {
+        // Never stored, and the next attempt uses a fresh key (amount_paid changed): switch it off.
+        if (newLink && newLink.id !== previousLinkId) {
+            await deactivatePaymentLink({ userId: auth.userId, paymentLinkId: newLink.id })
+        }
+        const { data: fresh, error: freshError } = await supabase
+            .from("estimates")
+            .select("total_amount, amount_paid")
+            .eq("id", estimate.id)
+            .eq("user_id", auth.userId)
+            .maybeSingle()
+        if (freshError) console.error("Failed to reload estimate after a concurrent payment:", freshError)
+        const latest = fresh as Pick<FinalizeEstimateRow, "total_amount" | "amount_paid"> | null
+        return stateChanged(toMoneyOrNull(latest?.amount_paid ?? null) ?? 0, toMoneyOrNull(latest?.total_amount ?? null))
+    }
+
+    // Only after the new state is saved: the same idempotent link returned again is still the live one.
+    if (previousLinkId && previousLinkId !== newLink?.id) {
+        await deactivatePaymentLink({ userId: auth.userId, paymentLinkId: previousLinkId })
+    }
+
+    return NextResponse.json({
+        ok: true,
+        totalAmount,
+        amountPaid: alreadyReceived,
+        balanceDue,
+        ...(newLink ? { paymentLink: newLink.url, paymentLinkId: newLink.id } : {}),
+        // Server truth for the client: it never infers "paid" on its own.
+        status: statusFields.status ?? estimate.status,
+        paymentCompletedAt: "payment_completed_at" in statusFields
+            ? statusFields.payment_completed_at
+            : estimate.payment_completed_at ?? null,
+        updatedAt,
+    })
+}

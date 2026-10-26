@@ -84,6 +84,7 @@ export interface TeamEstimateDetailResponse {
             id: string
             name: string
             divisionCode?: string
+            addedOnSite?: boolean
             items: Array<{
                 id: string
                 itemNumber: number

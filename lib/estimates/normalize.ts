@@ -104,6 +104,7 @@ export function normalizeEstimateSection(input: unknown, sectionIndex: number): 
         id,
         name: name || `Section ${sectionIndex + 1}`,
         divisionCode: divisionCode || undefined,
+        ...(section.addedOnSite === true ? { addedOnSite: true } : {}),
         items,
     }
 }

@@ -42,6 +42,7 @@ create table estimates (
   payment_link_id text,
   payment_link_type text check (payment_link_type is null or payment_link_type in ('full', 'deposit', 'custom')),
   payment_completed_at timestamp with time zone,
+  amount_paid numeric(12,2) not null default 0 check (amount_paid >= 0),
   last_payment_session_id text,
   first_followup_queued_at timestamp with time zone,
   second_followup_queued_at timestamp with time zone,
@@ -81,6 +82,7 @@ create table estimate_sections (
   division_code text,
   name text not null,
   sort_order int default 0 not null,
+  added_on_site boolean not null default false,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
   unique(estimate_id, local_id)
@@ -112,6 +114,7 @@ create table estimate_attachments (
   audio_url text,
   original_transcript text,
   scope_assumptions_confirmed_at timestamp with time zone,
+  completion jsonb,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
   unique(estimate_id)

@@ -26,6 +26,9 @@ interface SmsModalProps {
     approvalLink?: string
     customerPortalStatus?: CustomerPortalSmsStatus
     onPrepareApprovalLink?: () => void | Promise<void>
+    /** Replaces the quote wording (e.g. the job completion message). */
+    initialMessage?: string
+    title?: string
 }
 
 function formatE164Hint(raw: string): string {
@@ -82,9 +85,11 @@ export function SmsModal({
     approvalLink,
     customerPortalStatus,
     onPrepareApprovalLink,
+    initialMessage,
+    title = "Send via SMS",
 }: SmsModalProps) {
     const [phone, setPhone] = useState(clientPhone)
-    const [message, setMessage] = useState(() => getDefaultSmsMessage({
+    const [message, setMessage] = useState(() => initialMessage ?? getDefaultSmsMessage({
         estimateTotal,
         paymentLink,
         businessName,
@@ -154,7 +159,7 @@ export function SmsModal({
     useEffect(() => {
         if (!open) return
         setPhone(clientPhone)
-        setMessage(getDefaultSmsMessage({
+        setMessage(initialMessage ?? getDefaultSmsMessage({
             estimateTotal,
             paymentLink,
             businessName,
@@ -163,7 +168,7 @@ export function SmsModal({
         }))
         setDeliveryIssue(null)
         setSending(false)
-    }, [approvalLink, businessName, clientPhone, customerPortalStatus, estimateTotal, open, paymentLink])
+    }, [approvalLink, businessName, clientPhone, customerPortalStatus, estimateTotal, initialMessage, open, paymentLink])
 
     useEffect(() => {
         if (!deliveryIssue) return
@@ -224,7 +229,7 @@ export function SmsModal({
                 <div className="flex items-center justify-between gap-3 border-b border-white/10 p-4">
                     <div className="flex min-w-0 items-center gap-2">
                         <MessageSquare className="h-5 w-5 shrink-0 text-blue-200" />
-                        <h2 id="sms-modal-title" className="min-w-0 break-words text-lg font-semibold [overflow-wrap:anywhere]">Send via SMS</h2>
+                        <h2 id="sms-modal-title" className="min-w-0 break-words text-lg font-semibold [overflow-wrap:anywhere]">{title}</h2>
                     </div>
                     <Button variant="ghost" size="icon" className="h-11 w-11 shrink-0 rounded-lg text-slate-300 hover:bg-white/10 hover:text-white" onClick={onClose} aria-label="Close SMS modal">
                         <X className="h-4 w-4" />

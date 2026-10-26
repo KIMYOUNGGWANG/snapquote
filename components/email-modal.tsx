@@ -22,6 +22,11 @@ interface EmailModalProps {
     approvalPaymentAvailable?: boolean
     approvalLinkStatus?: ApprovalLinkStatus
     onPrepareApprovalLink?: () => void | Promise<void>
+    /** Replaces the estimate wording (e.g. the job completion message, sent without a PDF). */
+    initialMessage?: string
+    title?: string
+    pdfAttached?: boolean
+    linkHelper?: string
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -52,9 +57,13 @@ export function EmailModal({
     approvalPaymentAvailable = false,
     approvalLinkStatus = "signin",
     onPrepareApprovalLink,
+    initialMessage,
+    title = "Send Estimate",
+    pdfAttached = true,
+    linkHelper,
 }: EmailModalProps) {
     const [email, setEmail] = useState(clientEmail)
-    const [message, setMessage] = useState(getDefaultEmailMessage({ estimateTotal, paymentLink }))
+    const [message, setMessage] = useState(() => initialMessage ?? getDefaultEmailMessage({ estimateTotal, paymentLink }))
     const [sending, setSending] = useState(false)
     const [deliveryIssue, setDeliveryIssue] = useState<DeliveryIssue | null>(null)
     const deliveryIssueRef = useRef<HTMLDivElement | null>(null)
@@ -76,14 +85,15 @@ export function EmailModal({
             : approvalLinkStatus === "saving"
                 ? "border-blue-300/20 bg-blue-500/10 text-blue-100"
                 : "border-amber-300/20 bg-amber-400/10 text-amber-100"
-    const approvalHelper =
-        approvalLinkStatus === "included"
+    const approvalHelper = linkHelper ??
+        (approvalLinkStatus === "included"
             ? "A review and approval link will be added when this email is sent."
             : approvalLinkStatus === "offline"
                 ? "Go online to include a customer approval link."
                 : approvalLinkStatus === "saving"
                     ? "Saving this quote before sign-in."
-                    : "Sign in to include a customer approval link before sending."
+                    : "Sign in to include a customer approval link before sending.")
+
     const trimmedEmail = email.trim()
     const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)
     const recipientStatusLabel = !trimmedEmail ? "Needed" : isValidEmail ? "Ready" : "Check"
@@ -97,10 +107,10 @@ export function EmailModal({
     useEffect(() => {
         if (!open) return
         setEmail(clientEmail)
-        setMessage(getDefaultEmailMessage({ estimateTotal, paymentLink }))
+        setMessage(initialMessage ?? getDefaultEmailMessage({ estimateTotal, paymentLink }))
         setDeliveryIssue(null)
         setSending(false)
-    }, [clientEmail, estimateTotal, open, paymentLink])
+    }, [clientEmail, estimateTotal, initialMessage, open, paymentLink])
 
     useEffect(() => {
         if (!deliveryIssue) return
@@ -153,7 +163,7 @@ export function EmailModal({
                 <div className="flex items-center justify-between gap-3 border-b border-white/10 p-4">
                     <div className="flex min-w-0 items-center gap-2">
                         <Mail className="h-5 w-5 shrink-0 text-blue-200" />
-                        <h2 id="email-modal-title" className="min-w-0 break-words text-lg font-semibold [overflow-wrap:anywhere]">Send Estimate</h2>
+                        <h2 id="email-modal-title" className="min-w-0 break-words text-lg font-semibold [overflow-wrap:anywhere]">{title}</h2>
                     </div>
                     <Button variant="ghost" size="icon" className="h-11 w-11 shrink-0 rounded-lg text-slate-300 hover:bg-white/10 hover:text-white" onClick={onClose} aria-label="Close email modal">
                         <X className="h-4 w-4" />
@@ -170,11 +180,11 @@ export function EmailModal({
                                 {recipientStatusLabel}
                             </p>
                         </div>
-                        <div className="min-w-0 rounded-lg border border-emerald-300/20 bg-emerald-400/10 p-2">
-                            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200/70">PDF</p>
-                            <p className="mt-1 flex min-w-0 items-center gap-1 break-words text-sm font-semibold text-emerald-100 [overflow-wrap:anywhere]">
+                        <div className={`min-w-0 rounded-lg border p-2 ${pdfAttached ? "border-emerald-300/20 bg-emerald-400/10" : "border-white/10 bg-slate-950/55"}`}>
+                            <p className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${pdfAttached ? "text-emerald-200/70" : "text-slate-500"}`}>PDF</p>
+                            <p className={`mt-1 flex min-w-0 items-center gap-1 break-words text-sm font-semibold [overflow-wrap:anywhere] ${pdfAttached ? "text-emerald-100" : "text-slate-300"}`}>
                                 <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                                Attached
+                                {pdfAttached ? "Attached" : "Link only"}
                             </p>
                         </div>
                         <div className={`min-w-0 rounded-lg border p-2 ${approvalStatusClassName}`}>
@@ -302,7 +312,7 @@ export function EmailModal({
 
                     <div id="email-modal-description" className="flex items-start gap-2 rounded-lg border border-white/10 bg-slate-950/55 p-3 text-sm text-slate-400">
                         <Paperclip className="mt-0.5 h-4 w-4 shrink-0 text-blue-200" />
-                        <span className="min-w-0 break-words [overflow-wrap:anywhere]">Your estimate PDF will be attached to this email.</span>
+                        <span className="min-w-0 break-words [overflow-wrap:anywhere]">{pdfAttached ? "Your estimate PDF will be attached to this email." : "No PDF is attached. The customer opens everything from the link."}</span>
                     </div>
                 </div>
 

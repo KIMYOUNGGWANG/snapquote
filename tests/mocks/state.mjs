@@ -277,6 +277,8 @@ export function resetTestState() {
         id: 'plink_default',
         url: 'https://example.com/payment-link',
       }),
+      paymentLinksUpdateCalls: [],
+      paymentLinksUpdate: async (id) => ({ id, active: false }),
       customersCreateCalls: [],
       customersCreate: async () => ({
         id: 'cus_default',

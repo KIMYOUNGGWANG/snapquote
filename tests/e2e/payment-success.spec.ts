@@ -6,6 +6,7 @@ type StoredEstimate = {
     status: "draft" | "sent" | "paid"
     clientName?: string
     totalAmount?: number
+    amountPaid?: number
     paymentCompletedAt?: string
     lastPaymentSessionId?: string
 }
@@ -137,6 +138,8 @@ async function mockStripePaymentStatus(
         paid: boolean
         checkoutSessionId?: string
         paidAt?: string
+        estimateStatus?: "draft" | "sent" | "paid"
+        amountPaid?: number
         expectedPaymentLinkId?: string
         expectedSessionId?: string
     }
@@ -158,6 +161,8 @@ async function mockStripePaymentStatus(
                 paid: input.paid,
                 checkoutSessionId: input.checkoutSessionId,
                 paidAt: input.paidAt,
+                estimateStatus: input.estimateStatus,
+                amountPaid: input.amountPaid,
             }),
         })
     })
@@ -175,6 +180,7 @@ test.describe("Payment success page", () => {
         const sessionId = "cs_test_payment_success_1234567890"
         await mockStripePaymentStatus(page, {
             paid: true,
+            estimateStatus: "paid",
             checkoutSessionId: sessionId,
             paidAt: "2026-05-23T12:00:00.000Z",
             expectedPaymentLinkId: "plink_payment_success",
@@ -214,7 +220,8 @@ test.describe("Payment success page", () => {
 
         const [updatedEstimate] = await readStoredEstimates(page)
         expect(updatedEstimate.status).toBe("paid")
-        expect(updatedEstimate.lastPaymentSessionId).toBe(sessionId)
+        // 세션 id는 서버(웹훅)만 쓴다: 클라이언트가 먼저 쓰면 웹훅이 결제를 건너뛸 수 있다.
+        expect(updatedEstimate.lastPaymentSessionId).toBeUndefined()
         expect(updatedEstimate.paymentCompletedAt).toBeTruthy()
 
         await page.getByTestId("payment-success-history-link").click()
@@ -300,6 +307,32 @@ test.describe("Payment success page", () => {
         expect(updatedEstimate.lastPaymentSessionId).toBeUndefined()
     })
 
+    test("partial payment stores amountPaid but leaves the local estimate sent", async ({ page }) => {
+        await seedStoredEstimate(page)
+
+        const [estimate] = await readStoredEstimates(page)
+        const sessionId = "cs_test_partial_deposit"
+        await mockStripePaymentStatus(page, {
+            paid: true,
+            estimateStatus: "sent",
+            amountPaid: 500,
+            checkoutSessionId: sessionId,
+            paidAt: "2026-05-23T12:00:00.000Z",
+            expectedSessionId: sessionId,
+        })
+        await page.goto(`/payment-success?estimateId=${estimate.id}&estimateNumber=${estimate.estimateNumber}&session_id=${sessionId}`)
+
+        const localStatus = page.getByTestId("payment-success-local-status")
+        await expect(localStatus).toContainText("Payment received")
+        await expect(localStatus).not.toContainText("updated to paid")
+
+        const [updatedEstimate] = await readStoredEstimates(page)
+        expect(updatedEstimate.status).toBe("sent")
+        expect(updatedEstimate.amountPaid).toBe(500)
+        // 세션 id는 서버(웹훅)만 쓴다: 클라이언트가 먼저 쓰면 웹훅이 결제를 건너뛸 수 있다.
+        expect(updatedEstimate.lastPaymentSessionId).toBeUndefined()
+    })
+
     test("success URL without a checkout session id does not mark a local estimate paid", async ({ page }) => {
         await seedStoredEstimate(page)
 
@@ -313,6 +346,7 @@ test.describe("Payment success page", () => {
                 body: JSON.stringify({
                     ok: true,
                     paid: true,
+                    estimateStatus: "paid",
                     checkoutSessionId: "cs_paid_without_return_session",
                     paidAt: "2026-05-23T12:00:00.000Z",
                 }),
@@ -419,6 +453,7 @@ test.describe("Payment success page", () => {
         expect(seededEstimate.estimateNumber).toBe(longEstimate.estimateNumber)
         await mockStripePaymentStatus(page, {
             paid: true,
+            estimateStatus: "paid",
             checkoutSessionId: sessionId,
             paidAt: "2026-05-23T12:00:00.000Z",
             expectedPaymentLinkId: "plink_payment_success",
@@ -459,6 +494,7 @@ test.describe("Payment success page", () => {
 
         const [updatedEstimate] = await readStoredEstimates(page)
         expect(updatedEstimate.status).toBe("paid")
-        expect(updatedEstimate.lastPaymentSessionId).toBe(sessionId)
+        // 세션 id는 서버(웹훅)만 쓴다: 클라이언트가 먼저 쓰면 웹훅이 결제를 건너뛸 수 있다.
+        expect(updatedEstimate.lastPaymentSessionId).toBeUndefined()
     })
 })

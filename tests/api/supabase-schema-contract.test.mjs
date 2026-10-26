@@ -17,4 +17,12 @@ describe("Supabase schema contract", () => {
       /plan_tier text check \(plan_tier in \('free', 'starter', 'pro', 'team'\)\) default 'free' not null/,
     );
   });
+
+  test("fresh schema has job completion columns", async () => {
+    const schema = await readFile(schemaUrl, "utf8");
+
+    assert.match(schema, /amount_paid numeric\(12,2\) not null default 0/);
+    assert.match(schema, /completion jsonb/);
+    assert.match(schema, /added_on_site boolean not null default false/);
+  });
 });

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
+import { resolveLwwSyncAction } from '../../lib/sync-resolution.ts'
 import {
+  applyCloudAmountPaidToLocalEstimate,
+  preserveLocalOnlyCompletionState,
   applyCloudCustomerPortalLinkToLocalEstimate,
   applyCloudQuickBooksLinkToLocalEstimate,
   assertSupabaseMutation,
@@ -10,8 +13,10 @@ import {
   mapCloudEstimateToLocal,
   mapCloudCustomerPortalLinkToLocalPatch,
   mapCloudQuickBooksLinkToLocalPatch,
+  mapClearedAttachmentsToCloudPatch,
   mapLocalEstimateAttachmentsToCloudRow,
   mapLocalEstimateItemToCloudRow,
+  mapLocalEstimateSectionToCloudRow,
   mapLocalEstimateSectionItemToCloudRow,
   mapLocalEstimateToCloudRow,
   selectLatestCloudCustomerPortalLink,
@@ -424,7 +429,6 @@ describe('sync estimate cloud mapping', () => {
       payment_link_id: 'plink_revision_1',
       payment_link_type: 'full',
       payment_completed_at: '2026-05-24T12:00:00.000Z',
-      last_payment_session_id: 'cs_revision_paid_1',
       revision_of_estimate_id: 'estimate-cloud-original',
       revision_of_estimate_number: 'EST-2605-900',
       revision_requested_at: '2026-05-23T09:00:00.000Z',
@@ -433,5 +437,151 @@ describe('sync estimate cloud mapping', () => {
       first_followed_up_at: '2026-05-24T09:30:00.000Z',
       last_followed_up_at: '2026-05-25T09:30:00.000Z',
     })
+  })
+
+  test('cloud amount_paid maps to local amountPaid', () => {
+    assert.equal(mapCloudEstimateToLocal({ id: 'e1', amount_paid: '250.5' }).amountPaid, 250.5)
+    assert.equal(mapCloudEstimateToLocal({ id: 'e1', amount_paid: 0 }).amountPaid, 0)
+    assert.equal(mapCloudEstimateToLocal({ id: 'e1' }).amountPaid, undefined)
+  })
+
+  test('local upsert row never includes server-owned payment fields', () => {
+    const row = mapLocalEstimateToCloudRow('user-1', null, {
+      id: 'e1', estimateNumber: 'EST-1', items: [], summary_note: '', clientName: 'A', clientAddress: '',
+      taxRate: 5, taxAmount: 0, totalAmount: 100, createdAt: '2026-05-24T08:00:00.000Z',
+      updatedAt: '2026-05-24T08:00:00.000Z', status: 'sent', amountPaid: 40,
+      lastPaymentSessionId: 'cs_polled', lastPolledPaymentSessionId: 'cs_polled',
+    })
+    assert.equal('amount_paid' in row, false)
+    assert.equal('last_payment_session_id' in row, false)
+    assert.equal('last_polled_payment_session_id' in row, false)
+  })
+
+  test('completion round-trips through attachments row', () => {
+    const completion = {
+      completedAt: '2026-06-01T10:00:00.000Z',
+      summary: 'Replaced the trap and tested for leaks.',
+      photos: ['data:image/jpeg;base64,aaa'],
+      items: [{ itemId: 'item-1', done: true, photoIndexes: [0] }, { itemId: 'item-2', done: false, photoIndexes: [] }],
+    }
+    const row = mapLocalEstimateAttachmentsToCloudRow('e1', undefined, { completion })
+    assert.deepEqual(row?.completion, completion)
+
+    const local = mapCloudEstimateToLocal({ id: 'e1', estimate_attachments: [{ photos: [], completion: row.completion }] })
+    assert.deepEqual(local.completion, completion)
+  })
+
+  test('malformed cloud completion is dropped', () => {
+    const bad = [
+      'nope',
+      { completedAt: 'x', summary: 's', photos: [1], items: [] },
+      { completedAt: 'x', summary: 's', photos: [], items: [{ itemId: 'a', done: 'yes', photoIndexes: [] }] },
+      { completedAt: 'x', summary: 's', photos: [], items: [{ itemId: 'a', done: true, photoIndexes: ['0'] }] },
+      { completedAt: 'x', summary: 's', photos: ['p'], items: [{ itemId: 'a', done: true, photoIndexes: [1] }] },
+      { completedAt: 'x', summary: 's', photos: ['p'], items: [{ itemId: 'a', done: true, photoIndexes: [-1] }] },
+      { completedAt: 'x', summary: 's', photos: ['p'], items: [{ itemId: 'a', done: true, photoIndexes: [0.5] }] },
+      { completedAt: 'x', summary: 's', photos: [] },
+    ]
+    for (const completion of bad) {
+      assert.equal(mapCloudEstimateToLocal({ id: 'e1', estimate_attachments: { photos: [], completion } }).completion, undefined)
+    }
+  })
+
+  test('addedOnSite section flag round-trips as added_on_site', () => {
+    const section = { id: 's1', name: 'Added on site', addedOnSite: true, items: [] }
+    const row = mapLocalEstimateSectionToCloudRow('e1', section, 2, { updatedAt: 'now' })
+    assert.deepEqual(row, {
+      estimate_id: 'e1', local_id: 's1', division_code: null, name: 'Added on site',
+      sort_order: 2, added_on_site: true, updated_at: 'now',
+    })
+    assert.equal(mapLocalEstimateSectionToCloudRow('e1', { id: 's2', name: 'X', items: [] }, 0).added_on_site, false)
+
+    const local = mapCloudEstimateToLocal({
+      id: 'e1',
+      estimate_sections: [{ local_id: 's1', name: 'Added on site', added_on_site: true, sort_order: 0,
+        estimate_section_items: [{ local_id: 'i1', description: 'Extra', quantity: 1, unit_price: 5, total: 5 }] }],
+    })
+    assert.equal(local.sections[0].addedOnSite, true)
+  })
+
+  test('missing completion column maps to undefined', () => {
+    const local = mapCloudEstimateToLocal({ id: 'e1', estimate_attachments: [{ photos: ['data:image/png;base64,a'] }] })
+    assert.equal(local.completion, undefined)
+    assert.equal(local.attachments.photos.length, 1)
+  })
+
+  test('push branch (local newer) still takes server amount_paid and never pushes it back', () => {
+    const local = {
+      id: 'e1', estimateNumber: 'EST-1', items: [], summary_note: '', clientName: 'A', clientAddress: '',
+      taxRate: 5, taxAmount: 0, totalAmount: 1000, createdAt: '2026-05-24T08:00:00.000Z',
+      updatedAt: '2026-05-25T08:00:00.000Z', status: 'sent', amountPaid: 100, synced: false,
+    }
+    const cloud = { id: 'e1', created_at: local.createdAt, updated_at: '2026-05-24T09:00:00.000Z', amount_paid: '500.00' }
+
+    assert.equal(resolveLwwSyncAction({
+      localUpdatedAt: local.updatedAt, localCreatedAt: local.createdAt,
+      cloudUpdatedAt: cloud.updated_at, cloudCreatedAt: cloud.created_at,
+    }), 'push')
+
+    const patched = applyCloudAmountPaidToLocalEstimate(local, cloud)
+    assert.equal(patched.amountPaid, 500)
+    assert.equal(patched.updatedAt, local.updatedAt)
+    assert.equal('amount_paid' in mapLocalEstimateToCloudRow('user-1', null, patched), false)
+  })
+
+  test('applyCloudAmountPaidToLocalEstimate is a no-op when equal or cloud has no value', () => {
+    const local = { id: 'e1', amountPaid: 500 }
+    assert.equal(applyCloudAmountPaidToLocalEstimate(local, { amount_paid: 500 }), local)
+    assert.equal(applyCloudAmountPaidToLocalEstimate(local, { amount_paid: null }), local)
+    assert.equal(applyCloudAmountPaidToLocalEstimate(local, undefined), local)
+  })
+
+  test('clearing attachments never touches the completion column', () => {
+    const patch = mapClearedAttachmentsToCloudPatch('2026-06-01T10:00:00.000Z')
+    assert.deepEqual(patch, {
+      photos: [],
+      audio_url: null,
+      original_transcript: null,
+      scope_assumptions_confirmed_at: null,
+      updated_at: '2026-06-01T10:00:00.000Z',
+    })
+    assert.equal('completion' in patch, false)
+  })
+})
+
+describe('preserveLocalOnlyCompletionState', () => {
+  const completion = { completedAt: '2026-10-25T10:00:00.000Z', summary: '', photos: [], items: [] }
+  const pendingCompletion = { completion, amountPaid: 500, balanceDue: 1240 }
+
+  test('keeps the local resume marker when the pulled cloud row has no completion yet', () => {
+    const pulled = { id: 'e1', status: 'paid', totalAmount: 1740 }
+    const merged = preserveLocalOnlyCompletionState(pulled, { id: 'e1', status: 'sent', totalAmount: 1000, pendingCompletion })
+    assert.deepEqual(merged, { id: 'e1', status: 'paid', totalAmount: 1740, pendingCompletion })
+  })
+
+  test('keeps a stored local completion the cloud does not have yet (write-once) and queues it for push', () => {
+    const pulled = { id: 'e1', status: 'sent', updatedAt: '2026-10-26T09:00:00.000Z', synced: true }
+    const merged = preserveLocalOnlyCompletionState(pulled, { id: 'e1', completion })
+    assert.equal(merged.status, 'sent')
+    assert.deepEqual(merged.completion, completion)
+    assert.equal(merged.synced, false)
+    assert.equal(resolveLwwSyncAction({ localUpdatedAt: merged.updatedAt, cloudUpdatedAt: pulled.updatedAt }), 'push')
+  })
+
+  test('prefers the cloud completion when both exist', () => {
+    const cloudCompletion = { ...completion, summary: 'cloud' }
+    const pulled = { id: 'e1', completion: cloudCompletion }
+    assert.equal(preserveLocalOnlyCompletionState(pulled, { id: 'e1', completion }), pulled)
+  })
+
+  test('drops the marker once the cloud already holds the completion', () => {
+    const pulled = { id: 'e1', completion }
+    assert.equal(preserveLocalOnlyCompletionState(pulled, { id: 'e1', pendingCompletion }), pulled)
+  })
+
+  test('is a no-op without a local marker', () => {
+    const pulled = { id: 'e1' }
+    assert.equal(preserveLocalOnlyCompletionState(pulled, undefined), pulled)
+    assert.equal(preserveLocalOnlyCompletionState(pulled, { id: 'e1' }), pulled)
   })
 })

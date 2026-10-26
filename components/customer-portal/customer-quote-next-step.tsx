@@ -13,6 +13,8 @@ type CustomerQuoteNextStepProps = {
     paymentComplete?: boolean
     paymentTerms?: string
     closingNote?: string
+    /** Completion report shows what's next; keep only the contractor's terms and closing note. */
+    hideStatus?: boolean
 }
 
 function isCustomerPortalDecisionStatus(value: unknown): value is CustomerPortalStatus {
@@ -45,6 +47,7 @@ export function CustomerQuoteNextStep({
     paymentComplete = false,
     paymentTerms,
     closingNote,
+    hideStatus = false,
 }: CustomerQuoteNextStepProps) {
     const [status, setStatus] = useState<CustomerPortalStatus>(initialStatus)
     const nextStepCopy = useMemo(
@@ -65,9 +68,11 @@ export function CustomerQuoteNextStep({
         return () => window.removeEventListener(CUSTOMER_QUOTE_STATUS_CHANGED_EVENT, handleStatusChanged)
     }, [])
 
+    if (hideStatus && !paymentTerms && !closingNote) return null
+
     return (
         <section className="rounded-lg border border-white/10 bg-slate-950/65 p-4" data-testid="customer-quote-next-step">
-            <div className="flex items-start gap-3">
+            {hideStatus ? null : <div className="flex items-start gap-3">
                 <div className={nextStepIconClassName}>
                     <NextStepIcon className="h-5 w-5" />
                 </div>
@@ -79,15 +84,15 @@ export function CustomerQuoteNextStep({
                         {nextStepCopy.description}
                     </p>
                 </div>
-            </div>
+            </div>}
             {paymentTerms ? (
-                <div className="mt-3 rounded-lg border border-white/10 bg-slate-950/70 p-3">
+                <div className={`${hideStatus ? "" : "mt-3 "}rounded-lg border border-white/10 bg-slate-950/70 p-3`} data-testid="customer-quote-terms">
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Terms</p>
                     <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-300">{paymentTerms}</p>
                 </div>
             ) : null}
             {closingNote ? (
-                <p className="mt-3 text-sm leading-6 text-slate-400">{closingNote}</p>
+                <p className={`${hideStatus && !paymentTerms ? "" : "mt-3 "}text-sm leading-6 text-slate-400`} data-testid="customer-quote-closing-note">{closingNote}</p>
             ) : null}
         </section>
     )

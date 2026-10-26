@@ -2,14 +2,17 @@ import { supabase } from './supabase'
 import { getEstimates, saveEstimate, LocalEstimate } from './estimates-storage' // Correct imports
 import { resolveLwwSyncAction } from './sync-resolution'
 import {
+    applyCloudAmountPaidToLocalEstimate,
     applyCloudCustomerPortalLinkToLocalEstimate,
     applyCloudQuickBooksLinkToLocalEstimate,
     assertSupabaseMutation,
     hasCustomerPortalEstimatePatchChanged,
     hasQuickBooksEstimatePatchChanged,
     mapCloudCustomerPortalLinkToLocalPatch,
+    mapClearedAttachmentsToCloudPatch,
     mapLocalEstimateAttachmentsToCloudRow,
     mapLocalEstimateItemToCloudRow,
+    mapLocalEstimateSectionToCloudRow,
     mapLocalEstimateSectionItemToCloudRow,
     mapLocalEstimateToCloudRow,
     mapCloudEstimateToLocal,
@@ -18,6 +21,7 @@ import {
     type CloudEstimateRow,
     type CloudQuickBooksInvoiceLinkRow,
     mapCloudQuickBooksLinkToLocalPatch,
+    preserveLocalOnlyCompletionState,
 } from './sync-estimate-mapping'
 
 export type SyncEstimatesResult =
@@ -205,6 +209,7 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
                     division_code,
                     name,
                     sort_order,
+                    added_on_site,
                     estimate_section_items (
                         local_id,
                         item_number,
@@ -220,7 +225,8 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
                     photos,
                     audio_url,
                     original_transcript,
-                    scope_assumptions_confirmed_at
+                    scope_assumptions_confirmed_at,
+                    completion
                 ),
                 clients (name, address, email, phone, notes)
             `)
@@ -331,12 +337,14 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
                 await pushEstimateToCloud(user.id, local)
                 const quickBooksPatch = mapCloudQuickBooksLinkToLocalPatch(quickBooksLinkMap.get(local.id))
                 const customerPortalPatch = mapCloudCustomerPortalLinkToLocalPatch(customerPortalLinkMap.get(local.id))
+                const withAmountPaid = applyCloudAmountPaidToLocalEstimate(local, cloud)
                 if (
                     hasQuickBooksEstimatePatchChanged(local, quickBooksPatch) ||
-                    hasCustomerPortalEstimatePatchChanged(local, customerPortalPatch)
+                    hasCustomerPortalEstimatePatchChanged(local, customerPortalPatch) ||
+                    withAmountPaid !== local
                 ) {
                     await saveEstimate({
-                        ...local,
+                        ...withAmountPaid,
                         ...(quickBooksPatch || {}),
                         ...(customerPortalPatch || {}),
                         synced: true,
@@ -350,12 +358,14 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
                 // Same? Just ensure local synced flag is true if it was false
                 const quickBooksPatch = mapCloudQuickBooksLinkToLocalPatch(quickBooksLinkMap.get(local.id))
                 const customerPortalPatch = mapCloudCustomerPortalLinkToLocalPatch(customerPortalLinkMap.get(local.id))
+                const withAmountPaid = applyCloudAmountPaidToLocalEstimate(local, cloud)
                 if (
                     hasQuickBooksEstimatePatchChanged(local, quickBooksPatch) ||
-                    hasCustomerPortalEstimatePatchChanged(local, customerPortalPatch)
+                    hasCustomerPortalEstimatePatchChanged(local, customerPortalPatch) ||
+                    withAmountPaid !== local
                 ) {
                     await saveEstimate({
-                        ...local,
+                        ...withAmountPaid,
                         ...(quickBooksPatch || {}),
                         ...(customerPortalPatch || {}),
                         synced: true,
@@ -383,12 +393,15 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
             if (!local || syncAction === 'pull') {
                 // Convert cloud shape to local shape
                 const cloudId = typeof cloud.id === "string" ? cloud.id : ""
-                const localEst = applyCloudCustomerPortalLinkToLocalEstimate(
-                    applyCloudQuickBooksLinkToLocalEstimate(
-                        mapCloudEstimateToLocal(cloud),
-                        quickBooksLinkMap.get(cloudId)
+                const localEst = preserveLocalOnlyCompletionState(
+                    applyCloudCustomerPortalLinkToLocalEstimate(
+                        applyCloudQuickBooksLinkToLocalEstimate(
+                            mapCloudEstimateToLocal(cloud),
+                            quickBooksLinkMap.get(cloudId)
+                        ),
+                        customerPortalLinkMap.get(cloudId)
                     ),
-                    customerPortalLinkMap.get(cloudId)
+                    local
                 )
                 await saveEstimate(localEst)
                 updatedLocalCount++
@@ -451,14 +464,9 @@ async function pushEstimateToCloud(userId: string, estimate: LocalEstimate) {
     if (estimate.sections && estimate.sections.length > 0) {
         const { data: insertedSections, error: sectionInsertError } = await supabase
             .from('estimate_sections')
-            .insert(estimate.sections.map((s, idx) => ({
-                estimate_id: estimate.id,
-                local_id: s.id,
-                division_code: s.divisionCode ?? null,
-                name: s.name,
-                sort_order: idx,
-                updated_at: now
-            })))
+            .insert(estimate.sections.map((s, idx) =>
+                mapLocalEstimateSectionToCloudRow(estimate.id, s, idx, { updatedAt: now })
+            ))
             .select('id, local_id')
 
         if (sectionInsertError) throw sectionInsertError
@@ -490,7 +498,10 @@ async function pushEstimateToCloud(userId: string, estimate: LocalEstimate) {
     }
 
     // 4. Refresh Attachments
-    const attachmentRow = mapLocalEstimateAttachmentsToCloudRow(estimate.id, estimate.attachments, { updatedAt: now })
+    const attachmentRow = mapLocalEstimateAttachmentsToCloudRow(estimate.id, estimate.attachments, {
+        updatedAt: now,
+        completion: estimate.completion,
+    })
 
     if (attachmentRow) {
         const upsertAttachments = await supabase
@@ -500,8 +511,12 @@ async function pushEstimateToCloud(userId: string, estimate: LocalEstimate) {
             })
         assertSupabaseMutation(upsertAttachments, "Failed to store estimate attachments")
     } else {
-        const deleteAttachments = await supabase.from('estimate_attachments').delete().eq('estimate_id', estimate.id)
-        assertSupabaseMutation(deleteAttachments, "Failed to refresh estimate attachments")
+        // Never delete the row: it may hold a completion report written from another device.
+        const clearAttachments = await supabase
+            .from('estimate_attachments')
+            .update(mapClearedAttachmentsToCloudPatch(now))
+            .eq('estimate_id', estimate.id)
+        assertSupabaseMutation(clearAttachments, "Failed to refresh estimate attachments")
     }
 
     // 5. Update local flag

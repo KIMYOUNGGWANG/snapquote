@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import Stripe from "stripe"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { requireAuthenticatedUser } from "@/lib/server/route-auth"
+import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 import { errorMessage, errorType } from "@/lib/unknown-fields"
 
 const UUID_PATTERN =
@@ -33,6 +34,41 @@ async function resolveSessionMetadata(stripe: Stripe, session: Stripe.Checkout.S
     }
 
     return { estimateId, estimateNumber, userId }
+}
+
+const ESTIMATE_STATUSES = ["draft", "sent", "paid"] as const
+
+// The server (webhook) owns the "paid" verdict; clients must follow this, not the session alone.
+async function readEstimateVerdict(estimateId: string, userId: string) {
+    if (!UUID_PATTERN.test(estimateId)) return {}
+
+    try {
+        const supabase = createServiceSupabaseClient()
+        if (!supabase) return {}
+
+        const { data, error } = await supabase
+            .from("estimates")
+            .select("status, amount_paid")
+            .eq("id", estimateId)
+            .eq("user_id", userId)
+            .maybeSingle()
+
+        if (error) {
+            console.error("Failed to read estimate verdict:", error)
+            return {}
+        }
+        if (!data) return {}
+
+        const estimateStatus = ESTIMATE_STATUSES.find((status) => status === data.status)
+        const amountPaid = Number(data.amount_paid)
+        return {
+            ...(estimateStatus ? { estimateStatus } : {}),
+            ...(data.amount_paid != null && Number.isFinite(amountPaid) ? { amountPaid } : {}),
+        }
+    } catch (error) {
+        console.error("Failed to read estimate verdict:", error)
+        return {}
+    }
 }
 
 export async function GET(req: Request) {
@@ -119,9 +155,12 @@ export async function GET(req: Request) {
                 if (estimateId && metadata.estimateId !== estimateId) continue
                 if (estimateNumber && metadata.estimateNumber !== estimateNumber) continue
 
+                const verdict = await readEstimateVerdict(metadata.estimateId, auth.userId)
+
                 return NextResponse.json({
                     ok: true,
                     paid: true,
+                    ...verdict,
                     checkoutSessionId: session.id,
                     paidAt: session.created
                         ? new Date(session.created * 1000).toISOString()

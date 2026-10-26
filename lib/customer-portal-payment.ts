@@ -25,6 +25,7 @@ export function getCustomerPortalPaymentActionState(
     hasPaymentLink: boolean,
     paymentLinkType?: CustomerPortalPaymentLinkType,
     paymentComplete = false,
+    hasCompletionBalance = false,
 ): CustomerPortalPaymentActionState {
     const paymentNoun = getPaymentNoun(paymentLinkType)
     const buttonLabel = getPayButtonLabel(paymentLinkType)
@@ -40,6 +41,15 @@ export function getCustomerPortalPaymentActionState(
 
     if (!hasPaymentLink) {
         return { showPayLink: false, helperText: "", buttonLabel, tone: "info" }
+    }
+
+    if (hasCompletionBalance) {
+        return {
+            showPayLink: true,
+            helperText: "The work is complete. The remaining balance is ready to pay.",
+            buttonLabel: "Pay balance",
+            tone: "success",
+        }
     }
 
     if (status === "approved") {
@@ -66,4 +76,12 @@ export function getCustomerPortalPaymentActionState(
         buttonLabel,
         tone: "info",
     }
+}
+
+export function formatPortalCurrency(amount: number, currency = "USD"): string {
+    return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 2,
+    }).format(amount)
 }

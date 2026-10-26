@@ -17,6 +17,11 @@ class Stripe {
         const current = getTestState()
         return current.stripe.paymentLinksCreate(payload, requestOptions)
       },
+      update: async (id, payload, requestOptions) => {
+        const current = getTestState()
+        current.stripe.paymentLinksUpdateCalls.push({ id, payload, requestOptions })
+        return current.stripe.paymentLinksUpdate(id, payload, requestOptions)
+      },
     }
 
     this.customers = {
