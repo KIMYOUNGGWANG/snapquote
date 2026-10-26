@@ -692,3 +692,13 @@ export function assertSupabaseMutation(
         throw new Error(result.error.message || fallbackMessage)
     }
 }
+
+// `pendingCompletion` is local-only (finalize ran, report not stored yet). A pull replaces the whole record,
+// so carry the marker over until the cloud row has the completion; otherwise a retry would re-finalize.
+export function preserveLocalOnlyCompletionState(
+    pulled: LocalEstimate,
+    local: Pick<LocalEstimate, "pendingCompletion"> | undefined
+): LocalEstimate {
+    if (!local?.pendingCompletion || pulled.completion) return pulled
+    return { ...pulled, pendingCompletion: local.pendingCompletion }
+}

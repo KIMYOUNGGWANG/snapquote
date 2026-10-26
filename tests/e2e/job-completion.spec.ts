@@ -69,6 +69,7 @@ type Mocks = {
     shareLinkFailures?: number
     smsDeduped?: boolean
     completionReportCalls: number
+    finalizeUpdatedAt?: string
     finalizeCalls: JsonRecord[]
     shareLinkPosts: JsonRecord[]
     smsPayloads: JsonRecord[]
@@ -124,6 +125,7 @@ async function routeApp(page: Page, options: Partial<Mocks> = {}): Promise<Mocks
             ...(balanceDue > 0 ? { paymentLink: BALANCE_LINK, paymentLinkId: "plink_balance" } : {}),
             status: balanceDue > 0 ? "sent" : "paid",
             paymentCompletedAt: balanceDue > 0 ? null : "2026-10-26T09:00:00.000Z",
+            updatedAt: (mocks.finalizeUpdatedAt = new Date().toISOString()),
         }))
     })
     await page.route("**/api/send-sms", async (route) => {
@@ -495,6 +497,9 @@ test("finalize OK then share-link fails: retry resumes without a second finalize
     expect(afterFailure?.status).toBe("paid")
     expect(afterFailure?.paymentCompletedAt).toBe("2026-10-26T09:00:00.000Z")
     expect(afterFailure?.amountPaid).toBe(1740)
+    // Local carries the server's updated_at, so LWW sees the row as already in sync.
+    expect(afterFailure?.updatedAt).toBe(mocks.finalizeUpdatedAt)
+    expect(afterFailure?.synced).toBe(true)
     expect(afterFailure?.completion).toBeUndefined()
     expect((afterFailure?.pendingCompletion as JsonRecord | undefined)?.balanceDue).toBe(0)
 
@@ -521,4 +526,98 @@ test("finalize OK then share-link fails: retry resumes without a second finalize
     expect(stored?.status).toBe("paid")
     expect(stored?.pendingCompletion).toBeUndefined()
     expect((stored?.completion as JsonRecord | undefined)?.items).toBeDefined()
+})
+
+const storedCompletion = {
+    completedAt: "2026-10-25T10:00:00.000Z",
+    summary: "Done.",
+    photos: [],
+    items: [{ itemId: "item-drain", done: true, photoIndexes: [] }],
+}
+
+test("resume without the saved marker stops: no push, no finalize, extra work kept", async ({ page }) => {
+    const mocks = await routeApp(page)
+    const extraSection = {
+        id: "section-extra",
+        name: "Added on site",
+        addedOnSite: true,
+        items: [{ id: "item-extra", itemNumber: 1, category: "SERVICE", description: "Extra valve", quantity: 1, unit: "LS", unit_price: 100, total: 100 }],
+    }
+    await seedEstimates(page, [makeEstimate({
+        status: "paid",
+        totalAmount: 1840,
+        amountPaid: 1840,
+        paymentCompletedAt: "2026-10-26T09:00:00.000Z",
+        sections: [extraSection],
+        pendingCompletion: { completion: storedCompletion, amountPaid: 1840, balanceDue: 0 },
+    })])
+
+    await page.goto("/history?tab=paid&estimateId=estimate-job-complete")
+    await expect.poll(() => mocks.estimateUpserts.length).toBeGreaterThan(0)
+    const action = page.getByTestId("history-mark-job-complete-action")
+    await expect(action).toHaveText(/Finish report/)
+    await action.click()
+    await expect(page.getByTestId("completion-resume")).toBeVisible()
+
+    // Simulate the marker vanishing (e.g. an older client's pull) while the sheet is open.
+    await page.evaluate(async (estimateId) => {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            const request = indexedDB.open("snapquote-db", 6)
+            request.onerror = () => reject(request.error)
+            request.onsuccess = () => resolve(request.result)
+        })
+        const store = db.transaction("estimates", "readwrite").objectStore("estimates")
+        await new Promise<void>((resolve, reject) => {
+            const read = store.get(estimateId)
+            read.onerror = () => reject(read.error)
+            read.onsuccess = () => {
+                const record = { ...read.result }
+                delete record.pendingCompletion
+                const write = store.put(record)
+                write.onerror = () => reject(write.error)
+                write.onsuccess = () => resolve()
+            }
+        })
+        db.close()
+    }, "estimate-job-complete")
+    const upsertsBefore = mocks.estimateUpserts.length
+
+    await page.getByTestId("completion-resume-button").click()
+    await expect(page.getByTestId("completion-send-error")).toContainText("We couldn't find the saved payment step. Close and reopen this job to continue.")
+    expect(mocks.finalizeCalls).toHaveLength(0)
+    expect(mocks.shareLinkPosts).toHaveLength(0)
+    expect(mocks.estimateUpserts.length).toBe(upsertsBefore)
+    const stored = await readEstimate(page, "estimate-job-complete")
+    expect(stored?.totalAmount).toBe(1840)
+    expect((stored?.sections as JsonRecord[] | undefined)?.[0]?.addedOnSite).toBe(true)
+})
+
+test("a stored report without a portal URL re-posts the snapshot once and never finalizes", async ({ page }) => {
+    const mocks = await routeApp(page)
+    await seedEstimates(page, [makeEstimate({
+        totalAmount: 1740,
+        amountPaid: 500,
+        customerPortalUrl: undefined,
+        completion: storedCompletion,
+    })])
+
+    await page.goto("/history?tab=sent&estimateId=estimate-job-complete")
+    const action = page.getByTestId("history-mark-job-complete-action")
+    await expect(action).toHaveText(/Resend report/)
+    await action.click()
+
+    await expect(page.getByTestId("completion-portal-url")).toHaveText(PORTAL_URL)
+    expect(mocks.shareLinkPosts).toHaveLength(1)
+    const shareBody = mocks.shareLinkPosts[0]
+    expect(shareBody.resetCustomerDecision).toBeUndefined()
+    const completion = (shareBody.estimate as JsonRecord).completion as JsonRecord
+    expect(completion.amountPaid).toBe(500)
+    expect(completion.balanceDue).toBe(1240)
+
+    await page.getByTestId("completion-text-button").click()
+    const smsDialog = page.getByRole("dialog", { name: "Text completion report" })
+    await expect(smsDialog.locator("#sms-message")).toHaveValue(`Reminder: Your job is done. See photos and pay the balance here: ${PORTAL_URL}`)
+    expect(mocks.finalizeCalls).toHaveLength(0)
+    expect(mocks.shareLinkPosts).toHaveLength(1)
+    expect((await readEstimate(page, "estimate-job-complete"))?.customerPortalUrl).toBe(PORTAL_URL)
 })

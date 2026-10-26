@@ -4,6 +4,7 @@ import { describe, test } from 'node:test'
 import { resolveLwwSyncAction } from '../../lib/sync-resolution.ts'
 import {
   applyCloudAmountPaidToLocalEstimate,
+  preserveLocalOnlyCompletionState,
   applyCloudCustomerPortalLinkToLocalEstimate,
   applyCloudQuickBooksLinkToLocalEstimate,
   assertSupabaseMutation,
@@ -543,5 +544,27 @@ describe('sync estimate cloud mapping', () => {
       updated_at: '2026-06-01T10:00:00.000Z',
     })
     assert.equal('completion' in patch, false)
+  })
+})
+
+describe('preserveLocalOnlyCompletionState', () => {
+  const completion = { completedAt: '2026-10-25T10:00:00.000Z', summary: '', photos: [], items: [] }
+  const pendingCompletion = { completion, amountPaid: 500, balanceDue: 1240 }
+
+  test('keeps the local resume marker when the pulled cloud row has no completion yet', () => {
+    const pulled = { id: 'e1', status: 'paid', totalAmount: 1740 }
+    const merged = preserveLocalOnlyCompletionState(pulled, { id: 'e1', status: 'sent', totalAmount: 1000, pendingCompletion })
+    assert.deepEqual(merged, { id: 'e1', status: 'paid', totalAmount: 1740, pendingCompletion })
+  })
+
+  test('drops the marker once the cloud already holds the completion', () => {
+    const pulled = { id: 'e1', completion }
+    assert.equal(preserveLocalOnlyCompletionState(pulled, { id: 'e1', pendingCompletion }), pulled)
+  })
+
+  test('is a no-op without a local marker', () => {
+    const pulled = { id: 'e1' }
+    assert.equal(preserveLocalOnlyCompletionState(pulled, undefined), pulled)
+    assert.equal(preserveLocalOnlyCompletionState(pulled, { id: 'e1' }), pulled)
   })
 })

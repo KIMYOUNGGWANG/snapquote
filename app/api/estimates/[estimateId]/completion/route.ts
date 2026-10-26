@@ -120,6 +120,7 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
             ? { status: "sent", payment_completed_at: null }
             : {}
 
+    const updatedAt = new Date().toISOString()
     const { error: updateError } = await supabase
         .from("estimates")
         .update({
@@ -127,7 +128,7 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
             payment_link: newLink?.url ?? null,
             payment_link_id: newLink?.id ?? null,
             payment_link_type: newLink ? "custom" : null,
-            updated_at: new Date().toISOString(),
+            updated_at: updatedAt,
             ...statusFields,
         })
         .eq("id", estimate.id)
@@ -145,5 +146,6 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
         paymentCompletedAt: "payment_completed_at" in statusFields
             ? statusFields.payment_completed_at
             : estimate.payment_completed_at ?? null,
+        updatedAt,
     })
 }

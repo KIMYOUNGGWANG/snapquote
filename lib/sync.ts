@@ -21,6 +21,7 @@ import {
     type CloudEstimateRow,
     type CloudQuickBooksInvoiceLinkRow,
     mapCloudQuickBooksLinkToLocalPatch,
+    preserveLocalOnlyCompletionState,
 } from './sync-estimate-mapping'
 
 export type SyncEstimatesResult =
@@ -392,12 +393,15 @@ export async function syncEstimates(): Promise<SyncEstimatesResult> {
             if (!local || syncAction === 'pull') {
                 // Convert cloud shape to local shape
                 const cloudId = typeof cloud.id === "string" ? cloud.id : ""
-                const localEst = applyCloudCustomerPortalLinkToLocalEstimate(
-                    applyCloudQuickBooksLinkToLocalEstimate(
-                        mapCloudEstimateToLocal(cloud),
-                        quickBooksLinkMap.get(cloudId)
+                const localEst = preserveLocalOnlyCompletionState(
+                    applyCloudCustomerPortalLinkToLocalEstimate(
+                        applyCloudQuickBooksLinkToLocalEstimate(
+                            mapCloudEstimateToLocal(cloud),
+                            quickBooksLinkMap.get(cloudId)
+                        ),
+                        customerPortalLinkMap.get(cloudId)
                     ),
-                    customerPortalLinkMap.get(cloudId)
+                    local
                 )
                 await saveEstimate(localEst)
                 updatedLocalCount++

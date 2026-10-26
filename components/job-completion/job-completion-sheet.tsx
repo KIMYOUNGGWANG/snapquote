@@ -33,11 +33,18 @@ import {
     applyExtraWork,
     buildCompletionMessage,
     buildReviewItems,
+    getCompletionAction,
     getQuoteItemsForCompletion,
     parseMoneyInput,
     type ExtraWorkLine,
 } from "@/lib/job-completion"
-import { finalizeJobCompletion, getStoredEstimate, requestCompletionMatches, sendCompletionEmail } from "@/lib/job-completion-client"
+import {
+    ensureCompletionPortalUrl,
+    finalizeJobCompletion,
+    getStoredEstimate,
+    requestCompletionMatches,
+    sendCompletionEmail,
+} from "@/lib/job-completion-client"
 import { sendEstimateSms } from "@/lib/send-sms"
 import { cn } from "@/lib/utils"
 
@@ -123,8 +130,12 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
     const online = useOnlineStatus()
     const quoteItems = useMemo(() => getQuoteItemsForCompletion(estimate), [estimate])
     const initialReady = useMemo(() => getInitialReady(estimate), [estimate])
+    // Same rule as the History card: a stored report only ever resends, a pending one only resumes.
+    const initialAction = useMemo(() => getCompletionAction(estimate), [estimate])
 
-    const [phase, setPhase] = useState<Phase>(initialReady ? "ready" : estimate.pendingCompletion ? "resume" : "capture")
+    const [phase, setPhase] = useState<Phase>(
+        initialAction === "resend" ? "ready" : initialAction === "resume" ? "resume" : "capture"
+    )
     const [pending, setPending] = useState<PendingCompletion | null>(estimate.pendingCompletion ?? null)
     const [photos, setPhotos] = useState<string[]>([])
     const [skippedFiles, setSkippedFiles] = useState<string[]>([])
@@ -149,7 +160,33 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
     const [channel, setChannel] = useState<"sms" | "email" | null>(null)
     const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-    const isResend = Boolean(initialReady)
+    const isResend = initialAction === "resend"
+    const [preparingLink, setPreparingLink] = useState(false)
+
+    // Stored report without a portal URL: re-post the snapshot to get one (never finalize again).
+    const prepareResendLink = useCallback(async () => {
+        setPreparingLink(true)
+        setSendError("")
+        try {
+            const result = await ensureCompletionPortalUrl(estimate)
+            setReady({
+                portalUrl: result.portalUrl,
+                balanceDue: computeBalanceDue(result.estimate.totalAmount, result.estimate.amountPaid ?? 0),
+                estimate: result.estimate,
+            })
+        } catch (error) {
+            setSendError(getErrorMessage(error, "Couldn't prepare the report link. Try again."))
+        } finally {
+            setPreparingLink(false)
+        }
+    }, [estimate])
+
+    const preparedOnceRef = useRef(false)
+    useEffect(() => {
+        if (!isResend || initialReady || preparedOnceRef.current) return
+        preparedOnceRef.current = true
+        void prepareResendLink()
+    }, [initialReady, isResend, prepareResendLink])
     const busy = sending || compressing || phase === "matching"
 
     const hasUnsavedWork = phase === "review" || (phase === "capture" && photos.length > 0)
@@ -275,12 +312,15 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
         else if (target.clientEmail?.trim()) setChannel("email")
     }
 
-    const runFinalize = async (input: Parameters<typeof finalizeJobCompletion>[1]) => {
+    const runFinalize = async (
+        input: Parameters<typeof finalizeJobCompletion>[1],
+        options: Parameters<typeof finalizeJobCompletion>[2] = {}
+    ) => {
         setSending(true)
         setSendError("")
         let result: Awaited<ReturnType<typeof finalizeJobCompletion>>
         try {
-            result = await finalizeJobCompletion(estimate, input)
+            result = await finalizeJobCompletion(estimate, input, options)
         } catch (error) {
             setSendError(getErrorMessage(error, "Couldn't send the report. Try again."))
             // Finalize may have run before the failure: switch to resume so a retry never re-finalizes.
@@ -321,7 +361,7 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
     // Inputs are ignored on resume: the stored pending completion is used.
     const handleResume = () => {
         if (!pending || !online || sending) return
-        void runFinalize({ completion: pending.completion, extraWork: [], alreadyReceived: pending.amountPaid })
+        void runFinalize({ completion: pending.completion, extraWork: [], alreadyReceived: pending.amountPaid }, { resume: true })
     }
 
     const readyMessage = ready ? buildCompletionMessage(ready.portalUrl, ready.balanceDue, { reminder: isResend }) : ""
@@ -792,7 +832,29 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
         }
 
         // ready
-        if (!ready) return null
+        if (!ready) {
+            return (
+                <div className="space-y-4" data-testid="completion-ready-preparing">
+                    {preparingLink ? (
+                        <div className="flex items-center gap-3 rounded-lg border border-blue-300/20 bg-blue-500/10 p-3 text-sm text-blue-100" role="status">
+                            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                            Preparing the report link…
+                        </div>
+                    ) : null}
+                    {sendError ? (
+                        <>
+                            <Notice tone="red" icon={<AlertTriangle className="h-4 w-4" />} title="Report link not ready" testId="completion-send-error">
+                                {sendError}
+                            </Notice>
+                            <Button type="button" className="h-12 w-full" onClick={() => void prepareResendLink()} disabled={!online || preparingLink}>
+                                Try again
+                            </Button>
+                        </>
+                    ) : null}
+                    {offlineNotice}
+                </div>
+            )
+        }
         const target = ready.estimate
         const hasPhone = Boolean(target.clientPhone?.trim())
         const hasEmail = Boolean(target.clientEmail?.trim())

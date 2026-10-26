@@ -92,7 +92,10 @@ describe('POST /api/estimates/[estimateId]/completion', () => {
       paymentLinkId: 'plink_balance',
       status: 'sent',
       paymentCompletedAt: null,
+      // The exact updated_at written, so the client's LWW sees local == cloud.
+      updatedAt: updates[0].payload.updated_at,
     })
+    assert.match(data.updatedAt, /^\d{4}-\d{2}-\d{2}T.*Z$/)
     assert.equal(captured.payload.line_items[0].price_data.unit_amount, 124000)
     assert.equal(captured.payload.metadata.estimateId, ESTIMATE_ID)
     assert.equal(captured.options.stripeAccount, 'acct_connected_1')

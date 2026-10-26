@@ -5,6 +5,7 @@ import {
     getCustomerPortalEstimateUpdates,
 } from "@/lib/customer-portal-client"
 import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
+import { computeBalanceDue } from "@/lib/estimates/balance"
 import { getEstimates, saveEstimate, type JobCompletion, type LocalEstimate } from "@/lib/estimates-storage"
 import {
     applyExtraWork,
@@ -81,6 +82,15 @@ type FinalizeResponse = {
     paymentLinkId?: string
     status: LocalEstimate["status"]
     paymentCompletedAt?: string
+    updatedAt?: string
+}
+
+/** Resume was requested but the saved finalize step is gone: never fall back to a fresh finalize. */
+export class CompletionStateLostError extends Error {
+    constructor() {
+        super("We couldn't find the saved payment step. Close and reopen this job to continue.")
+        this.name = "CompletionStateLostError"
+    }
 }
 
 async function postFinalize(estimateId: string, alreadyReceived: number): Promise<FinalizeResponse> {
@@ -112,6 +122,7 @@ async function postFinalize(estimateId: string, alreadyReceived: number): Promis
         paymentLinkId: typeof data.paymentLinkId === "string" ? data.paymentLinkId : undefined,
         status,
         paymentCompletedAt,
+        updatedAt: typeof data.updatedAt === "string" && data.updatedAt.trim() ? data.updatedAt : undefined,
     }
 }
 
@@ -127,13 +138,15 @@ export async function getStoredEstimate(estimateId: string): Promise<LocalEstima
  */
 export async function finalizeJobCompletion(
     estimate: LocalEstimate,
-    input: { completion: JobCompletion; extraWork: ExtraWorkLine[]; alreadyReceived: number }
+    input: { completion: JobCompletion; extraWork: ExtraWorkLine[]; alreadyReceived: number },
+    options: { resume?: boolean } = {}
 ): Promise<{ estimate: LocalEstimate; portalUrl: string; balanceDue: number }> {
     if (typeof navigator !== "undefined" && !navigator.onLine) {
         throw new Error("You're offline. Connect to send the report.")
     }
 
     let finalized = await getStoredEstimate(estimate.id)
+    if (options.resume && !finalized?.pendingCompletion) throw new CompletionStateLostError()
     if (!finalized?.pendingCompletion) {
         // 1. Extra work + recomputed totals, saved locally.
         const withExtraWork: LocalEstimate = {
@@ -162,8 +175,9 @@ export async function finalizeJobCompletion(
             paymentLinkId: result.paymentLinkId,
             paymentLinkType: result.paymentLink ? "custom" : undefined,
             pendingCompletion: { completion: input.completion, amountPaid: result.amountPaid, balanceDue: result.balanceDue },
-            updatedAt: new Date().toISOString(),
-            synced: false,
+            // Server's own updated_at: LWW then sees local == cloud and neither pushes nor pulls this row.
+            updatedAt: result.updatedAt ?? new Date().toISOString(),
+            synced: Boolean(result.updatedAt),
         }
         await saveEstimate(finalized)
     }
@@ -192,6 +206,30 @@ export async function finalizeJobCompletion(
     void syncEstimates().catch((error: unknown) => console.warn("Completion sync deferred:", error))
 
     return { estimate: saved, portalUrl, balanceDue: pending.balanceDue }
+}
+
+/**
+ * Resend for a stored report that has no portal URL: re-post the snapshot (no finalize, no push).
+ * The record keeps its updatedAt, so sync does not treat this as a local edit.
+ */
+export async function ensureCompletionPortalUrl(estimate: LocalEstimate): Promise<{ estimate: LocalEstimate; portalUrl: string }> {
+    if (estimate.customerPortalUrl) return { estimate, portalUrl: estimate.customerPortalUrl }
+    if (!estimate.completion) throw new Error("This job has no completion report yet.")
+
+    const amountPaid = estimate.amountPaid ?? 0
+    const portal = await createCustomerPortalLinkForEstimate(estimate, {
+        completion: { amountPaid, balanceDue: computeBalanceDue(estimate.totalAmount, amountPaid) },
+    })
+    if (!portal.shareUrl) throw new Error("Customer link was not returned. Try again.")
+
+    const updates = getCustomerPortalEstimateUpdates(portal)
+    const saved: LocalEstimate = {
+        ...estimate,
+        customerPortalUrl: portal.shareUrl,
+        customerPortalStatus: updates.customerPortalStatus,
+    }
+    await saveEstimate(saved)
+    return { estimate: saved, portalUrl: portal.shareUrl }
 }
 
 export async function sendCompletionEmail(input: {
