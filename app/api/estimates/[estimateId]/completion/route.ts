@@ -114,7 +114,7 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
     }
 
     // Contractor confirmed full receipt: server marks it paid (total 0 never counts).
-    const statusFields = isFullyPaid(totalAmount, alreadyReceived)
+    const statusFields: { status?: string; payment_completed_at?: string | null } = isFullyPaid(totalAmount, alreadyReceived)
         ? { status: "paid", payment_completed_at: estimate.payment_completed_at || new Date().toISOString() }
         : reopeningDeposit && balanceDue > 0
             ? { status: "sent", payment_completed_at: null }
@@ -140,5 +140,10 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
         amountPaid: alreadyReceived,
         balanceDue,
         ...(newLink ? { paymentLink: newLink.url, paymentLinkId: newLink.id } : {}),
+        // Server truth for the client: it never infers "paid" on its own.
+        status: statusFields.status ?? estimate.status,
+        paymentCompletedAt: "payment_completed_at" in statusFields
+            ? statusFields.payment_completed_at
+            : estimate.payment_completed_at ?? null,
     })
 }

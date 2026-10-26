@@ -90,6 +90,8 @@ describe('POST /api/estimates/[estimateId]/completion', () => {
       balanceDue: 1240,
       paymentLink: 'https://pay.stripe.com/balance',
       paymentLinkId: 'plink_balance',
+      status: 'sent',
+      paymentCompletedAt: null,
     })
     assert.equal(captured.payload.line_items[0].price_data.unit_amount, 124000)
     assert.equal(captured.payload.metadata.estimateId, ESTIMATE_ID)
@@ -185,10 +187,14 @@ describe('POST /api/estimates/[estimateId]/completion', () => {
     const updates = mockDb(state, baseEstimate())
 
     const res = await post({ alreadyReceived: 1740 })
+    const data = await res.json()
 
     assert.equal(res.status, 200)
     assert.equal(updates[0].payload.status, 'paid')
     assert.match(updates[0].payload.payment_completed_at, /^\d{4}-\d{2}-\d{2}T/)
+    // The client applies server truth instead of inferring "paid".
+    assert.equal(data.status, 'paid')
+    assert.equal(data.paymentCompletedAt, updates[0].payload.payment_completed_at)
   })
 
   test('finalize keeps an existing payment_completed_at when marking paid', async () => {
@@ -210,8 +216,10 @@ describe('POST /api/estimates/[estimateId]/completion', () => {
     const updates = mockDb(state, baseEstimate({ total_amount: 0 }))
 
     const res = await post({ alreadyReceived: 0 })
+    const data = await res.json()
 
     assert.equal(res.status, 200)
+    assert.equal(data.status, 'sent')
     assert.equal('status' in updates[0].payload, false)
     assert.equal('payment_completed_at' in updates[0].payload, false)
   })
@@ -249,11 +257,14 @@ describe('POST /api/estimates/[estimateId]/completion', () => {
     )
 
     const res = await post({ alreadyReceived: 500 })
+    const data = await res.json()
 
     assert.equal(res.status, 200)
     assert.equal(updates[0].payload.status, 'sent')
     assert.equal(updates[0].payload.payment_completed_at, null)
     assert.equal(updates[0].payload.payment_link_type, 'custom')
+    assert.equal(data.status, 'sent')
+    assert.equal(data.paymentCompletedAt, null)
   })
 
   test('finalize rejects negative alreadyReceived with 400', async () => {

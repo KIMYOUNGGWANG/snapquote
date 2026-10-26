@@ -52,7 +52,7 @@ import {
 import { isOpenCustomerChangeRequest, isSupersededCustomerChangeRequest } from "@/lib/customer-revisions"
 import { isEstimateReadyForFollowUp } from "@/lib/follow-up-service"
 import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
-import { canCompleteJob } from "@/lib/job-completion"
+import { getCompletionAction } from "@/lib/job-completion"
 
 type TabType = 'drafts' | 'sent' | 'paid'
 type HistoryDeepLinkAction = "follow-up" | "sms"
@@ -2092,12 +2092,8 @@ function HistoryPageContent() {
                     const canCreatePaymentLinkPrimary = isApprovedSentQuote
                         && !effectivePaymentLink
                         && !isLocalOnlyMode
-                    // A stored completion means the report was finalized: offer a resend, never a second finalize.
-                    const completionAction = !isAuthenticated
-                        ? null
-                        : estimate.completion
-                            ? (estimate.customerPortalUrl && !estimateIsPaidLike ? "resend" : null)
-                            : canCompleteJob(estimate) ? "complete" : null
+                    // Stored report -> resend; finalized but unsent -> resume; never a second finalize.
+                    const completionAction = isAuthenticated ? getCompletionAction(estimate) : null
                     const paymentStatusLabel = estimate.paymentLink?.trim()
                         ? "Payment link attached"
                         : businessProfile?.payment_link?.trim()
@@ -2505,7 +2501,7 @@ function HistoryPageContent() {
                                                 data-testid="history-mark-job-complete-action"
                                             >
                                                 <CheckCircle2 className="mr-1 h-3 w-3" />
-                                                {completionAction === "resend" ? "Resend report" : "Mark job complete"}
+                                                {completionAction === "resend" ? "Resend report" : completionAction === "resume" ? "Finish report" : "Mark job complete"}
                                             </Button>
                                         )}
                                         {items.length > 0 && (

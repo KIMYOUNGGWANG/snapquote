@@ -7,6 +7,8 @@ import {
   buildExtraWorkSection,
   buildReviewItems,
   canCompleteJob,
+  getCompletionAction,
+  parseMoneyInput,
 } from '../../lib/job-completion.ts'
 import { buildCustomerQuoteSnapshot } from '../../lib/customer-portal-client.ts'
 
@@ -142,6 +144,48 @@ describe('buildCompletionMessage', () => {
       buildCompletionMessage('https://snapquote.test/q/abc', 0),
       'Your job is done. See the photos here: https://snapquote.test/q/abc'
     )
+  })
+})
+
+describe('resend reminder', () => {
+  test('prefixes a resend so the SMS dedupe key differs from the first send', () => {
+    assert.equal(
+      buildCompletionMessage('https://snapquote.test/q/abc', 0, { reminder: true }),
+      'Reminder: Your job is done. See the photos here: https://snapquote.test/q/abc'
+    )
+  })
+})
+
+describe('getCompletionAction', () => {
+  const completion = { completedAt: '2026-10-25T10:00:00.000Z', summary: '', photos: [], items: [] }
+
+  test('a stored completion is always resendable, even when paid', () => {
+    assert.equal(getCompletionAction(makeEstimate({ completion })), 'resend')
+    assert.equal(getCompletionAction(makeEstimate({ completion, status: 'paid', paymentCompletedAt: '2026-10-25T10:00:00.000Z' })), 'resend')
+  })
+
+  test('a finalized-but-unsent report resumes even after the server marked it paid', () => {
+    const pendingCompletion = { completion, amountPaid: 1130, balanceDue: 0 }
+    assert.equal(getCompletionAction(makeEstimate({ status: 'paid', pendingCompletion })), 'resume')
+  })
+
+  test('otherwise follows canCompleteJob', () => {
+    assert.equal(getCompletionAction(makeEstimate()), 'complete')
+    assert.equal(getCompletionAction(makeEstimate({ customerPortalStatus: 'viewed' })), null)
+  })
+})
+
+describe('parseMoneyInput', () => {
+  test('accepts plain decimal amounts and treats blank as 0', () => {
+    assert.equal(parseMoneyInput(''), 0)
+    assert.equal(parseMoneyInput(' 1240.5 '), 1240.5)
+    assert.equal(parseMoneyInput('.75'), 0.75)
+  })
+
+  test('rejects exponents, signs, and extra decimals', () => {
+    for (const value of ['1e3', '-5', '12.345', 'abc', '1,000']) {
+      assert.ok(Number.isNaN(parseMoneyInput(value)), value)
+    }
   })
 })
 

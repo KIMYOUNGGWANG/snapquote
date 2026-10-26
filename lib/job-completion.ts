@@ -117,10 +117,26 @@ export function buildReviewItems(itemIds: readonly string[], matches: readonly C
     })
 }
 
-export function buildCompletionMessage(portalUrl: string, balanceDue: number): string {
-    return balanceDue > 0
+export function buildCompletionMessage(portalUrl: string, balanceDue: number, options: { reminder?: boolean } = {}): string {
+    const message = balanceDue > 0
         ? `Your job is done. See photos and pay the balance here: ${portalUrl}`
         : `Your job is done. See the photos here: ${portalUrl}`
+    // A resend must differ from the first text, or the SMS idempotency key dedupes it.
+    return options.reminder ? `Reminder: ${message}` : message
+}
+
+/** History card action: resend a stored report, resume a finalized-but-unsent one, or start a new one. */
+export function getCompletionAction(estimate: LocalEstimate): "resend" | "resume" | "complete" | null {
+    if (estimate.completion) return "resend"
+    if (estimate.pendingCompletion) return "resume"
+    return canCompleteJob(estimate) ? "complete" : null
+}
+
+/** Money typed by hand: blank is 0; anything but plain digits with up to 2 decimals is NaN. */
+export function parseMoneyInput(value: string): number {
+    const trimmed = value.trim()
+    if (!trimmed) return 0
+    return /^(\d+(\.\d{0,2})?|\.\d{1,2})$/.test(trimmed) ? Number(trimmed) : Number.NaN
 }
 
 export function buildCompletionEmailSubject(estimateNumber: string): string {

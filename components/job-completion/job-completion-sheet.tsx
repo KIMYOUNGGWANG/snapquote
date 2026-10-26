@@ -28,15 +28,16 @@ import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/components/toast"
 import { computeBalanceDue } from "@/lib/estimates/balance"
 import type { JobCompletionItem, LocalEstimate } from "@/lib/estimates-storage"
-import { compressImageToDataUrl } from "@/lib/image-compress"
+import { compressImageToDataUrl, ImageTooLargeError } from "@/lib/image-compress"
 import {
     applyExtraWork,
     buildCompletionMessage,
     buildReviewItems,
     getQuoteItemsForCompletion,
+    parseMoneyInput,
     type ExtraWorkLine,
 } from "@/lib/job-completion"
-import { finalizeJobCompletion, requestCompletionMatches, sendCompletionEmail } from "@/lib/job-completion-client"
+import { finalizeJobCompletion, getStoredEstimate, requestCompletionMatches, sendCompletionEmail } from "@/lib/job-completion-client"
 import { sendEstimateSms } from "@/lib/send-sms"
 import { cn } from "@/lib/utils"
 
@@ -46,7 +47,8 @@ const EmailModal = dynamic(() => import("@/components/email-modal").then((mod) =
 const MAX_PHOTOS = 6
 const MAX_RECEIVED = 1_000_000
 
-type Phase = "capture" | "matching" | "limit" | "review" | "ready"
+type Phase = "capture" | "matching" | "limit" | "review" | "resume" | "ready"
+type PendingCompletion = NonNullable<LocalEstimate["pendingCompletion"]>
 type ExtraWorkRow = { key: string; description: string; amount: string }
 type SelectedPhoto = { itemId: string | null; photoIndex: number }
 type ReadyState = { portalUrl: string; balanceDue: number; estimate: LocalEstimate }
@@ -80,11 +82,6 @@ function useOnlineStatus(): boolean {
         }
     }, [])
     return online
-}
-
-function parseAmount(value: string): number {
-    const trimmed = value.trim()
-    return trimmed ? Number(trimmed) : 0
 }
 
 function getInitialReady(estimate: LocalEstimate): ReadyState | null {
@@ -127,13 +124,15 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
     const quoteItems = useMemo(() => getQuoteItemsForCompletion(estimate), [estimate])
     const initialReady = useMemo(() => getInitialReady(estimate), [estimate])
 
-    const [phase, setPhase] = useState<Phase>(initialReady ? "ready" : "capture")
+    const [phase, setPhase] = useState<Phase>(initialReady ? "ready" : estimate.pendingCompletion ? "resume" : "capture")
+    const [pending, setPending] = useState<PendingCompletion | null>(estimate.pendingCompletion ?? null)
     const [photos, setPhotos] = useState<string[]>([])
     const [skippedFiles, setSkippedFiles] = useState<string[]>([])
+    const [oversizedFiles, setOversizedFiles] = useState<string[]>([])
     const [droppedForLimit, setDroppedForLimit] = useState(0)
     const [compressing, setCompressing] = useState(false)
     const [note, setNote] = useState("")
-    const [aiFailed, setAiFailed] = useState(false)
+    const [matchNotice, setMatchNotice] = useState<"failed" | "manual" | null>(null)
     const [limitMessage, setLimitMessage] = useState("")
     const [reviewItems, setReviewItems] = useState<JobCompletionItem[]>([])
     const [summary, setSummary] = useState("")
@@ -153,9 +152,12 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
     const isResend = Boolean(initialReady)
     const busy = sending || compressing || phase === "matching"
 
+    const hasUnsavedWork = phase === "review" || (phase === "capture" && photos.length > 0)
     const requestClose = useCallback(() => {
-        if (!busy) onClose()
-    }, [busy, onClose])
+        if (busy) return
+        if (hasUnsavedWork && !window.confirm("Discard this completion report? Your photos and edits will be lost.")) return
+        onClose()
+    }, [busy, hasUnsavedWork, onClose])
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -168,11 +170,11 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
     // ---- Derived money values -------------------------------------------------
     const extraWorkLines: ExtraWorkLine[] = extraWork
         .filter((row) => row.description.trim() || row.amount.trim())
-        .map((row) => ({ description: row.description, amount: parseAmount(row.amount) }))
+        .map((row) => ({ description: row.description, amount: parseMoneyInput(row.amount) }))
     const extraWorkInvalid = extraWorkLines.some((line) => !line.description.trim() || !Number.isFinite(line.amount) || line.amount <= 0)
     const projected = applyExtraWork(estimate, extraWorkInvalid ? [] : extraWorkLines)
     const baseTotal = useMemo(() => applyExtraWork(estimate, []).totalAmount, [estimate])
-    const receivedValue = parseAmount(alreadyReceived)
+    const receivedValue = parseMoneyInput(alreadyReceived)
     const receivedInvalid = !Number.isFinite(receivedValue) || receivedValue < 0 || receivedValue > MAX_RECEIVED
     const balanceDue = receivedInvalid ? projected.totalAmount : computeBalanceDue(projected.totalAmount, receivedValue)
     const extraSubtotal = extraWorkInvalid ? 0 : extraWorkLines.reduce((sum, line) => sum + line.amount, 0)
@@ -193,15 +195,19 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
         setCompressing(true)
         const added: string[] = []
         const skipped: string[] = []
+        const oversized: string[] = []
         for (const file of files.slice(0, slots)) {
             try {
                 added.push(await compressImageToDataUrl(file))
-            } catch {
-                skipped.push(file.name || "Unnamed photo")
+            } catch (error) {
+                const name = file.name || "Unnamed photo"
+                if (error instanceof ImageTooLargeError) oversized.push(name)
+                else skipped.push(name)
             }
         }
         setPhotos((current) => [...current, ...added].slice(0, MAX_PHOTOS))
         setSkippedFiles(skipped)
+        setOversizedFiles(oversized)
         setCompressing(false)
     }
 
@@ -222,14 +228,23 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
             return
         }
         if (outcome.kind === "failed") {
-            setAiFailed(true)
+            setMatchNotice("failed")
             setSummary("")
             setReviewItems(buildReviewItems(itemIds, []))
         } else {
-            setAiFailed(false)
+            setMatchNotice(null)
             setSummary(outcome.summary)
             setReviewItems(buildReviewItems(itemIds, outcome.items))
         }
+        setPhase("review")
+    }
+
+    // Free limit reached: check lines off by hand, no AI call.
+    const startManualReview = () => {
+        setMatchNotice("manual")
+        setSummary("")
+        setSelectedPhoto(null)
+        setReviewItems(buildReviewItems(quoteItems.map((item) => item.id), []))
         setPhase("review")
     }
 
@@ -260,38 +275,62 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
         else if (target.clientEmail?.trim()) setChannel("email")
     }
 
-    const handleSend = async () => {
-        if (!canSend) return
+    const runFinalize = async (input: Parameters<typeof finalizeJobCompletion>[1]) => {
         setSending(true)
         setSendError("")
+        let result: Awaited<ReturnType<typeof finalizeJobCompletion>>
         try {
-            const result = await finalizeJobCompletion(estimate, {
-                completion: {
-                    completedAt: new Date().toISOString(),
-                    summary: summary.trim(),
-                    photos,
-                    items: reviewItems,
-                },
-                extraWork: extraWorkLines,
-                alreadyReceived: receivedValue,
-            })
-            setReady(result)
-            setPhase("ready")
-            await onChanged()
-            openChannelFor(result.estimate)
+            result = await finalizeJobCompletion(estimate, input)
         } catch (error) {
             setSendError(getErrorMessage(error, "Couldn't send the report. Try again."))
-        } finally {
+            // Finalize may have run before the failure: switch to resume so a retry never re-finalizes.
+            const stored = await getStoredEstimate(estimate.id).catch(() => undefined)
+            if (stored?.pendingCompletion) {
+                setPending(stored.pendingCompletion)
+                setPhase("resume")
+            }
             setSending(false)
+            return
+        }
+        setSending(false)
+        setPending(null)
+        setReady(result)
+        setPhase("ready")
+        openChannelFor(result.estimate)
+        try {
+            await onChanged()
+        } catch (error) {
+            toast(getErrorMessage(error, "Report sent, but History didn't refresh. Reopen it to see the update."), "error")
         }
     }
 
-    const readyMessage = ready ? buildCompletionMessage(ready.portalUrl, ready.balanceDue) : ""
+    const handleSend = () => {
+        if (!canSend) return
+        void runFinalize({
+            completion: {
+                completedAt: new Date().toISOString(),
+                summary: summary.trim(),
+                photos,
+                items: reviewItems,
+            },
+            extraWork: extraWorkLines,
+            alreadyReceived: receivedValue,
+        })
+    }
+
+    // Inputs are ignored on resume: the stored pending completion is used.
+    const handleResume = () => {
+        if (!pending || !online || sending) return
+        void runFinalize({ completion: pending.completion, extraWork: [], alreadyReceived: pending.amountPaid })
+    }
+
+    const readyMessage = ready ? buildCompletionMessage(ready.portalUrl, ready.balanceDue, { reminder: isResend }) : ""
 
     const handleSendSms = async (toPhoneNumber: string, message: string) => {
         if (!ready) return
-        await sendEstimateSms({ estimateId: ready.estimate.id, toPhoneNumber, message })
-        toast("Completion report texted.", "success")
+        const result = await sendEstimateSms({ estimateId: ready.estimate.id, toPhoneNumber, message })
+        if (result.deduped) toast("This exact text was already sent.", "info")
+        else toast("Completion report texted.", "success")
         await onChanged()
     }
 
@@ -330,7 +369,9 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
                 ? "Monthly limit reached"
                 : phase === "review"
                     ? "Review before sending"
-                    : isResend ? "Resend completion report" : "Report ready"
+                    : phase === "resume"
+                        ? "Finish sending report"
+                        : isResend ? "Resend completion report" : "Report ready"
     const sendLabel = balanceDue > 0 ? `Send & request ${formatMoney(balanceDue)}` : "Send report"
 
     const offlineNotice = !online ? (
@@ -472,6 +513,11 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
                             <p>Skipped: {skippedFiles.join(", ")}. Save them as JPEG (or take a new photo) and add again.</p>
                         </Notice>
                     ) : null}
+                    {oversizedFiles.length > 0 ? (
+                        <Notice tone="amber" icon={<AlertTriangle className="h-4 w-4" />} title="Some photos are too large" testId="completion-oversized-files">
+                            <p>{oversizedFiles.join(", ")} {oversizedFiles.length === 1 ? "is" : "are"} too large even after compression. Crop or retake {oversizedFiles.length === 1 ? "it" : "them"} and add again.</p>
+                        </Notice>
+                    ) : null}
                     {droppedForLimit > 0 ? (
                         <Notice tone="blue" icon={<ImagePlus className="h-4 w-4" />} title={`Only ${MAX_PHOTOS} photos fit in a report`}>
                             {droppedForLimit} extra photo{droppedForLimit === 1 ? " was" : "s were"} left out.
@@ -521,11 +567,12 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
                 <div className="space-y-4" data-testid="completion-limit">
                     <div className="rounded-[20px] border border-primary/25 bg-primary/10 p-5">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-200/80">Free plan</p>
-                        <p className="mt-2 text-lg font-semibold text-white">{limitMessage}</p>
+                        <p className="mt-2 text-lg font-semibold text-white">AI matching is used up this month</p>
                         <p className="mt-2 text-sm leading-6 text-slate-300">
-                            Upgrade to send unlimited completion reports with AI photo matching. Your photos stay here if you go back.
+                            You can still send this report: check off each line and attach your photos yourself. Upgrade for unlimited AI matching.
                         </p>
-                        <Button asChild className="mt-4 h-12 w-full" data-testid="completion-limit-pricing">
+                        {limitMessage ? <p className="mt-2 text-xs leading-5 text-slate-500" data-testid="completion-limit-detail">{limitMessage}</p> : null}
+                        <Button asChild variant="outline" className={cn(outlineButtonClassName, "mt-4 h-12 w-full")} data-testid="completion-limit-pricing">
                             <NextLink href="/pricing">See plans</NextLink>
                         </Button>
                     </div>
@@ -536,9 +583,13 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
         if (phase === "review") {
             return (
                 <div className="space-y-5">
-                    {aiFailed ? (
+                    {matchNotice === "failed" ? (
                         <Notice tone="amber" icon={<AlertTriangle className="h-4 w-4" />} title="AI matching didn't finish" testId="completion-ai-failed">
                             Every line is marked ?. Tap a line to confirm it&apos;s done, and tap a photo to attach it.
+                        </Notice>
+                    ) : matchNotice === "manual" ? (
+                        <Notice tone="blue" icon={<Check className="h-4 w-4" />} title="Manual review" testId="completion-manual-review">
+                            Tap each line you finished, then tap a photo to attach it to a line.
                         </Notice>
                     ) : null}
 
@@ -627,10 +678,9 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
                                     <Input
                                         value={row.amount}
                                         onChange={(event) => updateExtraRow(row.key, { amount: event.target.value })}
-                                        type="number"
+                                        type="text"
                                         inputMode="decimal"
-                                        min="0.01"
-                                        step="0.01"
+                                        autoComplete="off"
                                         placeholder="0.00"
                                         aria-label={`Extra work ${index + 1} amount`}
                                         className={cn(fieldClassName, "pl-6")}
@@ -671,10 +721,9 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
                                 <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">$</span>
                                 <Input
                                     id="completion-received"
-                                    type="number"
+                                    type="text"
                                     inputMode="decimal"
-                                    min="0"
-                                    step="0.01"
+                                    autoComplete="off"
                                     value={alreadyReceived}
                                     onChange={(event) => setAlreadyReceived(event.target.value)}
                                     aria-invalid={receivedInvalid}
@@ -708,6 +757,30 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
                         </dl>
                     </section>
 
+                    {offlineNotice}
+                    {sendError ? (
+                        <Notice tone="red" icon={<AlertTriangle className="h-4 w-4" />} title="Report not sent" testId="completion-send-error">
+                            {sendError}
+                        </Notice>
+                    ) : null}
+                </div>
+            )
+        }
+
+        if (phase === "resume") {
+            return (
+                <div className="space-y-4" data-testid="completion-resume">
+                    <div className="rounded-[20px] border border-blue-300/20 bg-blue-500/10 p-4">
+                        <div className="flex items-center gap-2 text-blue-100">
+                            <CheckCircle2 className="h-5 w-5 shrink-0" />
+                            <p className="text-base font-semibold">Payment details are saved</p>
+                        </div>
+                        <p className="mt-2 text-sm leading-6 text-slate-300">
+                            {pending && pending.balanceDue > 0
+                                ? `The ${formatMoney(pending.balanceDue)} balance link is ready, but the customer page wasn't updated yet. Finish to update it and send the report.`
+                                : "The customer page wasn't updated yet. Finish to update it and send the report."}
+                        </p>
+                    </div>
                     {offlineNotice}
                     {sendError ? (
                         <Notice tone="red" icon={<AlertTriangle className="h-4 w-4" />} title="Report not sent" testId="completion-send-error">
@@ -788,15 +861,31 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
         }
         if (phase === "limit") {
             return (
-                <Button type="button" variant="outline" className={cn(outlineButtonClassName, "h-12 w-full")} onClick={() => setPhase("capture")}>
-                    <ArrowLeft className="h-4 w-4" />
-                    Back to photos
+                <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] gap-2">
+                    <Button type="button" variant="outline" size="icon" className={cn(outlineButtonClassName, "h-12 w-11")} onClick={() => setPhase("capture")} aria-label="Back to photos">
+                        <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                    <Button type="button" className="h-12 w-full" onClick={startManualReview} data-testid="completion-limit-manual">
+                        Review manually
+                    </Button>
+                </div>
+            )
+        }
+        if (phase === "resume") {
+            return (
+                <Button type="button" className="h-12 w-full text-base" onClick={handleResume} disabled={!online || sending} data-testid="completion-resume-button">
+                    {sending ? (
+                        <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Sending report…
+                        </>
+                    ) : "Finish sending"}
                 </Button>
             )
         }
         if (phase === "review") {
             return (
-                <Button type="button" className="h-12 w-full text-base" onClick={() => void handleSend()} disabled={!canSend} data-testid="completion-send-button">
+                <Button type="button" className="h-12 w-full text-base" onClick={handleSend} disabled={!canSend} data-testid="completion-send-button">
                     {sending ? (
                         <>
                             <Loader2 className="h-4 w-4 animate-spin" />

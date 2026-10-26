@@ -5,7 +5,7 @@ import {
     getCustomerPortalEstimateUpdates,
 } from "@/lib/customer-portal-client"
 import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
-import { saveEstimate, type JobCompletion, type LocalEstimate } from "@/lib/estimates-storage"
+import { getEstimates, saveEstimate, type JobCompletion, type LocalEstimate } from "@/lib/estimates-storage"
 import {
     applyExtraWork,
     buildCompletionEmailSubject,
@@ -13,7 +13,6 @@ import {
     type CompletionMatchResult,
     type ExtraWorkLine,
 } from "@/lib/job-completion"
-import { supabase } from "@/lib/supabase"
 import { syncEstimates } from "@/lib/sync"
 
 const AI_TIMEOUT_MS = 60_000
@@ -80,6 +79,8 @@ type FinalizeResponse = {
     balanceDue: number
     paymentLink?: string
     paymentLinkId?: string
+    status: LocalEstimate["status"]
+    paymentCompletedAt?: string
 }
 
 async function postFinalize(estimateId: string, alreadyReceived: number): Promise<FinalizeResponse> {
@@ -96,38 +97,33 @@ async function postFinalize(estimateId: string, alreadyReceived: number): Promis
         throw new Error("Completion response was incomplete.")
     }
 
-    return {
-        amountPaid: data.amountPaid,
-        balanceDue: data.balanceDue,
-        paymentLink: typeof data.paymentLink === "string" ? data.paymentLink : undefined,
-        paymentLinkId: typeof data.paymentLinkId === "string" ? data.paymentLinkId : undefined,
-    }
-}
-
-/** Status is server-owned: read what the finalize route decided instead of inferring it. */
-async function fetchServerPaymentStatus(estimateId: string): Promise<Pick<LocalEstimate, "status" | "paymentCompletedAt">> {
-    const { data, error } = await supabase
-        .from("estimates")
-        .select("status, payment_completed_at")
-        .eq("id", estimateId)
-        .maybeSingle()
-    if (error || !isRecord(data)) {
-        throw new Error("Couldn't confirm the payment status. Try again.")
-    }
-
-    const paymentCompletedAt = typeof data.payment_completed_at === "string" && data.payment_completed_at.trim()
-        ? data.payment_completed_at
+    // Status is server-owned: apply what the route decided, never infer it.
+    const paymentCompletedAt = typeof data.paymentCompletedAt === "string" && data.paymentCompletedAt.trim()
+        ? data.paymentCompletedAt
         : undefined
     const status = isEstimatePaidLike({ status: data.status, paymentCompletedAt })
         ? "paid"
         : data.status === "sent" ? "sent" : "draft"
 
-    return { status, paymentCompletedAt }
+    return {
+        amountPaid: data.amountPaid,
+        balanceDue: data.balanceDue,
+        paymentLink: typeof data.paymentLink === "string" ? data.paymentLink : undefined,
+        paymentLinkId: typeof data.paymentLinkId === "string" ? data.paymentLinkId : undefined,
+        status,
+        paymentCompletedAt,
+    }
+}
+
+export async function getStoredEstimate(estimateId: string): Promise<LocalEstimate | undefined> {
+    return (await getEstimates()).find((entry) => entry.id === estimateId)
 }
 
 /**
  * One send: save extra work -> push -> finalize (amount received + balance link) -> portal snapshot -> save locally.
- * `completion` is stored last, so a stored completion means the report was finalized (resend never re-finalizes).
+ * Finalize's result is saved locally right away with a `pendingCompletion` marker, so a failure after it
+ * resumes at the snapshot step (no second push or finalize). `completion` is stored last: a stored completion
+ * means the report was finalized, and a resend never re-finalizes.
  */
 export async function finalizeJobCompletion(
     estimate: LocalEstimate,
@@ -137,53 +133,65 @@ export async function finalizeJobCompletion(
         throw new Error("You're offline. Connect to send the report.")
     }
 
-    // 1. Extra work + recomputed totals, saved locally.
-    const withExtraWork: LocalEstimate = {
-        ...applyExtraWork(estimate, input.extraWork),
-        updatedAt: new Date().toISOString(),
-        synced: false,
-    }
-    await saveEstimate(withExtraWork)
+    let finalized = await getStoredEstimate(estimate.id)
+    if (!finalized?.pendingCompletion) {
+        // 1. Extra work + recomputed totals, saved locally.
+        const withExtraWork: LocalEstimate = {
+            ...applyExtraWork(finalized ?? estimate, input.extraWork),
+            updatedAt: new Date().toISOString(),
+            synced: false,
+        }
+        await saveEstimate(withExtraWork)
 
-    // 2. Push so the server finalizes against the new total.
-    const sync = await syncEstimates()
-    if (sync.status !== "synced") {
-        throw new Error(sync.status === "offline"
-            ? "You're offline. Connect to send the report."
-            : "Sign in to send the report.")
+        // 2. Push so the server finalizes against the new total.
+        const sync = await syncEstimates()
+        if (sync.status !== "synced") {
+            throw new Error(sync.status === "offline"
+                ? "You're offline. Connect to send the report."
+                : "Sign in to send the report.")
+        }
+
+        // 3. Record what was received, create the balance link, and keep the server's answer locally at once.
+        const result = await postFinalize(estimate.id, input.alreadyReceived)
+        finalized = {
+            ...withExtraWork,
+            status: result.status,
+            paymentCompletedAt: result.paymentCompletedAt,
+            amountPaid: result.amountPaid,
+            paymentLink: result.paymentLink,
+            paymentLinkId: result.paymentLinkId,
+            paymentLinkType: result.paymentLink ? "custom" : undefined,
+            pendingCompletion: { completion: input.completion, amountPaid: result.amountPaid, balanceDue: result.balanceDue },
+            updatedAt: new Date().toISOString(),
+            synced: false,
+        }
+        await saveEstimate(finalized)
     }
 
-    // 3. Record what was received and create the balance link.
-    const finalized = await postFinalize(estimate.id, input.alreadyReceived)
-    const serverStatus = await fetchServerPaymentStatus(estimate.id)
-    const finalizedEstimate: LocalEstimate = {
-        ...withExtraWork,
-        ...serverStatus,
-        amountPaid: finalized.amountPaid,
-        paymentLink: finalized.paymentLink,
-        paymentLinkId: finalized.paymentLinkId,
-        paymentLinkType: finalized.paymentLink ? "custom" : undefined,
-        completion: input.completion,
-    }
+    const pending = finalized.pendingCompletion
+    if (!pending) throw new Error("Completion state was lost. Try again.")
 
     // 4. Refresh the portal snapshot without resetting the customer's approval.
-    const portal = await createCustomerPortalLinkForEstimate(finalizedEstimate, {
-        completion: { amountPaid: finalized.amountPaid, balanceDue: finalized.balanceDue },
-    })
+    const portal = await createCustomerPortalLinkForEstimate(
+        { ...finalized, completion: pending.completion },
+        { completion: { amountPaid: pending.amountPaid, balanceDue: pending.balanceDue } }
+    )
     const portalUrl = portal.shareUrl
     if (!portalUrl) throw new Error("Customer link was not returned. Try again.")
 
-    // 5. Store locally, then push the completion in the background.
+    // 5. Store the report, then push it in the background.
     const saved: LocalEstimate = {
-        ...finalizedEstimate,
+        ...finalized,
         ...getCustomerPortalEstimateUpdates(portal),
+        completion: pending.completion,
+        pendingCompletion: undefined,
         updatedAt: new Date().toISOString(),
         synced: false,
     }
     await saveEstimate(saved)
     void syncEstimates().catch((error: unknown) => console.warn("Completion sync deferred:", error))
 
-    return { estimate: saved, portalUrl, balanceDue: finalized.balanceDue }
+    return { estimate: saved, portalUrl, balanceDue: pending.balanceDue }
 }
 
 export async function sendCompletionEmail(input: {

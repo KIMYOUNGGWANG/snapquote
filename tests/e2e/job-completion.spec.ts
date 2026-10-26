@@ -66,7 +66,9 @@ async function seedSession(context: BrowserContext) {
 
 type Mocks = {
     completionReport?: { status: number; body: unknown; delayMs?: number }
-    serverStatus?: { status: string; payment_completed_at: string | null }
+    shareLinkFailures?: number
+    smsDeduped?: boolean
+    completionReportCalls: number
     finalizeCalls: JsonRecord[]
     shareLinkPosts: JsonRecord[]
     smsPayloads: JsonRecord[]
@@ -74,7 +76,7 @@ type Mocks = {
 }
 
 async function routeApp(page: Page, options: Partial<Mocks> = {}): Promise<Mocks> {
-    const mocks: Mocks = { finalizeCalls: [], shareLinkPosts: [], smsPayloads: [], estimateUpserts: [], ...options }
+    const mocks: Mocks = { finalizeCalls: [], shareLinkPosts: [], smsPayloads: [], estimateUpserts: [], completionReportCalls: 0, ...options }
     const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) })
 
     await page.route("**/auth/v1/user**", (route) => route.fulfill(json({
@@ -92,9 +94,15 @@ async function routeApp(page: Page, options: Partial<Mocks> = {}): Promise<Mocks
             return
         }
         mocks.shareLinkPosts.push(route.request().postDataJSON())
+        if ((mocks.shareLinkFailures ?? 0) > 0) {
+            mocks.shareLinkFailures = (mocks.shareLinkFailures ?? 0) - 1
+            await route.fulfill(json({ error: { message: "Customer quote link is temporarily unavailable.", code: 500 } }, 500))
+            return
+        }
         await route.fulfill(json({ ok: true, shareUrl: PORTAL_URL, portal: { status: "approved", approvedAt: "2026-10-21T08:00:00.000Z" } }))
     })
     await page.route("**/api/completion-report", async (route) => {
+        mocks.completionReportCalls += 1
         if (mocks.completionReport?.delayMs) await new Promise((resolve) => setTimeout(resolve, mocks.completionReport?.delayMs))
         await route.fulfill(json(
         mocks.completionReport?.body ?? { ok: true, summary: "", items: [] },
@@ -105,7 +113,8 @@ async function routeApp(page: Page, options: Partial<Mocks> = {}): Promise<Mocks
         const body = route.request().postDataJSON() as JsonRecord
         mocks.finalizeCalls.push(body)
         const received = typeof body.alreadyReceived === "number" ? body.alreadyReceived : 0
-        const total = 1840
+        const pushed = mocks.estimateUpserts.filter((row) => row.id === "estimate-job-complete").at(-1)
+        const total = typeof pushed?.total_amount === "number" ? pushed.total_amount : 1740
         const balanceDue = Math.max(0, total - received)
         await route.fulfill(json({
             ok: true,
@@ -113,11 +122,13 @@ async function routeApp(page: Page, options: Partial<Mocks> = {}): Promise<Mocks
             amountPaid: received,
             balanceDue,
             ...(balanceDue > 0 ? { paymentLink: BALANCE_LINK, paymentLinkId: "plink_balance" } : {}),
+            status: balanceDue > 0 ? "sent" : "paid",
+            paymentCompletedAt: balanceDue > 0 ? null : "2026-10-26T09:00:00.000Z",
         }))
     })
     await page.route("**/api/send-sms", async (route) => {
         mocks.smsPayloads.push(route.request().postDataJSON())
-        await route.fulfill(json({ ok: true, messageId: "SM_DONE", creditsRemaining: 9 }))
+        await route.fulfill(json({ ok: true, messageId: "SM_DONE", creditsRemaining: 9, ...(mocks.smsDeduped ? { deduped: true } : {}) }))
     })
     // Supabase REST used by the estimate sync and the server status read.
     await page.route("**/rest/v1/**", async (route) => {
@@ -127,11 +138,6 @@ async function routeApp(page: Page, options: Partial<Mocks> = {}): Promise<Mocks
         const method = request.method()
 
         if (method === "GET") {
-            const select = url.searchParams.get("select") || ""
-            if (table === "estimates" && select.startsWith("status")) {
-                await route.fulfill(json([{ ...(mocks.serverStatus ?? { status: "sent", payment_completed_at: null }) }]))
-                return
-            }
             await route.fulfill(json([]))
             return
         }
@@ -369,10 +375,15 @@ test("AI failure falls back to all '?' lines and still allows a send", async ({ 
     await page.getByTestId("completion-offline").scrollIntoViewIfNeeded()
     await page.screenshot({ path: path.join(SCREENS_DIR, "task9-offline.png"), animations: "disabled" })
     await page.context().setOffline(false)
+
+    // Closing the review with unsaved work asks first; dismissing keeps the sheet.
+    page.once("dialog", (dialog) => void dialog.dismiss())
+    await page.getByRole("button", { name: "Close completion report" }).click()
+    await expect(page.getByTestId("job-completion-sheet")).toBeVisible()
 })
 
-test("free plan limit shows the pricing link instead of a review", async ({ page }) => {
-    await routeApp(page, { completionReport: { status: 402, body: { error: "Free plan includes 2 completion reports per month." } } })
+test("free plan limit shows the pricing link and a manual review without AI", async ({ page }) => {
+    const mocks = await routeApp(page, { completionReport: { status: 402, body: { error: "Free plan includes 2 completion reports per month." } } })
     await seedEstimates(page, [makeEstimate()])
     await openCompletionSheet(page)
 
@@ -380,10 +391,21 @@ test("free plan limit shows the pricing link instead of a review", async ({ page
     await page.getByTestId("completion-match-button").click()
 
     const limit = page.getByTestId("completion-limit")
-    await expect(limit).toContainText("Free plan includes 2 completion reports per month.")
+    await expect(limit).toContainText("AI matching is used up this month")
+    await expect(page.getByTestId("completion-limit-detail")).toHaveText("Free plan includes 2 completion reports per month.")
     await expect(page.getByTestId("completion-limit-pricing")).toHaveAttribute("href", "/pricing")
     await expect(page.getByTestId("completion-item-row")).toHaveCount(0)
     await page.screenshot({ path: path.join(SCREENS_DIR, "task9-free-limit.png"), animations: "disabled" })
+
+    // Manual review: no second AI call, every line starts as "?".
+    await page.getByTestId("completion-limit-manual").click()
+    await expect(page.getByTestId("completion-manual-review")).toBeVisible()
+    const rows = page.getByTestId("completion-item-row")
+    await expect(rows).toHaveCount(3)
+    for (let index = 0; index < 3; index += 1) {
+        await expect(rows.nth(index)).toHaveAttribute("data-done", "false")
+    }
+    expect(mocks.completionReportCalls).toBe(1)
 })
 
 test("resending a finalized report reuses the stored link and never finalizes again", async ({ page }) => {
@@ -412,7 +434,91 @@ test("resending a finalized report reuses the stored link and never finalizes ag
     await page.screenshot({ path: path.join(SCREENS_DIR, "task9-resend-ready.png"), animations: "disabled" })
     await page.getByTestId("completion-text-button").click()
     const smsDialog = page.getByRole("dialog", { name: "Text completion report" })
-    await expect(smsDialog.locator("#sms-message")).toHaveValue(`Your job is done. See photos and pay the balance here: ${PORTAL_URL}`)
+    await expect(smsDialog.locator("#sms-message")).toHaveValue(`Reminder: Your job is done. See photos and pay the balance here: ${PORTAL_URL}`)
+    await smsDialog.getByRole("button", { name: "Send SMS" }).click()
+    await expect(page.getByTestId("toast-message-text")).toContainText("Completion report texted.")
+    expect(mocks.smsPayloads[0]?.message).toMatch(/^Reminder: /)
     expect(mocks.finalizeCalls).toHaveLength(0)
     expect(mocks.shareLinkPosts).toHaveLength(0)
+})
+
+test("a fully paid report can be resent, and a deduped text says so", async ({ page }) => {
+    const mocks = await routeApp(page, { smsDeduped: true })
+    await seedEstimates(page, [makeEstimate({
+        status: "paid",
+        amountPaid: 1740,
+        paymentCompletedAt: "2026-10-25T10:00:00.000Z",
+        completion: {
+            completedAt: "2026-10-25T10:00:00.000Z",
+            summary: "Done.",
+            photos: [],
+            items: [{ itemId: "item-drain", done: true, photoIndexes: [] }],
+        },
+    })])
+
+    await page.goto("/history?tab=paid&estimateId=estimate-job-complete")
+    const action = page.getByTestId("history-mark-job-complete-action")
+    await expect(action).toHaveText(/Resend report/)
+    await action.click()
+    await page.getByTestId("completion-text-button").click()
+    const smsDialog = page.getByRole("dialog", { name: "Text completion report" })
+    await expect(smsDialog.locator("#sms-message")).toHaveValue(`Reminder: Your job is done. See the photos here: ${PORTAL_URL}`)
+    await smsDialog.getByRole("button", { name: "Send SMS" }).click()
+    await expect(page.getByTestId("toast-message-text")).toContainText("This exact text was already sent.")
+    expect(mocks.finalizeCalls).toHaveLength(0)
+})
+
+test("finalize OK then share-link fails: retry resumes without a second finalize or a status revert", async ({ page }) => {
+    const mocks = await routeApp(page, {
+        shareLinkFailures: 1,
+        completionReport: {
+            status: 200,
+            body: { ok: true, summary: "All done.", items: [{ itemId: "item-drain", photoIndexes: [0], confidence: "high" }] },
+        },
+    })
+    await seedEstimates(page, [makeEstimate({ amountPaid: 0 })])
+    await openCompletionSheet(page)
+
+    await addPhotos(page, ["drain.png"])
+    await page.getByTestId("completion-match-button").click()
+    await page.getByTestId("completion-already-received").fill("1740")
+    await expect(page.getByTestId("completion-send-button")).toHaveText("Send report")
+    await page.getByTestId("completion-send-button").click()
+
+    await expect(page.getByTestId("completion-resume")).toBeVisible()
+    await expect(page.getByTestId("completion-send-error")).toContainText("temporarily unavailable")
+    expect(mocks.finalizeCalls).toHaveLength(1)
+    const upsertsAtFinalize = mocks.estimateUpserts.length
+    await page.screenshot({ path: path.join(SCREENS_DIR, "task9-resume.png"), animations: "disabled" })
+
+    const afterFailure = await readEstimate(page, "estimate-job-complete")
+    expect(afterFailure?.status).toBe("paid")
+    expect(afterFailure?.paymentCompletedAt).toBe("2026-10-26T09:00:00.000Z")
+    expect(afterFailure?.amountPaid).toBe(1740)
+    expect(afterFailure?.completion).toBeUndefined()
+    expect((afterFailure?.pendingCompletion as JsonRecord | undefined)?.balanceDue).toBe(0)
+
+    // Close and come back later: the paid card offers to finish, not to start over.
+    await page.getByRole("button", { name: "Close completion report" }).click()
+    await page.goto("/history?tab=paid&estimateId=estimate-job-complete")
+    const action = page.getByTestId("history-mark-job-complete-action")
+    await expect(action).toHaveText(/Finish report/)
+    await action.click()
+    await page.getByTestId("completion-resume-button").click()
+
+    const smsDialog = page.getByRole("dialog", { name: "Text completion report" })
+    await expect(smsDialog.locator("#sms-message")).toHaveValue(`Your job is done. See the photos here: ${PORTAL_URL}`)
+    await smsDialog.getByRole("button", { name: "Send SMS" }).click()
+    await expect(page.getByTestId("toast-message-text")).toContainText("Completion report texted.")
+
+    expect(mocks.finalizeCalls).toHaveLength(1)
+    const completion = (mocks.shareLinkPosts.at(-1)?.estimate as JsonRecord).completion as JsonRecord
+    expect(completion.balanceDue).toBe(0)
+    const laterPushes = mocks.estimateUpserts.slice(upsertsAtFinalize).filter((row) => row.id === "estimate-job-complete")
+    expect(laterPushes.length).toBeGreaterThan(0)
+    expect(laterPushes.every((row) => row.status === "paid" && row.payment_link === null)).toBe(true)
+    const stored = await readEstimate(page, "estimate-job-complete")
+    expect(stored?.status).toBe("paid")
+    expect(stored?.pendingCompletion).toBeUndefined()
+    expect((stored?.completion as JsonRecord | undefined)?.items).toBeDefined()
 })

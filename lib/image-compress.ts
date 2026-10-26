@@ -2,6 +2,9 @@
 const MAX_DATA_URL_LENGTH = 400_000
 const MIN_QUALITY = 0.4
 
+/** Decoded fine but still over the photo limit at the lowest quality. */
+export class ImageTooLargeError extends Error {}
+
 /**
  * Long edge <= maxEdge, JPEG. Steps quality down if the data URL is still over 400,000 chars.
  * Throws when the browser cannot decode the file (e.g. HEIC outside Safari); callers list the file name.
@@ -27,7 +30,7 @@ export async function compressImageToDataUrl(file: File, maxEdge = 1280, quality
             const dataUrl = canvas.toDataURL("image/jpeg", q)
             if (dataUrl.length <= MAX_DATA_URL_LENGTH) return dataUrl
         }
-        throw new Error(`${file.name} is too large`)
+        throw new ImageTooLargeError(`${file.name} is too large even after compression`)
     } finally {
         bitmap.close()
     }

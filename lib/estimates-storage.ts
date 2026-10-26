@@ -120,6 +120,8 @@ export interface LocalEstimate {
     lastPaymentSessionId?: string
     amountPaid?: number        // Server-owned (Stripe webhook); never pushed from the client
     completion?: JobCompletion // Job completion report (synced via estimate_attachments.completion)
+    // Local-only: finalize already ran but the report isn't stored yet; a retry resumes from here instead of re-finalizing.
+    pendingCompletion?: { completion: JobCompletion; amountPaid: number; balanceDue: number }
     quickbooksInvoiceId?: string
     quickbooksCustomerId?: string
     quickbooksDocNumber?: string
