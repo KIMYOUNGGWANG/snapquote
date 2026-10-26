@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { readField } from "@/lib/unknown-fields"
 
 interface BeforeInstallPromptEvent extends Event {
     prompt: () => Promise<void>
@@ -21,7 +22,7 @@ export function usePWAInstall() {
         }
 
         // Check if on iOS
-        const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
+        const isIOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) && !readField(window, "MSStream")
         setIsIOS(isIOSDevice)
 
         // Listen for beforeinstallprompt (Android/Chrome)

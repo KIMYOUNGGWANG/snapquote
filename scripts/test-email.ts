@@ -39,10 +39,11 @@ const resend = new Resend(apiKey);
         } else {
             console.log("✅ Success! Data:", data);
         }
-    } catch (e: any) {
-        console.error("❌ Exception caught:", e.message);
-        if (e.response) {
-            console.error("Response:", e.response.data);
+    } catch (e: unknown) {
+        console.error("❌ Exception caught:", e instanceof Error ? e.message : e);
+        const response = typeof e === "object" && e !== null && "response" in e ? e.response : undefined;
+        if (typeof response === "object" && response !== null && "data" in response) {
+            console.error("Response:", response.data);
         }
     }
 })();

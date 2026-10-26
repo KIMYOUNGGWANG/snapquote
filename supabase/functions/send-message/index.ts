@@ -83,10 +83,13 @@ async function recordResendUsage(userId: string): Promise<void> {
     }
 }
 
+// 시도 횟수 추적에 필요한 필드만 타입으로 둔다.
+type ClaimedJob = { attempt_count?: unknown; max_attempts?: unknown }
+
 Deno.serve(async (req: Request) => {
     let jobId: string | undefined
     let hasJobLock = false
-    let claimedJob: any | null = null
+    let claimedJob: ClaimedJob | null = null
 
     try {
         if (!JOB_RUNNER_SECRET) {
@@ -150,15 +153,16 @@ Deno.serve(async (req: Request) => {
         }
 
         hasJobLock = true
-        claimedJob = job
+        const lockedJob: ClaimedJob = job
+        claimedJob = lockedJob
 
         // 2. Track attempts (best-effort)
         const nowIso = new Date().toISOString()
-        const nextAttemptCount = Number(claimedJob.attempt_count || 0) + 1
-        const maxAttempts = Number(claimedJob.max_attempts || 3)
+        const nextAttemptCount = Number(lockedJob.attempt_count || 0) + 1
+        const maxAttempts = Number(lockedJob.max_attempts || 3)
 
-        claimedJob.attempt_count = nextAttemptCount
-        claimedJob.max_attempts = maxAttempts
+        lockedJob.attempt_count = nextAttemptCount
+        lockedJob.max_attempts = maxAttempts
 
         await supabase
             .from('job_queue')

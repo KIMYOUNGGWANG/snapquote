@@ -1,5 +1,6 @@
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 import { resolveEffectivePlanTier } from "@/lib/server/effective-plan"
+import { readString } from "@/lib/unknown-fields"
 
 type ServiceSupabaseClient = NonNullable<ReturnType<typeof createServiceSupabaseClient>>
 
@@ -264,11 +265,11 @@ export async function listWorkspaceMembers(
 
         if (!profileResult.error && Array.isArray(profileResult.data)) {
             profileByUserId = new Map(
-                profileResult.data.map((profile: any) => [
-                    profile.id,
+                profileResult.data.map((profile: unknown) => [
+                    readString(profile, "id"),
                     {
-                        business_name: typeof profile?.business_name === "string" ? profile.business_name : "",
-                        email: typeof profile?.email === "string" ? profile.email : "",
+                        business_name: readString(profile, "business_name"),
+                        email: readString(profile, "email"),
                     },
                 ])
             )

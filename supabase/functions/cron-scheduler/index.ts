@@ -9,7 +9,13 @@ const CRON_SECRET = Deno.env.get('CRON_SECRET') ?? ''
 
 const supabase = createClient(supabaseUrl, supabaseKey)
 
-function getDelayHours(settings: any, stage: 1 | 2): number {
+type DelaySettings = {
+    first_delay_hours?: unknown
+    delay_days?: unknown
+    second_delay_hours?: unknown
+}
+
+function getDelayHours(settings: DelaySettings | null | undefined, stage: 1 | 2): number {
     if (stage === 1) {
         const explicit = Number(settings?.first_delay_hours)
         if (Number.isFinite(explicit) && explicit > 0) return explicit

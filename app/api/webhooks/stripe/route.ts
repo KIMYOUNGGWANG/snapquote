@@ -3,6 +3,7 @@ import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import { isEstimatePaidLike } from '@/lib/estimate-payment-state'
 import { recordOpsAlert } from '@/lib/ops-alerts'
+import { errorMessage } from '@/lib/unknown-fields'
 import { resolveEstimateForSettlement } from '@/lib/server/payment-estimate-ownership'
 
 function getCheckoutSessionPaidAt(session: Stripe.Checkout.Session): string {
@@ -78,16 +79,17 @@ export async function POST(req: Request) {
             return new NextResponse('Webhook Error: Missing signature or secret', { status: 400 })
         }
         event = stripe.webhooks.constructEvent(body, sig, endpointSecret)
-    } catch (err: any) {
-        console.error(`Webhook signature verification failed.`, err.message)
+    } catch (err: unknown) {
+        const message = errorMessage(err)
+        console.error(`Webhook signature verification failed.`, message)
         await recordOpsAlert({
             source: 'stripe_webhook',
             severity: 'warning',
             alertKey: 'stripe_webhook_signature_verification_failed',
             message: 'Stripe webhook signature verification failed',
-            context: { error: err.message },
+            context: { error: message },
         })
-        return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 })
+        return new NextResponse(`Webhook Error: ${message}`, { status: 400 })
     }
 
     if (

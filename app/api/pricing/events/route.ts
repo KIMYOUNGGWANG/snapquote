@@ -224,7 +224,7 @@ export async function POST(req: Request) {
         }
 
         return NextResponse.json({ ok: true, eventId: inserted.id })
-    } catch (error: any) {
+    } catch (error: unknown) {
         const message =
             error instanceof Error && error.message.includes("Metadata payload too large")
                 ? error.message
