@@ -429,7 +429,6 @@ describe('sync estimate cloud mapping', () => {
       payment_link_id: 'plink_revision_1',
       payment_link_type: 'full',
       payment_completed_at: '2026-05-24T12:00:00.000Z',
-      last_payment_session_id: 'cs_revision_paid_1',
       revision_of_estimate_id: 'estimate-cloud-original',
       revision_of_estimate_number: 'EST-2605-900',
       revision_requested_at: '2026-05-23T09:00:00.000Z',
@@ -446,13 +445,16 @@ describe('sync estimate cloud mapping', () => {
     assert.equal(mapCloudEstimateToLocal({ id: 'e1' }).amountPaid, undefined)
   })
 
-  test('local upsert row never includes amount_paid', () => {
+  test('local upsert row never includes server-owned payment fields', () => {
     const row = mapLocalEstimateToCloudRow('user-1', null, {
       id: 'e1', estimateNumber: 'EST-1', items: [], summary_note: '', clientName: 'A', clientAddress: '',
       taxRate: 5, taxAmount: 0, totalAmount: 100, createdAt: '2026-05-24T08:00:00.000Z',
       updatedAt: '2026-05-24T08:00:00.000Z', status: 'sent', amountPaid: 40,
+      lastPaymentSessionId: 'cs_polled', lastPolledPaymentSessionId: 'cs_polled',
     })
     assert.equal('amount_paid' in row, false)
+    assert.equal('last_payment_session_id' in row, false)
+    assert.equal('last_polled_payment_session_id' in row, false)
   })
 
   test('completion round-trips through attachments row', () => {

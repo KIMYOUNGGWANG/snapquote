@@ -220,7 +220,8 @@ test.describe("Payment success page", () => {
 
         const [updatedEstimate] = await readStoredEstimates(page)
         expect(updatedEstimate.status).toBe("paid")
-        expect(updatedEstimate.lastPaymentSessionId).toBe(sessionId)
+        // 세션 id는 서버(웹훅)만 쓴다: 클라이언트가 먼저 쓰면 웹훅이 결제를 건너뛸 수 있다.
+        expect(updatedEstimate.lastPaymentSessionId).toBeUndefined()
         expect(updatedEstimate.paymentCompletedAt).toBeTruthy()
 
         await page.getByTestId("payment-success-history-link").click()
@@ -328,7 +329,8 @@ test.describe("Payment success page", () => {
         const [updatedEstimate] = await readStoredEstimates(page)
         expect(updatedEstimate.status).toBe("sent")
         expect(updatedEstimate.amountPaid).toBe(500)
-        expect(updatedEstimate.lastPaymentSessionId).toBe(sessionId)
+        // 세션 id는 서버(웹훅)만 쓴다: 클라이언트가 먼저 쓰면 웹훅이 결제를 건너뛸 수 있다.
+        expect(updatedEstimate.lastPaymentSessionId).toBeUndefined()
     })
 
     test("success URL without a checkout session id does not mark a local estimate paid", async ({ page }) => {
@@ -492,6 +494,7 @@ test.describe("Payment success page", () => {
 
         const [updatedEstimate] = await readStoredEstimates(page)
         expect(updatedEstimate.status).toBe("paid")
-        expect(updatedEstimate.lastPaymentSessionId).toBe(sessionId)
+        // 세션 id는 서버(웹훅)만 쓴다: 클라이언트가 먼저 쓰면 웹훅이 결제를 건너뛸 수 있다.
+        expect(updatedEstimate.lastPaymentSessionId).toBeUndefined()
     })
 })

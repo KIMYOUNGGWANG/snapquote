@@ -176,7 +176,6 @@ export type CloudEstimateUpsertRow = {
     payment_link_id: string | null
     payment_link_type: "full" | "deposit" | "custom" | null
     payment_completed_at: string | null
-    last_payment_session_id: string | null
     revision_of_estimate_id: string | null
     revision_of_estimate_number: string | null
     revision_requested_at: string | null
@@ -398,7 +397,6 @@ export function mapLocalEstimateToCloudRow(
     const paymentLinkId = estimate.paymentLinkId?.trim() || null
     const paymentLinkType = paymentLink ? estimate.paymentLinkType ?? null : null
     const paymentCompletedAt = estimate.paymentCompletedAt?.trim() || null
-    const lastPaymentSessionId = estimate.lastPaymentSessionId?.trim() || null
 
     return {
         id: estimate.id,
@@ -419,7 +417,6 @@ export function mapLocalEstimateToCloudRow(
         payment_link_id: paymentLinkId,
         payment_link_type: paymentLinkType,
         payment_completed_at: paymentCompletedAt,
-        last_payment_session_id: lastPaymentSessionId,
         revision_of_estimate_id: revisionOfEstimateId,
         revision_of_estimate_number: revisionOfEstimateNumber,
         revision_requested_at: revisionRequestedAt,

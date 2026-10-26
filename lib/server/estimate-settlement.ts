@@ -40,10 +40,7 @@ export async function applyCheckoutSettlement(
     if (paymentStatus !== 'paid') return { ok: true, applied: false, fullyPaid: false }
 
     // ponytail: 세션 단위 중복 방지는 analytics_events.external_id(unique)를 결제 원장으로 쓴다. 분석 테이블에 원장이 있으니 분석 데이터 보관/정리 정책을 넣게 되면 → 전용 payments 테이블로 옮긴다.
-    // 이전 방식(마지막 세션 id)으로 이미 처리된 결제는 원장에 없으므로 이 비교를 남겨 둔다.
-    if (estimate.last_payment_session_id === sessionId) {
-        return { ok: true, applied: false, fullyPaid: false }
-    }
+    // last_payment_session_id는 "이미 처리됨"의 근거로 쓰지 않는다(동시성 가드 전용). 중복 판단은 원장만 한다.
 
     // 이미 완납이면 과거 세션(reconcile 재스캔, 웹훅 재시도)이 다시 들어와도 금액을 더하지 않는다.
     const total = toAmount(estimate.total_amount)

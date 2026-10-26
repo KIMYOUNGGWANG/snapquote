@@ -437,12 +437,36 @@ describe('POST /api/webhooks/stripe', () => {
     test('same session delivered twice is applied once', async () => {
       const state = setupWebhook({
         session: { id: 'cs_deposit', payment_status: 'paid', amount_total: 50000 },
-        estimate: { total_amount: 1740, amount_paid: 500, last_payment_session_id: 'cs_deposit' },
+        estimate: { total_amount: 1740, amount_paid: 0, last_payment_session_id: null },
       })
+      const db = createSettlementDb({
+        id: 'estimate_partial', estimate_number: 'EST-P',
+        total_amount: 1740, amount_paid: 0, last_payment_session_id: null,
+      })
+      state.supabase.queryResolver = db.resolver
+
+      assert.equal((await send()).status, 200)
+      assert.equal((await send()).status, 200)
+      assert.equal(db.row.amount_paid, 500)
+      assert.equal(state.supabase.queryCalls.filter((q) => q.table === 'estimates' && q.action === 'update').length, 1)
+    })
+
+    test('session id already on the row but missing from the ledger is still applied', async () => {
+      // 클라이언트 동기화가 last_payment_session_id를 먼저 써 둔 경우: 원장만 보고 판단해야 한다.
+      const state = setupWebhook({
+        session: { id: 'cs_X', payment_status: 'paid', amount_total: 50000 },
+        estimate: {},
+      })
+      const db = createSettlementDb({
+        id: 'estimate_partial', estimate_number: 'EST-P',
+        total_amount: 1740, amount_paid: 0, last_payment_session_id: 'cs_X',
+      })
+      state.supabase.queryResolver = db.resolver
 
       const res = await send()
       assert.equal(res.status, 200)
-      assert.equal(findUpdate(state), undefined)
+      assert.equal(db.row.amount_paid, 500)
+      assert.equal(db.ledger.has('payment_settlement:cs_X'), true)
     })
 
     test('older session replayed after the estimate is fully paid adds nothing', async () => {
@@ -1227,6 +1251,41 @@ describe('GET /api/webhooks/stripe/reconcile', () => {
       state.supabase.queryCalls.some((q) => q.table === 'estimates' && q.action === 'update'),
       false
     )
+  })
+
+  test('reconcile applies a session whose id is already on the row but missing from the ledger', async () => {
+    process.env.STRIPE_SECRET_KEY = 'sk_test'
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
+    process.env.CRON_SECRET = 'cron_secret'
+
+    const state = getTestState()
+    const db = createSettlementDb({
+      id: 'estimate_x', estimate_number: 'EST-X',
+      total_amount: 1740, amount_paid: 0, last_payment_session_id: 'cs_X',
+    })
+    state.supabase.queryResolver = db.resolver
+    state.stripe.sessionsListPages = [{
+      data: [{
+        id: 'cs_X',
+        created: 1735689600,
+        payment_status: 'paid',
+        amount_total: 50000,
+        metadata: { estimateId: 'estimate_x', estimateNumber: 'EST-X', userId: 'user_1' },
+      }],
+      has_more: false,
+    }]
+
+    const res = await stripeReconcileGet(new Request('http://localhost/api/webhooks/stripe/reconcile?lookbackHours=24', {
+      method: 'GET',
+      headers: { authorization: 'Bearer cron_secret' },
+    }))
+    const data = await res.json()
+
+    assert.equal(res.status, 200)
+    assert.equal(data.errors, 0)
+    assert.equal(db.row.amount_paid, 500)
+    assert.equal(db.ledger.has('payment_settlement:cs_X'), true)
   })
 
   test('reconcile rescan after two partial webhook payments does not inflate amount_paid', async () => {

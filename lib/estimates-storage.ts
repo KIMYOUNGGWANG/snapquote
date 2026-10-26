@@ -117,7 +117,8 @@ export interface LocalEstimate {
     lastFollowedUpAt?: string
     lastFollowUpChannel?: 'email' | 'sms' | 'automation'
     paymentCompletedAt?: string
-    lastPaymentSessionId?: string
+    lastPaymentSessionId?: string // Server-owned (Stripe webhook); pulled from cloud, never pushed
+    lastPolledPaymentSessionId?: string // Local-only: last Checkout Session the History poll saw, for its "nothing changed" guard
     amountPaid?: number        // Server-owned (Stripe webhook); never pushed from the client
     completion?: JobCompletion // Job completion report (synced via estimate_attachments.completion)
     // Local-only: finalize already ran but the report isn't stored yet; a retry resumes from here instead of re-finalizing.

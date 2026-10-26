@@ -410,7 +410,8 @@ function HistoryPageContent() {
                 if (
                     !isServerPaid &&
                     nextAmountPaid === estimate.amountPaid &&
-                    result.checkoutSessionId === estimate.lastPaymentSessionId
+                    (result.checkoutSessionId === estimate.lastPolledPaymentSessionId
+                        || result.checkoutSessionId === estimate.lastPaymentSessionId)
                 ) continue
 
                 await updateEstimate(estimate.id, {
@@ -418,7 +419,8 @@ function HistoryPageContent() {
                         ? { status: "paid" as const, paymentCompletedAt: result.paidAt || new Date().toISOString() }
                         : {}),
                     ...(typeof nextAmountPaid === "number" ? { amountPaid: nextAmountPaid } : {}),
-                    lastPaymentSessionId: result.checkoutSessionId,
+                    // last_payment_session_id is server-owned; writing it here would make the webhook skip this payment.
+                    lastPolledPaymentSessionId: result.checkoutSessionId,
                     synced: false,
                 })
 

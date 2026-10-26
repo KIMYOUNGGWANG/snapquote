@@ -414,6 +414,7 @@ async function readEstimatePaymentFields(page: Page, estimateId: string) {
             paymentCompletedAt?: string
             amountPaid?: number
             lastPaymentSessionId?: string
+            lastPolledPaymentSessionId?: string
             updatedAt?: string
             customerPortalStatus?: string
             customerPortalUrl?: string
@@ -434,6 +435,7 @@ async function readEstimatePaymentFields(page: Page, estimateId: string) {
             paymentCompletedAt: estimate?.paymentCompletedAt,
             amountPaid: estimate?.amountPaid,
             lastPaymentSessionId: estimate?.lastPaymentSessionId,
+            lastPolledPaymentSessionId: estimate?.lastPolledPaymentSessionId,
             updatedAt: estimate?.updatedAt,
             customerPortalStatus: estimate?.customerPortalStatus,
             customerPortalUrl: estimate?.customerPortalUrl,
@@ -689,7 +691,8 @@ test("history poll records a partial payment once and keeps the estimate sent", 
     const first = await readEstimatePaymentFields(page, "estimate-sent-1")
     expect(first.status).toBe("sent")
     expect(first.paymentCompletedAt).toBeUndefined()
-    expect(first.lastPaymentSessionId).toBe("cs_partial_deposit")
+    expect(first.lastPaymentSessionId).toBeUndefined()
+    expect(first.lastPolledPaymentSessionId).toBe("cs_partial_deposit")
     await expect.poll(() => paymentCompletedEvents).toBe(1)
 
     // Second poll with identical data must not write, count or emit again.
@@ -731,7 +734,8 @@ test("history poll marks the estimate paid only when the server says paid", asyn
     const fields = await readEstimatePaymentFields(page, "estimate-sent-1")
     expect(fields.amountPaid).toBe(1280)
     expect(fields.paymentCompletedAt).toBe("2026-05-30T12:00:00.000Z")
-    expect(fields.lastPaymentSessionId).toBe("cs_full_payment")
+    expect(fields.lastPaymentSessionId).toBeUndefined()
+    expect(fields.lastPolledPaymentSessionId).toBe("cs_full_payment")
 })
 
 test("history mobile command center and search keep the pipeline actionable", async ({ page }) => {

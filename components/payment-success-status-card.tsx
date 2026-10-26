@@ -176,7 +176,6 @@ export function PaymentSuccessStatusCard({
                         ? { status: "paid" as const, paymentCompletedAt: verifiedPayment.paidAt || estimate.paymentCompletedAt || paidAt }
                         : {}),
                     ...(typeof verifiedPayment.amountPaid === "number" ? { amountPaid: verifiedPayment.amountPaid } : {}),
-                    lastPaymentSessionId: verifiedPayment.checkoutSessionId || sessionId || estimate.lastPaymentSessionId,
                     synced: false,
                 })
 
