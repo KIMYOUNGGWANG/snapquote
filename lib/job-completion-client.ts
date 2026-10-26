@@ -5,11 +5,12 @@ import {
     getCustomerPortalEstimateUpdates,
 } from "@/lib/customer-portal-client"
 import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
-import { computeBalanceDue } from "@/lib/estimates/balance"
+import { computeBalanceDue, toCents } from "@/lib/estimates/balance"
 import { getEstimates, saveEstimate, type JobCompletion, type LocalEstimate } from "@/lib/estimates-storage"
 import {
     applyExtraWork,
     buildCompletionEmailSubject,
+    getUpdatedAtAfterServer,
     sanitizeCompletionMatches,
     type CompletionMatchResult,
     type ExtraWorkLine,
@@ -76,6 +77,7 @@ export async function requestCompletionMatches(input: {
 }
 
 type FinalizeResponse = {
+    totalAmount?: number
     amountPaid: number
     balanceDue: number
     paymentLink?: string
@@ -90,6 +92,14 @@ export class CompletionStateLostError extends Error {
     constructor() {
         super("We couldn't find the saved payment step. Close and reopen this job to continue.")
         this.name = "CompletionStateLostError"
+    }
+}
+
+/** The stored total moved during the pre-finalize sync (another device edited it): stop before finalize. */
+export class CompletionTotalsChangedError extends Error {
+    constructor() {
+        super("This job changed on another device. Reopen it to review the latest total.")
+        this.name = "CompletionTotalsChangedError"
     }
 }
 
@@ -116,6 +126,7 @@ async function postFinalize(estimateId: string, alreadyReceived: number): Promis
         : data.status === "sent" ? "sent" : "draft"
 
     return {
+        totalAmount: typeof data.totalAmount === "number" ? data.totalAmount : undefined,
         amountPaid: data.amountPaid,
         balanceDue: data.balanceDue,
         paymentLink: typeof data.paymentLink === "string" ? data.paymentLink : undefined,
@@ -164,8 +175,17 @@ export async function finalizeJobCompletion(
                 : "Sign in to send the report.")
         }
 
+        // The sync may have pulled a newer cloud copy: never finalize against a total the user didn't review.
+        const afterSync = await getStoredEstimate(estimate.id)
+        if (!afterSync || toCents(afterSync.totalAmount) !== toCents(withExtraWork.totalAmount)) {
+            throw new CompletionTotalsChangedError()
+        }
+
         // 3. Record what was received, create the balance link, and keep the server's answer locally at once.
         const result = await postFinalize(estimate.id, input.alreadyReceived)
+        // Server total is the source of truth for the link; on a mismatch keep the row queued for sync.
+        const totalsMatch = result.totalAmount === undefined
+            || toCents(result.totalAmount) === toCents(withExtraWork.totalAmount)
         finalized = {
             ...withExtraWork,
             status: result.status,
@@ -177,7 +197,7 @@ export async function finalizeJobCompletion(
             pendingCompletion: { completion: input.completion, amountPaid: result.amountPaid, balanceDue: result.balanceDue },
             // Server's own updated_at: LWW then sees local == cloud and neither pushes nor pulls this row.
             updatedAt: result.updatedAt ?? new Date().toISOString(),
-            synced: Boolean(result.updatedAt),
+            synced: Boolean(result.updatedAt) && totalsMatch,
         }
         await saveEstimate(finalized)
     }
@@ -199,7 +219,8 @@ export async function finalizeJobCompletion(
         ...getCustomerPortalEstimateUpdates(portal),
         completion: pending.completion,
         pendingCompletion: undefined,
-        updatedAt: new Date().toISOString(),
+        // Past the server's finalize time + LWW buffer, so the next sync pushes the completion.
+        updatedAt: getUpdatedAtAfterServer(finalized.updatedAt),
         synced: false,
     }
     await saveEstimate(saved)
@@ -212,7 +233,8 @@ export async function finalizeJobCompletion(
  * Resend for a stored report that has no portal URL: re-post the snapshot (no finalize, no push).
  * The record keeps its updatedAt, so sync does not treat this as a local edit.
  */
-export async function ensureCompletionPortalUrl(estimate: LocalEstimate): Promise<{ estimate: LocalEstimate; portalUrl: string }> {
+export async function ensureCompletionPortalUrl(input: LocalEstimate): Promise<{ estimate: LocalEstimate; portalUrl: string }> {
+    const estimate = (await getStoredEstimate(input.id)) ?? input
     if (estimate.customerPortalUrl) return { estimate, portalUrl: estimate.customerPortalUrl }
     if (!estimate.completion) throw new Error("This job has no completion report yet.")
 

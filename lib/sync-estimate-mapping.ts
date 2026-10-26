@@ -8,6 +8,7 @@ import type {
     LocalEstimate,
 } from "./estimates-storage"
 import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
+import { getUpdatedAtAfterServer } from "@/lib/job-completion"
 
 type CloudEstimateItemRow = {
     id?: unknown
@@ -693,12 +694,20 @@ export function assertSupabaseMutation(
     }
 }
 
-// `pendingCompletion` is local-only (finalize ran, report not stored yet). A pull replaces the whole record,
-// so carry the marker over until the cloud row has the completion; otherwise a retry would re-finalize.
+// A pull replaces the whole record. Until the cloud row has the completion, carry over the local
+// `pendingCompletion` (local-only: finalize ran, report not stored) and a stored-but-unpushed `completion`
+// (write-once); otherwise a retry would re-finalize or the report would vanish.
 export function preserveLocalOnlyCompletionState(
     pulled: LocalEstimate,
-    local: Pick<LocalEstimate, "pendingCompletion"> | undefined
+    local: Pick<LocalEstimate, "pendingCompletion" | "completion"> | undefined
 ): LocalEstimate {
-    if (!local?.pendingCompletion || pulled.completion) return pulled
-    return { ...pulled, pendingCompletion: local.pendingCompletion }
+    if (pulled.completion || (!local?.pendingCompletion && !local?.completion)) return pulled
+    return {
+        ...pulled,
+        ...(local.pendingCompletion ? { pendingCompletion: local.pendingCompletion } : {}),
+        // A kept completion still has to reach the cloud: make this record win the next sync.
+        ...(local.completion
+            ? { completion: local.completion, updatedAt: getUpdatedAtAfterServer(pulled.updatedAt), synced: false }
+            : {}),
+    }
 }

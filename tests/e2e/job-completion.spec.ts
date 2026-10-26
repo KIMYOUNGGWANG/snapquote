@@ -70,6 +70,9 @@ type Mocks = {
     smsDeduped?: boolean
     completionReportCalls: number
     finalizeUpdatedAt?: string
+    /** Cloud row served by the sync pull once AI matching ran (simulates another device's edit). */
+    cloudEditOnMatch?: JsonRecord
+    cloudRows: JsonRecord[]
     finalizeCalls: JsonRecord[]
     shareLinkPosts: JsonRecord[]
     smsPayloads: JsonRecord[]
@@ -77,7 +80,7 @@ type Mocks = {
 }
 
 async function routeApp(page: Page, options: Partial<Mocks> = {}): Promise<Mocks> {
-    const mocks: Mocks = { finalizeCalls: [], shareLinkPosts: [], smsPayloads: [], estimateUpserts: [], completionReportCalls: 0, ...options }
+    const mocks: Mocks = { finalizeCalls: [], shareLinkPosts: [], smsPayloads: [], estimateUpserts: [], completionReportCalls: 0, cloudRows: [], ...options }
     const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) })
 
     await page.route("**/auth/v1/user**", (route) => route.fulfill(json({
@@ -104,6 +107,7 @@ async function routeApp(page: Page, options: Partial<Mocks> = {}): Promise<Mocks
     })
     await page.route("**/api/completion-report", async (route) => {
         mocks.completionReportCalls += 1
+        if (mocks.cloudEditOnMatch) mocks.cloudRows = [mocks.cloudEditOnMatch]
         if (mocks.completionReport?.delayMs) await new Promise((resolve) => setTimeout(resolve, mocks.completionReport?.delayMs))
         await route.fulfill(json(
         mocks.completionReport?.body ?? { ok: true, summary: "", items: [] },
@@ -140,7 +144,7 @@ async function routeApp(page: Page, options: Partial<Mocks> = {}): Promise<Mocks
         const method = request.method()
 
         if (method === "GET") {
-            await route.fulfill(json([]))
+            await route.fulfill(json(table === "estimates" ? mocks.cloudRows : []))
             return
         }
         if (method === "POST") {
@@ -342,6 +346,8 @@ test("approved quote: photos, AI review, extra work, one send, SMS carries the p
     expect(stored?.status).toBe("sent")
     expect(stored?.paymentLink).toBe(BALANCE_LINK)
     expect((stored?.completion as JsonRecord | undefined)?.completedAt).toMatch(/Z$/)
+    // Stored past the server's finalize time + LWW buffer, so sync pushes the completion.
+    expect(Date.parse(String(stored?.updatedAt))).toBeGreaterThan(Date.parse(String(mocks.finalizeUpdatedAt)) + 1000)
 
     await page.getByTestId("completion-done-button").click()
     await expect(page.getByTestId("history-mark-job-complete-action")).toHaveText(/Resend report/)
@@ -620,4 +626,43 @@ test("a stored report without a portal URL re-posts the snapshot once and never 
     expect(mocks.finalizeCalls).toHaveLength(0)
     expect(mocks.shareLinkPosts).toHaveLength(1)
     expect((await readEstimate(page, "estimate-job-complete"))?.customerPortalUrl).toBe(PORTAL_URL)
+})
+
+test("a total changed on another device stops the send before finalize", async ({ page }) => {
+    const mocks = await routeApp(page, {
+        completionReport: { status: 200, body: { ok: true, summary: "", items: [] } },
+        cloudEditOnMatch: {
+            id: "estimate-job-complete",
+            user_id: "00000000-0000-4000-8000-000000000001",
+            estimate_number: "EST-1042",
+            status: "sent",
+            total_amount: 2000,
+            tax_rate: 0,
+            tax_amount: 0,
+            created_at: "2026-10-20T08:00:00.000Z",
+            updated_at: "2099-01-01T00:00:00.000Z",
+            sent_at: "2026-10-20T08:00:00.000Z",
+            estimate_items: [
+                { id: "row-1", local_id: "item-drain", item_number: 1, category: "LABOR", description: "Remove old drain", quantity: 1, unit: "LS", unit_price: 2000, total: 2000 },
+            ],
+            estimate_sections: [],
+            estimate_attachments: null,
+            clients: { name: "Rivera Kitchen" },
+        },
+    })
+    await seedEstimates(page, [makeEstimate()])
+    await openCompletionSheet(page)
+
+    await addPhotos(page, ["drain.png"])
+    await page.getByTestId("completion-match-button").click()
+    await expect(page.getByTestId("completion-item-row")).toHaveCount(3)
+    await page.getByTestId("completion-send-button").click()
+
+    await expect(page.getByTestId("completion-send-error")).toContainText("This job changed on another device. Reopen it to review the latest total.")
+    expect(mocks.finalizeCalls).toHaveLength(0)
+    expect(mocks.shareLinkPosts).toHaveLength(0)
+    const stored = await readEstimate(page, "estimate-job-complete")
+    expect(stored?.totalAmount).toBe(2000)
+    expect(stored?.completion).toBeUndefined()
+    expect(stored?.pendingCompletion).toBeUndefined()
 })

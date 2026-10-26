@@ -8,9 +8,11 @@ import {
   buildReviewItems,
   canCompleteJob,
   getCompletionAction,
+  getUpdatedAtAfterServer,
   parseMoneyInput,
 } from '../../lib/job-completion.ts'
 import { buildCustomerQuoteSnapshot } from '../../lib/customer-portal-client.ts'
+import { resolveLwwSyncAction } from '../../lib/sync-resolution.ts'
 
 function makeEstimate(overrides = {}) {
   return {
@@ -203,5 +205,25 @@ describe('buildCustomerQuoteSnapshot completion', () => {
 
     const snapshot = buildCustomerQuoteSnapshot(estimate, { completion: { amountPaid: 500, balanceDue: 630 } })
     assert.deepEqual(Object.keys(snapshot.completion).sort(), ['amountPaid', 'balanceDue', 'completedAt', 'items', 'photos', 'summary'])
+  })
+})
+
+describe('getUpdatedAtAfterServer', () => {
+  test('lands past the sync buffer so the stored report is pushed, even when the client clock is behind', () => {
+    const server = '2026-10-26T09:00:00.000Z'
+    for (const now of [Date.parse(server) - 60_000, Date.parse(server) - 500, Date.parse(server) + 300]) {
+      const local = getUpdatedAtAfterServer(server, now)
+      assert.equal(resolveLwwSyncAction({ localUpdatedAt: local, cloudUpdatedAt: server }), 'push')
+    }
+  })
+
+  test('uses the client time when it is already well ahead', () => {
+    const now = Date.parse('2026-10-26T09:05:00.000Z')
+    assert.equal(getUpdatedAtAfterServer('2026-10-26T09:00:00.000Z', now), '2026-10-26T09:05:00.000Z')
+  })
+
+  test('falls back to now without a server time', () => {
+    const now = Date.parse('2026-10-26T09:05:00.000Z')
+    assert.equal(getUpdatedAtAfterServer(undefined, now), '2026-10-26T09:05:00.000Z')
   })
 })

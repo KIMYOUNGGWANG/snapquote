@@ -1,6 +1,7 @@
 // Pure helpers for the job completion report. Client code imports this file too, so no server-only imports.
 import type { EstimateSection, JobCompletionItem, LocalEstimate } from "@/lib/estimates-storage"
 import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
+import { DEFAULT_SYNC_BUFFER_MS } from "@/lib/sync-resolution"
 
 export type CompletionMatchConfidence = "high" | "low"
 
@@ -149,4 +150,14 @@ export function getQuoteItemsForCompletion(estimate: LocalEstimate) {
         (estimate.sections ?? []).filter((section) => section.addedOnSite).flatMap((section) => section.items.map((item) => item.id))
     )
     return getAllItemsFromEstimate(estimate).filter((item) => !addedIds.has(item.id))
+}
+
+/**
+ * updatedAt for the locally stored report: past the server's finalize time by more than the LWW buffer,
+ * so the next sync pushes the completion instead of treating it as in sync (or pulling it away).
+ */
+export function getUpdatedAtAfterServer(serverUpdatedAt: string | undefined, now = Date.now()): string {
+    const server = serverUpdatedAt ? Date.parse(serverUpdatedAt) : Number.NaN
+    const floor = Number.isFinite(server) ? server + DEFAULT_SYNC_BUFFER_MS + 1 : now
+    return new Date(Math.max(now, floor)).toISOString()
 }

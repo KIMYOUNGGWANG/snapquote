@@ -176,10 +176,16 @@ export function JobCompletionSheet({ estimate, businessName, onClose, onChanged 
             })
         } catch (error) {
             setSendError(getErrorMessage(error, "Couldn't prepare the report link. Try again."))
+            return
         } finally {
             setPreparingLink(false)
         }
-    }, [estimate])
+        try {
+            await onChanged()
+        } catch (error) {
+            toast(getErrorMessage(error, "Link is ready, but History didn't refresh. Reopen it to see the update."), "error")
+        }
+    }, [estimate, onChanged])
 
     const preparedOnceRef = useRef(false)
     useEffect(() => {

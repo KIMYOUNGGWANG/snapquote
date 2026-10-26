@@ -557,6 +557,21 @@ describe('preserveLocalOnlyCompletionState', () => {
     assert.deepEqual(merged, { id: 'e1', status: 'paid', totalAmount: 1740, pendingCompletion })
   })
 
+  test('keeps a stored local completion the cloud does not have yet (write-once) and queues it for push', () => {
+    const pulled = { id: 'e1', status: 'sent', updatedAt: '2026-10-26T09:00:00.000Z', synced: true }
+    const merged = preserveLocalOnlyCompletionState(pulled, { id: 'e1', completion })
+    assert.equal(merged.status, 'sent')
+    assert.deepEqual(merged.completion, completion)
+    assert.equal(merged.synced, false)
+    assert.equal(resolveLwwSyncAction({ localUpdatedAt: merged.updatedAt, cloudUpdatedAt: pulled.updatedAt }), 'push')
+  })
+
+  test('prefers the cloud completion when both exist', () => {
+    const cloudCompletion = { ...completion, summary: 'cloud' }
+    const pulled = { id: 'e1', completion: cloudCompletion }
+    assert.equal(preserveLocalOnlyCompletionState(pulled, { id: 'e1', completion }), pulled)
+  })
+
   test('drops the marker once the cloud already holds the completion', () => {
     const pulled = { id: 'e1', completion }
     assert.equal(preserveLocalOnlyCompletionState(pulled, { id: 'e1', pendingCompletion }), pulled)
