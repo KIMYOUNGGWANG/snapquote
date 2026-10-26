@@ -206,6 +206,20 @@ describe('buildCustomerQuoteSnapshot completion', () => {
     const snapshot = buildCustomerQuoteSnapshot(estimate, { completion: { amountPaid: 500, balanceDue: 630 } })
     assert.deepEqual(Object.keys(snapshot.completion).sort(), ['amountPaid', 'balanceDue', 'completedAt', 'items', 'photos', 'summary'])
   })
+
+  test('keeps the completion and its balance when re-posted without completion options (Copy approval link)', () => {
+    const completion = { completedAt: '2026-10-25T10:00:00.000Z', summary: 'Done', photos: [], items: [] }
+
+    const partial = buildCustomerQuoteSnapshot(makeEstimate({ completion, amountPaid: 500.5 }))
+    assert.equal(partial.completion.amountPaid, 500.5)
+    assert.equal(partial.completion.balanceDue, 629.5)
+
+    const unpaid = buildCustomerQuoteSnapshot(makeEstimate({ completion }), {})
+    assert.equal(unpaid.completion.amountPaid, 0)
+    assert.equal(unpaid.completion.balanceDue, 1130)
+
+    assert.equal(buildCustomerQuoteSnapshot(makeEstimate()).completion, undefined)
+  })
 })
 
 describe('getUpdatedAtAfterServer', () => {

@@ -708,7 +708,7 @@ describe("customer quote portal routes", () => {
     assert.equal(getCustomerPortalPaymentActionState("approved", true, "deposit", true, true).showPayLink, false)
   })
 
-  test("customer quote snapshots carry the completion report only when provided", () => {
+  test("customer quote snapshots carry a stored completion report, with explicit or stored amounts", () => {
     const estimate = {
       id: "est-1",
       estimateNumber: "EST-1",
@@ -730,7 +730,12 @@ describe("customer quote portal routes", () => {
     assert.equal(withOptions.completion.amountPaid, 100)
     assert.equal(withOptions.completion.summary, "Done")
     assert.equal(withOptions.sections[0].addedOnSite, true)
-    assert.equal(buildCustomerQuoteSnapshot(estimate).completion, undefined)
+    // Re-posted without options (Copy approval link): the stored amounts keep the report on the portal.
+    const withoutOptions = buildCustomerQuoteSnapshot({ ...estimate, totalAmount: 150, amountPaid: 100 })
+    assert.equal(withoutOptions.completion.summary, "Done")
+    assert.equal(withoutOptions.completion.amountPaid, 100)
+    assert.equal(withoutOptions.completion.balanceDue, 50)
+    assert.equal(buildCustomerQuoteSnapshot({ ...estimate, completion: undefined }).completion, undefined)
   })
 
   test("GET /api/estimates/:estimateId/share-link returns customer response status", async () => {

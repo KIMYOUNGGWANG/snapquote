@@ -2,6 +2,7 @@ import type { z } from "zod"
 import { customerQuoteSnapshotSchema } from "@/lib/validation/api-schemas"
 import { withAuthHeaders } from "@/lib/auth-headers"
 import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
+import { computeBalanceDue } from "@/lib/estimates/balance"
 import type { LocalEstimate } from "@/lib/estimates-storage"
 import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
 
@@ -47,6 +48,10 @@ export function buildCustomerQuoteSnapshot(
     estimate: LocalEstimate,
     options: Pick<CustomerPortalLinkOptions, "paymentLinkOverride" | "paymentLinkTypeOverride" | "completion"> = {}
 ): CustomerQuoteSnapshotInput {
+    // Any re-post (e.g. Copy approval link) keeps a stored report and its Pay balance on the portal.
+    const amountPaid = estimate.amountPaid ?? 0
+    const completionAmounts = options.completion
+        ?? { amountPaid, balanceDue: computeBalanceDue(estimate.totalAmount, amountPaid) }
     const items = getAllItemsFromEstimate(estimate).map((item, index) => ({
         id: item.id,
         itemNumber: item.itemNumber || index + 1,
@@ -99,14 +104,14 @@ export function buildCustomerQuoteSnapshot(
             })),
         })),
         // Pick fields explicitly: the snapshot schema is strict and rejects stray keys.
-        completion: estimate.completion && options.completion
+        completion: estimate.completion
             ? {
                 completedAt: estimate.completion.completedAt,
                 summary: estimate.completion.summary,
                 photos: estimate.completion.photos,
                 items: estimate.completion.items.map(({ itemId, done, photoIndexes }) => ({ itemId, done, photoIndexes })),
-                amountPaid: options.completion.amountPaid,
-                balanceDue: options.completion.balanceDue,
+                amountPaid: completionAmounts.amountPaid,
+                balanceDue: completionAmounts.balanceDue,
             }
             : undefined,
         createdAt: estimate.createdAt,
