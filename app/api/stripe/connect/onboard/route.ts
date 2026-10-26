@@ -8,6 +8,7 @@ import {
     getStripeConnectProfile,
     upsertStripeConnectProfile,
 } from "@/lib/server/stripe-connect"
+import { errorMessage, errorType } from "@/lib/unknown-fields"
 
 function getAppUrl(): string {
     const raw = process.env.NEXT_PUBLIC_APP_URL || "https://snapquote.app"
@@ -132,10 +133,10 @@ export async function POST(req: Request) {
             url: accountLink.url,
             accountId,
         })
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Stripe Connect onboarding error:", error)
 
-        if (error.type === "StripeAuthenticationError") {
+        if (errorType(error) === "StripeAuthenticationError") {
             return NextResponse.json(
                 { error: "Invalid Stripe API key. Please check your configuration." },
                 { status: 401 }
@@ -143,7 +144,7 @@ export async function POST(req: Request) {
         }
 
         return NextResponse.json(
-            { error: error.message || "Failed to create Stripe onboarding link." },
+            { error: errorMessage(error) || "Failed to create Stripe onboarding link." },
             { status: 500 }
         )
     }

@@ -3,6 +3,7 @@ import { Resend } from 'resend';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { enforceUsageQuota, recordUsage } from '@/lib/server/usage-quota';
 import { buildEmailWatermarkHtml, buildEmailFooterHtml } from '@/lib/email-watermark';
+import { errorMessage } from "@/lib/unknown-fields"
 
 const MAX_PDF_BYTES = 10 * 1024 * 1024; // 10MB
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -159,11 +160,11 @@ export async function POST(req: Request) {
         await recordUsage(quotaContext, "send_email")
 
         return NextResponse.json({ success: true, data });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Email send exception:', error);
         return NextResponse.json({
             success: false,
-            error: error.message || 'Internal server error during email sending'
+            error: errorMessage(error) || 'Internal server error during email sending'
         }, { status: 500 });
     }
 }

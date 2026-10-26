@@ -7,6 +7,7 @@ import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 import { resolveEffectivePlanTier } from "@/lib/server/effective-plan"
 import { parseReceiptFormSchema } from "@/lib/validation/api-schemas"
+import { readField, readString } from "@/lib/unknown-fields"
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -17,6 +18,8 @@ const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000
 const RATE_LIMIT_MAX = 20
 const OPENAI_RECEIPT_MODEL = process.env.OPENAI_RECEIPT_MODEL?.trim() || "gpt-4o-mini"
 const PRO_TIERS = new Set(["pro", "team"])
+
+type ServiceSupabaseClient = NonNullable<ReturnType<typeof createServiceSupabaseClient>>
 
 type ChatMessagePart =
     | { type: "text"; text: string }
@@ -65,7 +68,7 @@ function extractMessageContent(content: unknown): string {
     if (typeof content === "string") return content
     if (Array.isArray(content)) {
         return content
-            .map((part: any) => (typeof part?.text === "string" ? part.text : ""))
+            .map((part: unknown) => readString(part, "text"))
             .join("\n")
             .trim()
     }
@@ -85,10 +88,12 @@ function dedupeWarnings(input: string[]): string[] {
     return warnings
 }
 
-function normalizeParsedReceipt(raw: any): NormalizedParsedReceipt {
-    const rawItems = Array.isArray(raw?.items) ? raw.items : []
-    const modelWarnings = Array.isArray(raw?.warnings)
-        ? raw.warnings
+function normalizeParsedReceipt(raw: unknown): NormalizedParsedReceipt {
+    const rawItemsField = readField(raw, "items")
+    const rawItems: unknown[] = Array.isArray(rawItemsField) ? rawItemsField : []
+    const rawWarningsField = readField(raw, "warnings")
+    const modelWarnings = Array.isArray(rawWarningsField)
+        ? rawWarningsField
             .filter((warning: unknown) => typeof warning === "string")
             .map((warning: string) => warning.trim())
             .filter(Boolean)
@@ -96,25 +101,25 @@ function normalizeParsedReceipt(raw: any): NormalizedParsedReceipt {
 
     const lowConfidenceWarnings: string[] = []
     const items: NormalizedParsedReceiptItem[] = rawItems
-        .map((item: any, index: number) => {
-            const description = toTrimmedString(item?.description, 320)
+        .map((item: unknown, index: number) => {
+            const description = toTrimmedString(readField(item, "description"), 320)
             if (!description) return null
 
-            const rawQuantity = toFiniteNumber(item?.quantity, 1)
+            const rawQuantity = toFiniteNumber(readField(item, "quantity"), 1)
             const quantity = rawQuantity > 0 ? rawQuantity : 1
 
-            const unitPrice = Math.max(0, toFiniteNumber(item?.unit_price, 0))
+            const unitPrice = Math.max(0, toFiniteNumber(readField(item, "unit_price"), 0))
             const fallbackTotal = quantity * unitPrice
-            const normalizedTotal = toFiniteNumber(item?.total, fallbackTotal)
+            const normalizedTotal = toFiniteNumber(readField(item, "total"), fallbackTotal)
             const total = normalizedTotal >= 0 ? normalizedTotal : fallbackTotal
 
-            const confidenceScore = clamp(toFiniteNumber(item?.confidence_score, 0.5), 0, 1)
+            const confidenceScore = clamp(toFiniteNumber(readField(item, "confidence_score"), 0.5), 0, 1)
             if (confidenceScore < 0.8) {
                 lowConfidenceWarnings.push(`Low confidence parse: "${description}"`)
             }
 
-            const id = toTrimmedString(item?.id, 64) || `receipt-item-${index + 1}`
-            const originalText = toTrimmedString(item?.original_text, 320)
+            const id = toTrimmedString(readField(item, "id"), 64) || `receipt-item-${index + 1}`
+            const originalText = toTrimmedString(readField(item, "original_text"), 320)
 
             return {
                 id,
@@ -128,13 +133,13 @@ function normalizeParsedReceipt(raw: any): NormalizedParsedReceipt {
         })
         .filter((item: NormalizedParsedReceiptItem | null): item is NormalizedParsedReceiptItem => item !== null)
 
-    const subtotal = Math.max(0, toFiniteNumber(raw?.subtotal, 0))
-    const tax = Math.max(0, toFiniteNumber(raw?.tax, 0))
+    const subtotal = Math.max(0, toFiniteNumber(readField(raw, "subtotal"), 0))
+    const tax = Math.max(0, toFiniteNumber(readField(raw, "tax"), 0))
     const fallbackTotal = subtotal + tax
-    const total = Math.max(0, toFiniteNumber(raw?.total, fallbackTotal))
+    const total = Math.max(0, toFiniteNumber(readField(raw, "total"), fallbackTotal))
 
-    const vendorName = toTrimmedString(raw?.vendorName, 120)
-    const date = toTrimmedString(raw?.date, 40)
+    const vendorName = toTrimmedString(readField(raw, "vendorName"), 120)
+    const date = toTrimmedString(readField(raw, "date"), 40)
     const warnings = dedupeWarnings([...modelWarnings, ...lowConfidenceWarnings])
 
     return {
@@ -193,7 +198,7 @@ function buildSystemPrompt(context: string): string {
 }
 
 async function resolvePlanTier(
-    supabase: any,
+    supabase: ServiceSupabaseClient,
     userId: string
 ): Promise<{ planTier: string; error: string | null }> {
     const { data, error } = await supabase
@@ -307,7 +312,7 @@ export async function POST(req: Request) {
             model: OPENAI_RECEIPT_MODEL,
             messages: [
                 { role: "system", content: systemPrompt },
-                { role: "user", content: messageContent as any },
+                { role: "user", content: messageContent },
             ],
             response_format: { type: "json_object" },
             temperature: 0.1,
@@ -332,7 +337,7 @@ export async function POST(req: Request) {
         }
 
         return NextResponse.json(normalized)
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Parse receipt error:", error)
         return NextResponse.json(
             { error: "Failed to parse receipt" },

@@ -4,6 +4,7 @@ import { requireAuthenticatedUser } from "@/lib/server/route-auth"
 import { createServiceSupabaseClient, ensureProfileExists } from "@/lib/server/stripe-connect"
 import { getWorkspaceMembershipByUser } from "@/lib/server/team-workspace"
 import { teamEstimateFeedQuerySchema } from "@/lib/validation/api-schemas"
+import { readField, readString } from "@/lib/unknown-fields"
 
 export async function GET(req: Request) {
     const auth = await requireAuthenticatedUser(req)
@@ -74,7 +75,7 @@ export async function GET(req: Request) {
     }
 
     const memberIds = Array.isArray(memberRows.data)
-        ? memberRows.data.map((member: any) => member.user_id).filter((value: unknown): value is string => typeof value === "string")
+        ? memberRows.data.map((member: unknown) => readField(member, "user_id")).filter((value: unknown): value is string => typeof value === "string")
         : []
 
     if (memberIds.length === 0) {
@@ -106,23 +107,23 @@ export async function GET(req: Request) {
         ok: true,
         workspaceId: membershipResult.data.workspace_id,
         count: estimates.length,
-        estimates: estimates.map((estimate: any) => ({
-            estimateId: estimate.id,
-            estimateNumber: estimate.estimate_number,
-            ownerUserId: estimate.user_id,
-            ...(typeof estimate?.profiles?.business_name === "string" && estimate.profiles.business_name
-                ? { ownerBusinessName: estimate.profiles.business_name }
-                : {}),
-            ...(typeof estimate?.clients?.name === "string" && estimate.clients.name
-                ? { clientName: estimate.clients.name }
-                : {}),
-            status: estimate.status || "draft",
-            totalAmount: typeof estimate.total_amount === "number" ? estimate.total_amount : 0,
-            ...(typeof estimate.payment_completed_at === "string" && estimate.payment_completed_at
-                ? { paymentCompletedAt: estimate.payment_completed_at }
-                : {}),
-            updatedAt: estimate.updated_at,
-            createdAt: estimate.created_at,
-        })),
+        estimates: estimates.map((estimate: unknown) => {
+            const ownerBusinessName = readString(readField(estimate, "profiles"), "business_name")
+            const clientName = readString(readField(estimate, "clients"), "name")
+            const totalAmount = readField(estimate, "total_amount")
+            const paymentCompletedAt = readString(estimate, "payment_completed_at")
+            return {
+                estimateId: readField(estimate, "id"),
+                estimateNumber: readField(estimate, "estimate_number"),
+                ownerUserId: readField(estimate, "user_id"),
+                ...(ownerBusinessName ? { ownerBusinessName } : {}),
+                ...(clientName ? { clientName } : {}),
+                status: readField(estimate, "status") || "draft",
+                totalAmount: typeof totalAmount === "number" ? totalAmount : 0,
+                ...(paymentCompletedAt ? { paymentCompletedAt } : {}),
+                updatedAt: readField(estimate, "updated_at"),
+                createdAt: readField(estimate, "created_at"),
+            }
+        }),
     })
 }

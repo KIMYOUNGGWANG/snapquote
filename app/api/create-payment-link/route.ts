@@ -9,6 +9,7 @@ import {
     getStripeConnectProfile,
     upsertStripeConnectProfile,
 } from "@/lib/server/stripe-connect"
+import { errorMessage, errorType } from "@/lib/unknown-fields"
 
 const UUID_PATTERN =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -258,11 +259,11 @@ export async function POST(req: Request) {
             url: paymentLink.url,
             id: paymentLink.id,
         })
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("Stripe Payment Link error:", error)
 
         // Handle Stripe-specific errors
-        if (error.type === 'StripeAuthenticationError') {
+        if (errorType(error) === 'StripeAuthenticationError') {
             return NextResponse.json(
                 { error: "Invalid Stripe API key. Please check your configuration." },
                 { status: 401 }
@@ -270,7 +271,7 @@ export async function POST(req: Request) {
         }
 
         return NextResponse.json(
-            { error: error.message || "Failed to create payment link" },
+            { error: errorMessage(error) || "Failed to create payment link" },
             { status: 500 }
         )
     }
