@@ -30,8 +30,9 @@ function getErrorMessage(error: unknown): string {
     return "Something went wrong. Please try again."
 }
 
-function getDecisionCopy(status: CustomerPortalStatus, paymentComplete: boolean): string {
+function getDecisionCopy(status: CustomerPortalStatus, paymentComplete: boolean, hasCompletionBalance: boolean): string {
     if (paymentComplete) return "Payment received. This quote is already paid."
+    if (hasCompletionBalance) return "Your job is done. The remaining balance is ready to pay."
     if (status === "approved") return "Approved. The contractor has your approval."
     if (status === "change_requested") return "Change request sent. The contractor can follow up with the next version."
     if (status === "viewed") return "Viewed. Approve this quote or request a change below."
@@ -118,7 +119,7 @@ export function CustomerQuoteActions({
                 <div className="min-w-0">
                     <h2 className="text-lg font-semibold text-white">Quote decision</h2>
                     <p className="mt-1 text-sm leading-6 text-slate-400" data-testid="customer-quote-decision-status">
-                        {getDecisionCopy(status, paymentComplete)}
+                        {getDecisionCopy(status, paymentComplete, hasCompletionBalance)}
                     </p>
                 </div>
             </div>
