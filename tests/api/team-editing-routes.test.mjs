@@ -582,10 +582,34 @@ describe("Team estimate editing routes", () => {
     assert.equal(sectionInsertCall.payload[0].added_on_site, true)
   })
 
-  test("PATCH /api/team/estimates/:estimateId preserves payment-completed sent edits as paid", async () => {
+  const paidAt = "2026-03-20T17:00:00.000Z"
+  const paymentStateScenarios = [
+    {
+      name: "keeps a webhook-paid estimate paid when the editor saves a stale sent",
+      stored: { status: "sent", sent_at: "2026-03-20T16:45:00.000Z", payment_completed_at: paidAt },
+      payload: { status: "sent", paymentCompletedAt: undefined },
+      expectedStatus: "paid",
+      expectedUpdate: {},
+    },
+    {
+      name: "keeps a finalize reopen when the editor saves a stale paid",
+      stored: { status: "sent", sent_at: "2026-03-20T16:45:00.000Z", payment_completed_at: null },
+      payload: { status: "paid", paymentCompletedAt: paidAt },
+      expectedStatus: "sent",
+      expectedUpdate: {},
+    },
+    {
+      name: "sends a draft",
+      stored: { status: "draft", sent_at: null, payment_completed_at: null },
+      payload: { status: "sent", paymentCompletedAt: undefined },
+      expectedStatus: "draft",
+      expectedUpdate: { status: "sent", sent_at: "2026-03-20T16:45:00.000Z" },
+    },
+  ]
+
+  for (const scenario of paymentStateScenarios) test(`PATCH /api/team/estimates/:estimateId ${scenario.name}`, async () => {
     setTeamEnv()
     const state = getTestState()
-    const paidAt = "2026-03-20T17:00:00.000Z"
 
     state.supabase.queryResolver = async (query) => {
       if (query.table === "profiles" && query.action === "upsert") {
@@ -614,11 +638,7 @@ describe("Team estimate editing routes", () => {
 
       if (query.table === "estimates" && query.action === "select" && query.mode === "maybeSingle") {
         return {
-          data: buildEstimateRow({
-            status: "sent",
-            sent_at: "2026-03-20T16:45:00.000Z",
-            payment_completed_at: paidAt,
-          }),
+          data: buildEstimateRow(scenario.stored),
           error: null,
         }
       }
@@ -662,12 +682,12 @@ describe("Team estimate editing routes", () => {
       clientName: "Harbor Dental",
       clientAddress: "44 Bay St",
       summary_note: "Paid edit should stay closed.",
-      status: "sent",
+      status: scenario.payload.status,
       taxRate: 5,
       taxAmount: 110,
       totalAmount: 2200,
       sentAt: "2026-03-20T16:45:00.000Z",
-      paymentCompletedAt: paidAt,
+      ...(scenario.payload.paymentCompletedAt ? { paymentCompletedAt: scenario.payload.paymentCompletedAt } : {}),
       items: [
         {
           id: "item_1",
@@ -690,15 +710,16 @@ describe("Team estimate editing routes", () => {
 
     assert.equal(res.status, 200)
     assert.equal(data.ok, true)
-    assert.equal(data.estimate.status, "paid")
-    assert.equal(data.estimate.paymentCompletedAt, paidAt)
+    // The response re-reads the (mocked) stored row; the update payload is what proves the guard.
+    assert.equal(data.estimate.status, scenario.expectedStatus)
 
     const updateCall = state.supabase.queryCalls.find(
       (query) => query.table === "estimates" && query.action === "update"
     )
     assert.ok(updateCall)
-    assert.equal(updateCall.payload.status, "paid")
-    assert.equal(updateCall.payload.payment_completed_at, paidAt)
-    assert.equal(updateCall.payload.sent_at, "2026-03-20T16:45:00.000Z")
+    assert.equal(updateCall.payload.ai_summary, "Paid edit should stay closed.")
+    assert.equal("payment_completed_at" in updateCall.payload, false)
+    assert.equal(updateCall.payload.status, scenario.expectedUpdate.status)
+    assert.equal(updateCall.payload.sent_at, scenario.expectedUpdate.sent_at)
   })
 })

@@ -2649,6 +2649,7 @@ function NewEstimatePageContent() {
             status,
             paymentCompletedAt: teamEstimateContext?.paymentCompletedAt,
             ...(storedEstimate?.amountPaid !== undefined ? { amountPaid: storedEstimate.amountPaid } : {}),
+            ...(storedEstimate?.paymentStateVersion !== undefined ? { paymentStateVersion: storedEstimate.paymentStateVersion } : {}),
             ...(storedEstimate?.completion ? { completion: storedEstimate.completion } : {}),
             paymentLink: includePaymentLink && paymentLink ? paymentLink : undefined,
             paymentLinkId: includePaymentLink && paymentLinkId ? paymentLinkId : undefined,
