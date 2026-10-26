@@ -510,3 +510,12 @@ create index idx_estimate_items_estimate on estimate_items (estimate_id);
 create index idx_automations_user on automations (user_id);
 create index idx_job_queue_user on job_queue (user_id);
 create index idx_feedback_user on feedback (user_id);
+
+-- Job completion photos (private bucket; see migration 20261026000000_add_completion_photos_bucket.sql)
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('completion-photos', 'completion-photos', false, 409600,
+  array['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'image/gif'])
+on conflict (id) do nothing;
+create policy "completion photos: owner insert" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'completion-photos' and (storage.foldername(name))[1] = (select auth.uid())::text);

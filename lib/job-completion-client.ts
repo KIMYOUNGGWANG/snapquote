@@ -10,11 +10,13 @@ import { getEstimates, saveEstimate, type JobCompletion, type LocalEstimate } fr
 import {
     applyExtraWork,
     buildCompletionEmailSubject,
+    COMPLETION_PHOTOS_BUCKET,
     getUpdatedAtAfterServer,
     sanitizeCompletionMatches,
     type CompletionMatchResult,
     type ExtraWorkLine,
 } from "@/lib/job-completion"
+import { supabase } from "@/lib/supabase"
 import { syncEstimates } from "@/lib/sync"
 
 const AI_TIMEOUT_MS = 60_000
@@ -158,6 +160,29 @@ async function postFinalize(
     }
 }
 
+/**
+ * Uploads data URL photos to Storage and returns the report with Storage paths in their place.
+ * Paths that are already uploaded pass through untouched.
+ */
+async function uploadCompletionPhotos(estimateId: string, completion: JobCompletion): Promise<JobCompletion> {
+    const { data } = await supabase.auth.getSession()
+    const userId = data.session?.user.id
+    if (!userId) throw new Error("Sign in to send the report.")
+
+    // ponytail: a failed send re-uploads on retry and leaves the earlier files orphaned; add a cleanup job if storage grows.
+    const photos = await Promise.all(completion.photos.map(async (photo) => {
+        if (!photo.startsWith("data:")) return photo
+        const blob = await (await fetch(photo)).blob()
+        const path = `${userId}/${estimateId}/${crypto.randomUUID()}.${blob.type.replace("image/", "")}`
+        const { error } = await supabase.storage
+            .from(COMPLETION_PHOTOS_BUCKET)
+            .upload(path, blob, { contentType: blob.type, upsert: false })
+        if (error) throw new Error("Couldn't upload the photos. Try again.")
+        return path
+    }))
+    return { ...completion, photos }
+}
+
 export async function getStoredEstimate(estimateId: string): Promise<LocalEstimate | undefined> {
     return (await getEstimates()).find((entry) => entry.id === estimateId)
 }
@@ -181,6 +206,9 @@ export async function finalizeJobCompletion(
     let finalized = await getStoredEstimate(estimate.id)
     if (options.resume && !finalized?.pendingCompletion) throw new CompletionStateLostError()
     if (!finalized?.pendingCompletion) {
+        // 0. Photos go to Storage first: nothing is finalized if the upload fails.
+        const completion = await uploadCompletionPhotos(estimate.id, input.completion)
+
         // 1. Extra work + recomputed totals, saved locally.
         const withExtraWork: LocalEstimate = {
             ...applyExtraWork(finalized ?? estimate, input.extraWork),
@@ -229,7 +257,7 @@ export async function finalizeJobCompletion(
             paymentLink: result.paymentLink,
             paymentLinkId: result.paymentLinkId,
             paymentLinkType: result.paymentLink ? "custom" : undefined,
-            pendingCompletion: { completion: input.completion, amountPaid: result.amountPaid, balanceDue: result.balanceDue },
+            pendingCompletion: { completion, amountPaid: result.amountPaid, balanceDue: result.balanceDue },
             // Server's own updated_at: LWW then sees local == cloud and neither pushes nor pulls this row.
             updatedAt: result.updatedAt ?? new Date().toISOString(),
             synced: Boolean(result.updatedAt),

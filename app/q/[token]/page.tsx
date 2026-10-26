@@ -2,7 +2,7 @@ import Link from "next/link"
 import { Fragment } from "react"
 import { AlertCircle, FileText, MapPin, Phone } from "lucide-react"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
-import { getCustomerPortalQuote, type CustomerQuoteSnapshot } from "@/lib/server/customer-portal"
+import { getCustomerPortalQuote, signCompletionPhotoUrls, type CustomerQuoteSnapshot } from "@/lib/server/customer-portal"
 import { CustomerQuoteActions } from "@/components/customer-portal/customer-quote-actions"
 import { CustomerQuoteStatusBadge } from "@/components/customer-portal/customer-quote-status-badge"
 import { CustomerQuoteNextStep } from "@/components/customer-portal/customer-quote-next-step"
@@ -93,6 +93,8 @@ export default async function CustomerQuotePage({ params }: CustomerQuotePagePro
     const estimate = quote.estimate
     const currency = estimate.currency || "USD"
     const completion = estimate.completion
+        ? { ...estimate.completion, photos: await signCompletionPhotoUrls(supabase, quote.userId, estimate.completion.photos) }
+        : undefined
     const allLineGroups = getQuoteLineGroups(estimate)
     // With a completion report, "Added on site" lines are listed in the report above; the quote
     // body shows them as one summary row so they are not listed twice and the totals still add up.
@@ -120,7 +122,8 @@ export default async function CustomerQuotePage({ params }: CustomerQuotePagePro
                 <div className="grid min-w-0 gap-4">
                     {completion ? (
                         <CustomerJobCompletion
-                            estimate={estimate}
+                            // Same signed copy: raw Storage paths never reach the client payload.
+                            estimate={{ ...estimate, completion }}
                             completion={completion}
                             businessName={quote.business.businessName}
                             paymentComplete={paymentComplete}

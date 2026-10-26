@@ -58,6 +58,9 @@ export type ExtraWorkLine = { description: string; amount: number }
 
 export const ADDED_ON_SITE_SECTION_NAME = "Added on site"
 
+/** Private Storage bucket for report photos; paths are `{userId}/{estimateId}/{uuid}.{ext}`. */
+export const COMPLETION_PHOTOS_BUCKET = "completion-photos"
+
 function roundToCents(value: number): number {
     return Math.round(value * 100) / 100
 }
