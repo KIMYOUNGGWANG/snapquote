@@ -21,7 +21,7 @@ function clearRelevantEnv() {
 }
 
 // Minimal stateful fake of the estimates row + analytics_events unique external_id.
-function createSettlementDb(initial) {
+function createSettlementDb(initial, { beforeUpdate = null } = {}) {
   const row = { user_id: 'user_1', status: 'sent', payment_completed_at: null, ...initial }
   const ledger = new Set()
   const filterValue = (query, column, op) => query.filters.find((f) => f.column === column && f.op === op)
@@ -41,9 +41,16 @@ function createSettlementDb(initial) {
       return { data: [], error: null }
     }
     if (query.table === 'estimates' && query.action === 'update' && query.mode === 'maybeSingle') {
+      // Simulates the finalize route writing amount_paid after the webhook read the row.
+      if (beforeUpdate) {
+        Object.assign(row, beforeUpdate)
+        beforeUpdate = null
+      }
       const isNull = filterValue(query, 'last_payment_session_id', 'is')
       const eqPrev = filterValue(query, 'last_payment_session_id', 'eq')
-      const matches = isNull ? row.last_payment_session_id === null : row.last_payment_session_id === eqPrev?.value
+      const eqPaid = filterValue(query, 'amount_paid', 'eq')
+      const matches = (isNull ? row.last_payment_session_id === null : row.last_payment_session_id === eqPrev?.value)
+        && (!eqPaid || row.amount_paid === eqPaid.value)
       if (!matches) return { data: null, error: null }
       Object.assign(row, query.payload)
       return { data: { id: row.id }, error: null }
@@ -467,6 +474,24 @@ describe('POST /api/webhooks/stripe', () => {
       assert.equal(res.status, 200)
       assert.equal(db.row.amount_paid, 500)
       assert.equal(db.ledger.has('payment_settlement:cs_X'), true)
+    })
+
+    test('payment that loses the race with finalize rolls back its ledger row and asks Stripe to retry', async () => {
+      const state = setupWebhook({
+        session: { id: 'cs_race', payment_status: 'paid', amount_total: 50000 },
+        estimate: {},
+      })
+      const db = createSettlementDb(
+        { id: 'estimate_partial', estimate_number: 'EST-P', total_amount: 1740, amount_paid: 0, last_payment_session_id: null },
+        { beforeUpdate: { amount_paid: 500 } }
+      )
+      state.supabase.queryResolver = db.resolver
+
+      const res = await send()
+      assert.equal(res.status, 500)
+      // Finalize's value survives, and the ledger is free so the retry re-applies on top of it.
+      assert.equal(db.row.amount_paid, 500)
+      assert.equal(db.ledger.has('payment_settlement:cs_race'), false)
     })
 
     test('older session replayed after the estimate is fully paid adds nothing', async () => {

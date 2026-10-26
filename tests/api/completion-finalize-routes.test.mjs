@@ -13,20 +13,30 @@ function setEnv() {
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
 }
 
-function mockDb(state, estimate, { accountId = 'acct_connected_1' } = {}) {
+function mockDb(state, estimate, { accountId = 'acct_connected_1', afterLoad = null, updateError = null } = {}) {
   const updates = []
+  let current = estimate
   state.supabase.queryResolver = async (query) => {
     if (query.table === 'estimates' && query.action === 'select') {
-      if (!estimate) return { data: null, error: null }
+      if (!current) return { data: null, error: null }
       const idFilter = query.filters.find((f) => f.column === 'id')
       const userFilter = query.filters.find((f) => f.column === 'user_id')
       const matches =
-        (!idFilter || idFilter.value === estimate.id) && (!userFilter || userFilter.value === estimate.user_id)
-      return { data: matches ? estimate : null, error: null }
+        (!idFilter || idFilter.value === current.id) && (!userFilter || userFilter.value === current.user_id)
+      const result = { data: matches ? current : null, error: null }
+      // Simulates a webhook payment landing right after the route read the row.
+      if (afterLoad) {
+        current = { ...current, ...afterLoad }
+        afterLoad = null
+      }
+      return result
     }
     if (query.table === 'estimates' && query.action === 'update') {
       updates.push({ payload: query.payload, filters: query.filters })
-      return { data: { id: estimate.id }, error: null }
+      if (updateError) return { data: null, error: updateError }
+      const paidFilter = query.filters.find((f) => f.column === 'amount_paid' && f.op === 'eq')
+      if (paidFilter && paidFilter.value !== current.amount_paid) return { data: null, error: null }
+      return { data: { id: current.id }, error: null }
     }
     if (query.table === 'profiles' && query.action === 'select') {
       return {
@@ -246,6 +256,61 @@ describe('POST /api/estimates/[estimateId]/completion', () => {
     assert.notEqual(keys[0], keys[1])
     assert.equal(keys[0], keys[2])
     assert.notEqual(keys[0], keys[3])
+  })
+
+  test('finalize idempotency key changes when the stored amount_paid changed', async () => {
+    const keys = []
+    for (const stored of [0, 100]) {
+      resetTestState()
+      setEnv()
+      const state = getTestState()
+      mockDb(state, baseEstimate({ payment_link_id: 'plink_a', amount_paid: stored }))
+      state.stripe.paymentLinksCreate = async (payload, options) => {
+        keys.push(options.idempotencyKey)
+        return { id: 'plink_new', url: 'https://pay.stripe.com/new' }
+      }
+      assert.equal((await post({ alreadyReceived: 500, expectedAmountPaid: stored })).status, 200)
+    }
+
+    assert.notEqual(keys[0], keys[1])
+  })
+
+  test('finalize guards the update on the stored amount_paid', async () => {
+    const state = getTestState()
+    const updates = mockDb(state, baseEstimate({ amount_paid: 0 }))
+
+    assert.equal((await post({ alreadyReceived: 500 })).status, 200)
+    assert.deepEqual(
+      updates[0].filters.find((f) => f.column === 'amount_paid'),
+      { op: 'eq', column: 'amount_paid', value: 0 }
+    )
+  })
+
+  test('finalize returns 409 and keeps the old link when a payment lands during finalize', async () => {
+    const state = getTestState()
+    mockDb(state, baseEstimate({ payment_link_id: 'plink_old' }), { afterLoad: { amount_paid: 300 } })
+    state.stripe.paymentLinksCreate = async () => ({ id: 'plink_new', url: 'https://pay.stripe.com/new' })
+
+    const res = await post({ alreadyReceived: 500 })
+    const data = await res.json()
+
+    assert.equal(res.status, 409)
+    assert.equal(data.error.code, 'COMPLETION_STATE_CHANGED')
+    assert.equal(data.amountPaid, 300)
+    assert.equal(data.totalAmount, 1740)
+    // The unsaved new link is switched off; the old (still stored) link stays live.
+    assert.deepEqual(state.stripe.paymentLinksUpdateCalls.map((c) => c.id), ['plink_new'])
+  })
+
+  test('finalize keeps the old link live when saving the row fails', async () => {
+    const state = getTestState()
+    mockDb(state, baseEstimate({ payment_link_id: 'plink_old' }), { updateError: { message: 'db down' } })
+    state.stripe.paymentLinksCreate = async () => ({ id: 'plink_new', url: 'https://pay.stripe.com/new' })
+
+    const res = await post({ alreadyReceived: 500 })
+
+    assert.equal(res.status, 500)
+    assert.equal(state.stripe.paymentLinksUpdateCalls.length, 0)
   })
 
   test('finalize reopens deposit-paid estimate to sent', async () => {

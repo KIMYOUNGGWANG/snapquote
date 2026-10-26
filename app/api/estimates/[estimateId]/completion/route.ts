@@ -88,19 +88,20 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
     // so the stale "Already received" default never overwrites amount_paid.
     const storedTotal = toMoneyOrNull(estimate.total_amount)
     const storedAmountPaid = toMoneyOrNull(estimate.amount_paid) ?? 0
+    const stateChanged = (amountPaid: number, total: number | null) => NextResponse.json({
+        error: {
+            code: "COMPLETION_STATE_CHANGED",
+            message: "Payments changed since you opened this job. Review the updated amounts.",
+        },
+        amountPaid,
+        totalAmount: total,
+    }, { status: 409 })
     if (
         storedTotal === null
         || toCents(storedTotal) !== toCents(parsed.data.expectedTotal)
         || toCents(storedAmountPaid) !== toCents(parsed.data.expectedAmountPaid)
     ) {
-        return NextResponse.json({
-            error: {
-                code: "COMPLETION_STATE_CHANGED",
-                message: "Payments changed since you opened this job. Review the updated amounts.",
-            },
-            amountPaid: storedAmountPaid,
-            totalAmount: storedTotal,
-        }, { status: 409 })
+        return stateChanged(storedAmountPaid, storedTotal)
     }
 
     const totalAmount = storedTotal
@@ -116,9 +117,16 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
             estimateNumber: estimate.estimate_number?.trim() || "",
             customerName: estimate.clients?.name?.trim().slice(0, 120) || "",
             amount: balanceDue,
-            // Fresh key when the stored link changed (A -> B -> A); same key for an exact retry.
+            // Fresh key when the stored link or amount_paid changed (A -> B -> A, or a payment landed);
+            // same key for an exact retry.
             idempotencyKey: `payment_link_balance:${createHash("sha256")
-                .update([auth.userId, estimate.id, toCents(balanceDue), previousLinkId || "none"].join("|"))
+                .update([
+                    auth.userId,
+                    estimate.id,
+                    toCents(balanceDue),
+                    previousLinkId || "none",
+                    toCents(storedAmountPaid),
+                ].join("|"))
                 .digest("hex")}`,
         })
         if (!created.ok) {
@@ -130,11 +138,6 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
         newLink = created
     }
 
-    // Same idempotent link returned again: it is still the live one.
-    if (previousLinkId && previousLinkId !== newLink?.id) {
-        await deactivatePaymentLink({ userId: auth.userId, paymentLinkId: previousLinkId })
-    }
-
     // Contractor confirmed full receipt: server marks it paid (total 0 never counts).
     const statusFields: { status?: string; payment_completed_at?: string | null } = isFullyPaid(totalAmount, alreadyReceived)
         ? { status: "paid", payment_completed_at: estimate.payment_completed_at || new Date().toISOString() }
@@ -143,7 +146,9 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
             : {}
 
     const updatedAt = new Date().toISOString()
-    const { error: updateError } = await supabase
+    // Compare-and-set on amount_paid: a webhook payment that landed after the read must not be overwritten.
+    // The webhook settlement guards on amount_paid the same way, so whichever writes second retries.
+    const { data: saved, error: updateError } = await supabase
         .from("estimates")
         .update({
             amount_paid: alreadyReceived,
@@ -155,7 +160,32 @@ export async function POST(req: Request, context: { params: Promise<{ estimateId
         })
         .eq("id", estimate.id)
         .eq("user_id", auth.userId)
+        .eq("amount_paid", estimate.amount_paid ?? 0)
+        .select("id")
+        .maybeSingle()
+    // Keep the new link live on a DB error: an exact retry gets it back through the idempotency key.
     if (updateError) return errorResponse("Failed to save completion.", 500)
+
+    if (!saved?.id) {
+        // Never stored, and the next attempt uses a fresh key (amount_paid changed): switch it off.
+        if (newLink && newLink.id !== previousLinkId) {
+            await deactivatePaymentLink({ userId: auth.userId, paymentLinkId: newLink.id })
+        }
+        const { data: fresh, error: freshError } = await supabase
+            .from("estimates")
+            .select("total_amount, amount_paid")
+            .eq("id", estimate.id)
+            .eq("user_id", auth.userId)
+            .maybeSingle()
+        if (freshError) console.error("Failed to reload estimate after a concurrent payment:", freshError)
+        const latest = fresh as Pick<FinalizeEstimateRow, "total_amount" | "amount_paid"> | null
+        return stateChanged(toMoneyOrNull(latest?.amount_paid ?? null) ?? 0, toMoneyOrNull(latest?.total_amount ?? null))
+    }
+
+    // Only after the new state is saved: the same idempotent link returned again is still the live one.
+    if (previousLinkId && previousLinkId !== newLink?.id) {
+        await deactivatePaymentLink({ userId: auth.userId, paymentLinkId: previousLinkId })
+    }
 
     return NextResponse.json({
         ok: true,

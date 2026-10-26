@@ -85,6 +85,8 @@ export async function applyCheckoutSettlement(
             updated_at: new Date().toISOString(),
         })
         .eq('id', estimate.id)
+        // 완료 확정(finalize)이 읽은 뒤에 amount_paid를 바꿨다면 0행 → 원장 롤백 후 재시도로 그 값 위에 다시 더한다.
+        .eq('amount_paid', estimate.amount_paid ?? 0)
 
     // 동시에 들어온 업데이트가 이미 세션 id를 바꿨다면 0행이 갱신된다.
     const guarded = estimate.last_payment_session_id === null
