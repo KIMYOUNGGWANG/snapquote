@@ -14,6 +14,7 @@ import {
 } from "../../lib/customer-portal-client.ts"
 import { getCustomerQuoteDecisionRetryLabel } from "../../lib/customer-portal-decision-recovery.ts"
 import { getCustomerPortalPaymentActionState } from "../../lib/customer-portal-payment.ts"
+import { signCompletionPhotoUrls } from "../../lib/server/customer-portal.ts"
 import {
   getCustomerQuoteNextStepCopy,
   getCustomerQuoteStatusClassName,
@@ -662,6 +663,61 @@ describe("customer quote portal routes", () => {
       const res = await postShareLink({ estimate: buildSnapshot({ completion }) })
       assert.equal(res.status, 400)
     }
+  })
+
+  const OWNER_ID = "00000000-0000-4000-8000-000000000001"
+  const OTHER_ID = "00000000-0000-4000-8000-000000000002"
+  const STORED_PHOTO = `${OWNER_ID}/estimate_1/22222222-2222-4222-8222-222222222222.jpeg`
+
+  test("share link accepts Storage photo paths and rejects malformed paths", async () => {
+    setCustomerPortalEnv()
+    const state = getTestState()
+    let stored
+    state.supabase.queryResolver = async (query) => {
+      if (query.table === "estimate_share_links" && query.action === "insert" && query.mode === "single") {
+        stored = query.payload.estimate_snapshot
+        return { data: buildShareRow({ estimate_snapshot: stored }), error: null }
+      }
+      return { data: null, error: null }
+    }
+
+    const ok = await postShareLink({ estimate: buildSnapshot({ completion: buildCompletion({ photos: [STORED_PHOTO, TINY_PHOTO], items: [] }) }) })
+    assert.equal(ok.status, 200)
+    assert.deepEqual(stored.completion.photos, [STORED_PHOTO, TINY_PHOTO])
+
+    for (const photo of [`../${STORED_PHOTO}`, `${OWNER_ID}/estimate_1/not-a-uuid.jpeg`, `${STORED_PHOTO.replace(".jpeg", ".svg")}`]) {
+      const res = await postShareLink({ estimate: buildSnapshot({ completion: buildCompletion({ photos: [photo] }) }) })
+      assert.equal(res.status, 400, photo)
+    }
+  })
+
+  test("signCompletionPhotoUrls signs only the owner's paths and keeps legacy data URLs", async () => {
+    const signedPaths = []
+    const supabase = {
+      storage: {
+        from: (bucket) => ({
+          createSignedUrls: async (paths, expiresIn) => {
+            assert.equal(bucket, "completion-photos")
+            assert.equal(expiresIn, 3600)
+            signedPaths.push(...paths)
+            return { data: paths.map((path) => ({ path, error: null, signedUrl: `https://storage.test/sign/${path}?token=t` })), error: null }
+          },
+        }),
+      },
+    }
+    const foreign = STORED_PHOTO.replace(OWNER_ID, OTHER_ID)
+
+    const photos = await signCompletionPhotoUrls(supabase, OWNER_ID, [STORED_PHOTO, TINY_PHOTO, foreign])
+
+    assert.deepEqual(signedPaths, [STORED_PHOTO])
+    assert.deepEqual(photos, [`https://storage.test/sign/${STORED_PHOTO}?token=t`, TINY_PHOTO, ""])
+  })
+
+  test("signCompletionPhotoUrls leaves photos unavailable when signing fails", async () => {
+    const supabase = {
+      storage: { from: () => ({ createSignedUrls: async () => ({ data: null, error: new Error("down") }) }) },
+    }
+    assert.deepEqual(await signCompletionPhotoUrls(supabase, OWNER_ID, [STORED_PHOTO, TINY_PHOTO]), ["", TINY_PHOTO])
   })
 
   test("re-posting snapshot without resetCustomerDecision keeps approved status", async () => {

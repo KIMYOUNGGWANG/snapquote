@@ -25,6 +25,21 @@ function getLineTotal(item: CustomerQuoteLineItem): number {
 }
 
 function PhotoThumb({ src, label, onOpen }: { src: string; label: string; onOpen: (event: MouseEvent<HTMLButtonElement>) => void }) {
+    // "" = the server could not sign this photo.
+    if (!src) {
+        return (
+            <span
+                className="flex h-14 w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border border-dashed border-white/15 text-[10px] leading-none text-slate-500"
+                data-testid="customer-completion-photo-unavailable"
+                role="img"
+                aria-label={`${label} could not load`}
+            >
+                <ImageOff className="h-4 w-4" aria-hidden="true" />
+                Can&apos;t load
+            </span>
+        )
+    }
+
     return (
         <button
             type="button"
@@ -32,7 +47,7 @@ function PhotoThumb({ src, label, onOpen }: { src: string; label: string; onOpen
             className="h-14 w-14 shrink-0 overflow-hidden rounded-md border border-white/10 bg-slate-900 transition-[border-color,transform] hover:border-white/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 active:scale-[0.97]"
             data-testid="customer-completion-photo"
         >
-            {/* eslint-disable-next-line @next/next/no-img-element -- data URL from the snapshot */}
+            {/* eslint-disable-next-line @next/next/no-img-element -- signed Storage URL or legacy data URL */}
             <img src={src} alt={label} width={56} height={56} loading="lazy" decoding="async" className="h-full w-full object-cover" />
         </button>
     )
@@ -258,7 +273,7 @@ export function CustomerJobCompletion({
                             <DialogTitle className="absolute left-4 top-6 max-w-[calc(100%-5.5rem)] truncate text-base">
                                 {openPhoto.title}
                             </DialogTitle>
-                            {/* eslint-disable-next-line @next/next/no-img-element -- data URL from the snapshot */}
+                            {/* eslint-disable-next-line @next/next/no-img-element -- signed Storage URL or legacy data URL */}
                             <img
                                 src={completion.photos[openPhoto.photoIndex]}
                                 alt={openPhoto.label}

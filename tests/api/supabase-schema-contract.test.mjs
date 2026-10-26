@@ -25,4 +25,11 @@ describe("Supabase schema contract", () => {
     assert.match(schema, /completion jsonb/);
     assert.match(schema, /added_on_site boolean not null default false/);
   });
+
+  test("fresh schema has the private completion photos bucket with an owner-folder insert policy", async () => {
+    const schema = await readFile(schemaUrl, "utf8");
+
+    assert.match(schema, /values \('completion-photos', 'completion-photos', false, 409600,/);
+    assert.match(schema, /for insert to authenticated\s+with check \(bucket_id = 'completion-photos' and \(storage\.foldername\(name\)\)\[1\] = \(select auth\.uid\(\)\)::text\)/);
+  });
 });

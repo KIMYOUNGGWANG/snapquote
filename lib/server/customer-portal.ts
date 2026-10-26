@@ -1,7 +1,9 @@
 import { createHash, randomBytes } from "crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { z } from "zod"
+import { COMPLETION_PHOTOS_BUCKET } from "@/lib/job-completion"
 import {
+    COMPLETION_PHOTO_PATH_PATTERN,
     customerPortalDecisionSchema,
     customerQuoteShareLinkSchema,
     customerQuoteSnapshotSchema,
@@ -330,6 +332,34 @@ async function loadEstimatePaymentState(
     }
 
     return data as EstimatePaymentStateRow | null
+}
+
+const COMPLETION_PHOTO_URL_TTL_SECONDS = 60 * 60
+
+/**
+ * Swaps report photo paths for short-lived signed URLs (the page is dynamic, so every view re-signs).
+ * Legacy data URLs pass through. The snapshot comes from the client, so only paths in the link owner's
+ * folder are signed; anything else becomes "" (shown as unavailable).
+ */
+export async function signCompletionPhotoUrls(
+    supabase: SupabaseClient,
+    ownerUserId: string,
+    photos: string[]
+): Promise<string[]> {
+    const ownPaths = photos.filter((photo) =>
+        Boolean(ownerUserId) && COMPLETION_PHOTO_PATH_PATTERN.test(photo) && photo.startsWith(`${ownerUserId}/`)
+    )
+    const signed = new Map<string, string>()
+    if (ownPaths.length > 0) {
+        const { data, error } = await supabase.storage
+            .from(COMPLETION_PHOTOS_BUCKET)
+            .createSignedUrls(ownPaths, COMPLETION_PHOTO_URL_TTL_SECONDS)
+        if (error) console.warn("Failed to sign completion photo URLs:", error)
+        for (const entry of data ?? []) {
+            if (entry.path && !entry.error) signed.set(entry.path, entry.signedUrl)
+        }
+    }
+    return photos.map((photo) => photo.startsWith("data:") ? photo : signed.get(photo) ?? "")
 }
 
 export function createCustomerPortalToken(): string {

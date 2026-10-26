@@ -40,14 +40,24 @@ const completionReportItemSchema = z.object({
     description: z.string({ error: "Invalid completion item" }).max(1_000, "Invalid completion item"),
 }).strict()
 
-export const completionPhotoSchema = z
+/** AI matching input (photos are not uploaded yet). */
+export const completionPhotoDataUrlSchema = z
     .string({ error: "Invalid photo payload" })
     .max(400_000, "Invalid photo payload")
     .regex(/^data:image\/(jpeg|png|webp|heic|heif|gif);base64,[A-Za-z0-9+/=]+$/, "Invalid photo payload")
 
+/** `{userId}/{estimateId}/{uuid}.{ext}` in the completion-photos bucket. */
+export const COMPLETION_PHOTO_PATH_PATTERN = /^[0-9a-f-]{36}\/[A-Za-z0-9_-]{1,120}\/[0-9a-f-]{36}\.(jpg|jpeg|png|webp|heic|heif|gif)$/
+
+/** Stored report photo: a Storage path, or a data URL from reports saved before photos moved to Storage. */
+export const completionPhotoSchema = z.union([
+    z.string({ error: "Invalid photo payload" }).regex(COMPLETION_PHOTO_PATH_PATTERN, "Invalid photo payload"),
+    completionPhotoDataUrlSchema,
+], { error: "Invalid photo payload" })
+
 export const completionReportRequestSchema = z.object({
     items: z.array(completionReportItemSchema, { error: "Invalid completion items" }).min(1, "Invalid completion items").max(300, "Invalid completion items"),
-    photos: z.array(completionPhotoSchema, { error: "Invalid photos input" }).min(1, "Invalid photos input").max(6, "Invalid photos input"),
+    photos: z.array(completionPhotoDataUrlSchema, { error: "Invalid photos input" }).min(1, "Invalid photos input").max(6, "Invalid photos input"),
     note: z.string({ error: "Invalid note input" }).max(2_000, "Invalid note input").optional(),
 }).strict()
 

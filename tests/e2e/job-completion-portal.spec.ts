@@ -20,7 +20,10 @@ async function capture(page: Page, name: string, fullPage = true) {
 
 
 const PORTAL_TOKEN = "job-done-portal-token-0123456789abcdef"
-const PHOTO = `data:image/png;base64,${readFileSync(path.join(process.cwd(), "public/hero-contractor.png")).toString("base64")}`
+const PHOTO_BYTES = readFileSync(path.join(process.cwd(), "public/hero-contractor.png"))
+const PHOTO = `data:image/png;base64,${PHOTO_BYTES.toString("base64")}`
+const OWNER_ID = "00000000-0000-4000-8000-000000000001"
+const STORED_PHOTO = `${OWNER_ID}/estimate-job-complete/33333333-3333-4333-8333-333333333333.jpeg`
 const LONG_SUMMARY = "Replaced the kitchen sink drain and P-trap, then ran water for ten minutes to check every joint. "
     .repeat(4)
     .concat("\nThe old shut-off valve was seized, so we left it in place — ask us if you want it swapped next visit.")
@@ -65,14 +68,28 @@ function makePortalSnapshot(overrides: JsonRecord = {}): JsonRecord {
     }
 }
 
-async function openPortal(page: Page, next: NextFixture, snapshot: JsonRecord, status = "approved") {
+/** Returns the Storage paths the page asked to sign. */
+async function openPortal(page: Page, next: NextFixture, snapshot: JsonRecord, status = "approved"): Promise<string[]> {
+    const signRequests: string[] = []
     await page.setViewportSize({ width: 375, height: 812 })
-    next.onFetch((request) => {
+    // Signed URLs point at the (mocked) Supabase host: serve the image bytes from the browser side.
+    await page.route("**/storage/v1/object/sign/completion-photos/**", (route) =>
+        route.fulfill({ status: 200, contentType: "image/png", body: PHOTO_BYTES }))
+    next.onFetch(async (request) => {
         const url = new URL(request.url)
+        if (request.method === "POST" && url.pathname.endsWith("/storage/v1/object/sign/completion-photos")) {
+            const body = await request.json() as { paths: string[] }
+            signRequests.push(...body.paths)
+            return new Response(JSON.stringify(body.paths.map((photoPath) => ({
+                path: photoPath,
+                signedURL: `/object/sign/completion-photos/${photoPath}?token=signed-test-token`,
+                error: null,
+            }))), { headers: { "content-type": "application/json" } })
+        }
         if (request.method === "GET" && url.pathname.endsWith("/rest/v1/estimate_share_links")) {
             return new Response(JSON.stringify([{
                 id: "share-job-done",
-                user_id: "00000000-0000-4000-8000-000000000001",
+                user_id: OWNER_ID,
                 // Not a UUID, so the page skips the live payment-state read and trusts the snapshot.
                 estimate_id: "estimate-job-complete",
                 share_url: `https://snapquote.test/q/${PORTAL_TOKEN}`,
@@ -87,6 +104,7 @@ async function openPortal(page: Page, next: NextFixture, snapshot: JsonRecord, s
     })
     await page.goto(`/q/${PORTAL_TOKEN}`)
     await expect(page.getByTestId("customer-quote-page")).toBeVisible()
+    return signRequests
 }
 
 test("portal: unpaid completion shows balance, checklist, extra work, and the quote once", async ({ page, next }) => {
@@ -210,4 +228,39 @@ test("portal: a completion on a viewed quote shows payment only, no approve form
     await expect(page.getByTestId("customer-quote-change-button")).toHaveCount(0)
     await expect(page.getByTestId("customer-quote-message-input")).toHaveCount(0)
     await expect(page.getByRole("link", { name: "Pay balance" })).toHaveCount(1)
+})
+
+test("portal: Storage photos load through signed URLs, legacy data URLs still show, foreign paths never sign", async ({ page, next }) => {
+    const foreignPhoto = STORED_PHOTO.replace(OWNER_ID, "00000000-0000-4000-8000-000000000002")
+    const signRequests = await openPortal(page, next, makePortalSnapshot({
+        completion: {
+            ...(makePortalSnapshot().completion as JsonRecord),
+            photos: [STORED_PHOTO, PHOTO, foreignPhoto],
+            items: [
+                { itemId: "item-drain", done: true, photoIndexes: [0] },
+                { itemId: "item-ptrap", done: true, photoIndexes: [2] },
+                { itemId: "item-leak", done: true, photoIndexes: [1] },
+            ],
+        },
+    }))
+
+    expect(signRequests).toEqual([STORED_PHOTO])
+    const completion = page.getByTestId("customer-job-completion")
+    const stored = completion.getByRole("img", { name: "Remove old drain, photo 1" })
+    await expect(stored).toHaveAttribute("src", new RegExp(`/storage/v1/object/sign/completion-photos/${STORED_PHOTO}\\?token=signed-test-token$`))
+    await expect.poll(() => stored.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0)
+    await expect(completion.getByRole("img", { name: "Leak test, photo 1" })).toHaveAttribute("src", /^data:image\/png;base64,/)
+    await expect(completion.getByTestId("customer-completion-photo-unavailable")).toHaveCount(1)
+    await expect(completion.getByRole("img", { name: "Install P-trap, photo 1 could not load" })).toBeVisible()
+
+    // The server HTML (inline RSC payload included) never carries the foreign path or any raw, unsigned Storage path.
+    const html = await page.content()
+    expect(html).not.toContain(foreignPhoto)
+    expect(html).toContain(STORED_PHOTO)
+    expect(html).not.toMatch(new RegExp(`${STORED_PHOTO.replaceAll(".", "\\.")}(?!\\?token=)`))
+
+    await completion.getByRole("button", { name: "Remove old drain, photo 1" }).click()
+    await expect(page.getByRole("dialog", { name: "Remove old drain" }).getByRole("img")).toHaveAttribute("src", /token=signed-test-token$/)
+    await page.keyboard.press("Escape")
+    await capture(page, "storage-photos-375")
 })

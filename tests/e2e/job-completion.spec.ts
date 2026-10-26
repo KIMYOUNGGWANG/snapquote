@@ -77,12 +77,15 @@ type Mocks = {
     cloudRows: JsonRecord[]
     finalizeCalls: JsonRecord[]
     shareLinkPosts: JsonRecord[]
+    /** Storage object paths uploaded to the completion-photos bucket. */
+    photoUploads: string[]
+    photoUploadFailures?: number
     smsPayloads: JsonRecord[]
     estimateUpserts: JsonRecord[]
 }
 
 async function routeApp(page: Page, options: Partial<Mocks> = {}): Promise<Mocks> {
-    const mocks: Mocks = { finalizeCalls: [], shareLinkPosts: [], smsPayloads: [], estimateUpserts: [], completionReportCalls: 0, cloudRows: [], ...options }
+    const mocks: Mocks = { finalizeCalls: [], shareLinkPosts: [], photoUploads: [], smsPayloads: [], estimateUpserts: [], completionReportCalls: 0, cloudRows: [], ...options }
     const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) })
 
     await page.route("**/auth/v1/user**", (route) => route.fulfill(json({
@@ -106,6 +109,16 @@ async function routeApp(page: Page, options: Partial<Mocks> = {}): Promise<Mocks
             return
         }
         await route.fulfill(json({ ok: true, shareUrl: PORTAL_URL, portal: { status: "approved", approvedAt: "2026-10-21T08:00:00.000Z" } }))
+    })
+    await page.route("**/storage/v1/object/completion-photos/**", async (route) => {
+        if ((mocks.photoUploadFailures ?? 0) > 0) {
+            mocks.photoUploadFailures = (mocks.photoUploadFailures ?? 0) - 1
+            await route.fulfill(json({ statusCode: "500", error: "Internal", message: "Storage is down" }, 500))
+            return
+        }
+        const objectPath = decodeURIComponent(new URL(route.request().url()).pathname.split("/object/completion-photos/")[1])
+        mocks.photoUploads.push(objectPath)
+        await route.fulfill(json({ Id: `object-${mocks.photoUploads.length}`, Key: `completion-photos/${objectPath}` }))
     })
     await page.route("**/api/completion-report", async (route) => {
         mocks.completionReportCalls += 1
@@ -338,7 +351,12 @@ test("approved quote: photos, AI review, extra work, one send, SMS carries the p
     const completion = snapshot.completion as JsonRecord
     expect(completion.amountPaid).toBe(500)
     expect(completion.balanceDue).toBe(1340)
-    expect((completion.photos as string[]).length).toBe(2)
+    // Photos went to Storage once each; the snapshot carries their paths, never the image bytes.
+    expect(mocks.photoUploads).toHaveLength(2)
+    for (const photo of mocks.photoUploads) {
+        expect(photo).toMatch(/^00000000-0000-4000-8000-000000000001\/estimate-job-complete\/[0-9a-f-]{36}\.jpeg$/)
+    }
+    expect(completion.photos).toEqual(mocks.photoUploads)
     expect(completion.items).toEqual([
         { itemId: "item-drain", done: true, photoIndexes: [0] },
         { itemId: "item-ptrap", done: true, photoIndexes: [] },
@@ -358,6 +376,7 @@ test("approved quote: photos, AI review, extra work, one send, SMS carries the p
     expect(stored?.status).toBe("sent")
     expect(stored?.paymentLink).toBe(BALANCE_LINK)
     expect((stored?.completion as JsonRecord | undefined)?.completedAt).toMatch(/Z$/)
+    expect((stored?.completion as JsonRecord | undefined)?.photos).toEqual(mocks.photoUploads)
     // Stored past the server's finalize time + LWW buffer, so sync pushes the completion.
     expect(Date.parse(String(stored?.updatedAt))).toBeGreaterThan(Date.parse(String(mocks.finalizeUpdatedAt)) + 1000)
 
@@ -537,6 +556,9 @@ test("finalize OK then share-link fails: retry resumes without a second finalize
     expect(mocks.finalizeCalls).toHaveLength(1)
     const completion = (mocks.shareLinkPosts.at(-1)?.estimate as JsonRecord).completion as JsonRecord
     expect(completion.balanceDue).toBe(0)
+    // Resume reuses the uploaded path: no second upload.
+    expect(mocks.photoUploads).toHaveLength(1)
+    expect(completion.photos).toEqual(mocks.photoUploads)
     const laterPushes = mocks.estimateUpserts.slice(upsertsAtFinalize).filter((row) => row.id === "estimate-job-complete")
     expect(laterPushes.length).toBeGreaterThan(0)
     expect(laterPushes.every((row) => row.status === "paid" && row.payment_link === null)).toBe(true)
@@ -544,6 +566,37 @@ test("finalize OK then share-link fails: retry resumes without a second finalize
     expect(stored?.status).toBe("paid")
     expect(stored?.pendingCompletion).toBeUndefined()
     expect((stored?.completion as JsonRecord | undefined)?.items).toBeDefined()
+})
+
+test("a failed photo upload stops the send before any push or finalize", async ({ page }) => {
+    const mocks = await routeApp(page, {
+        photoUploadFailures: 1,
+        completionReport: {
+            status: 200,
+            body: { ok: true, summary: "All done.", items: [{ itemId: "item-drain", photoIndexes: [0], confidence: "high" }] },
+        },
+    })
+    await seedEstimates(page, [makeEstimate()])
+    await openCompletionSheet(page)
+
+    await addPhotos(page, ["drain.png"])
+    await page.getByTestId("completion-match-button").click()
+    const upsertsBeforeSend = mocks.estimateUpserts.length
+    await page.getByTestId("completion-send-button").click()
+
+    await expect(page.getByTestId("completion-send-error")).toContainText("Couldn't upload the photos")
+    expect(mocks.finalizeCalls).toHaveLength(0)
+    expect(mocks.shareLinkPosts).toHaveLength(0)
+    expect(mocks.estimateUpserts.length).toBe(upsertsBeforeSend)
+    const stored = await readEstimate(page, "estimate-job-complete")
+    expect(stored?.pendingCompletion).toBeUndefined()
+    expect(stored?.completion).toBeUndefined()
+
+    // Retry uploads and sends.
+    await page.getByTestId("completion-send-button").click()
+    await expect(page.getByRole("dialog", { name: "Text completion report" })).toBeVisible()
+    expect(mocks.photoUploads).toHaveLength(1)
+    expect(mocks.finalizeCalls).toHaveLength(1)
 })
 
 const storedCompletion = {
