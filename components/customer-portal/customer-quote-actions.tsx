@@ -23,6 +23,8 @@ type CustomerQuoteActionsProps = {
     paymentLinkType?: CustomerPortalPaymentLinkType
     paymentComplete?: boolean
     hasCompletionBalance?: boolean
+    /** A completion report exists: no decision form, payment state only. */
+    jobComplete?: boolean
 }
 
 function getErrorMessage(error: unknown): string {
@@ -30,9 +32,9 @@ function getErrorMessage(error: unknown): string {
     return "Something went wrong. Please try again."
 }
 
-function getDecisionCopy(status: CustomerPortalStatus, paymentComplete: boolean, hasCompletionBalance: boolean): string {
+function getDecisionCopy(status: CustomerPortalStatus, paymentComplete: boolean, jobComplete: boolean, hasCompletionBalance: boolean): string {
     if (paymentComplete) return "Payment received. This quote is already paid."
-    if (hasCompletionBalance) return "Your job is done. The remaining balance is ready to pay."
+    if (jobComplete) return hasCompletionBalance ? "Your job is done. The remaining balance is ready to pay." : "Your job is done."
     if (status === "approved") return "Approved. The contractor has your approval."
     if (status === "change_requested") return "Change request sent. The contractor can follow up with the next version."
     if (status === "viewed") return "Viewed. Approve this quote or request a change below."
@@ -46,6 +48,7 @@ export function CustomerQuoteActions({
     paymentLinkType,
     paymentComplete = false,
     hasCompletionBalance = false,
+    jobComplete = false,
 }: CustomerQuoteActionsProps) {
     const [status, setStatus] = useState<CustomerPortalStatus>(initialStatus)
     const [customerName, setCustomerName] = useState("")
@@ -104,7 +107,7 @@ export function CustomerQuoteActions({
         }
     }
 
-    const decisionIsComplete = paymentComplete || status === "approved" || status === "change_requested"
+    const decisionIsComplete = jobComplete || paymentComplete || status === "approved" || status === "change_requested"
     const paymentAction = getCustomerPortalPaymentActionState(status, Boolean(paymentLink?.trim()), paymentLinkType, paymentComplete, hasCompletionBalance)
     const paymentGateClassName = paymentAction.tone === "success"
         ? "mt-3 rounded-lg border border-emerald-300/25 bg-emerald-500/10 px-3 py-2 text-sm leading-6 text-emerald-100"
@@ -117,9 +120,9 @@ export function CustomerQuoteActions({
                     <CheckCircle2 className="h-5 w-5" />
                 </div>
                 <div className="min-w-0">
-                    <h2 className="text-lg font-semibold text-white">Quote decision</h2>
+                    <h2 className="text-lg font-semibold text-white">{jobComplete ? "Payment" : "Quote decision"}</h2>
                     <p className="mt-1 text-sm leading-6 text-slate-400" data-testid="customer-quote-decision-status">
-                        {getDecisionCopy(status, paymentComplete, hasCompletionBalance)}
+                        {getDecisionCopy(status, paymentComplete, jobComplete, hasCompletionBalance)}
                     </p>
                 </div>
             </div>
@@ -210,13 +213,14 @@ export function CustomerQuoteActions({
             ) : null}
 
             {paymentLink && paymentAction.showPayLink ? (
-                <Button asChild className="mt-3 h-11 w-full rounded-lg bg-emerald-600 text-white hover:bg-emerald-500" data-testid="customer-quote-pay-link">
+                // With a completion report, the report's own Pay button is the one on mobile.
+                <Button asChild className={`mt-3 h-11 w-full rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 ${jobComplete ? "hidden lg:inline-flex" : ""}`} data-testid="customer-quote-pay-link">
                     <a href={paymentLink} target="_blank" rel="noreferrer">
                         <CreditCard className="mr-2 h-4 w-4" />
                         {paymentAction.buttonLabel}
                     </a>
                 </Button>
-            ) : paymentAction.helperText ? (
+            ) : paymentAction.helperText && !(jobComplete && paymentComplete) ? (
                 <p
                     className={paymentGateClassName}
                     data-testid="customer-quote-payment-gate"

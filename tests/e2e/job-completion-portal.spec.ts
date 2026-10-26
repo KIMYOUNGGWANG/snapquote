@@ -12,6 +12,12 @@ type JsonRecord = Record<string, unknown>
 const SCREENS_DIR = path.join(process.cwd(), ".superpowers/sdd/2026-10-25-job-completion-report/screens")
 const BALANCE_LINK = "https://pay.snapquote.test/balance-link"
 
+/** Screenshots for design review: `CAPTURE_SCREENS=1 pnpm test:e2e tests/e2e/job-completion-portal.spec.ts`. */
+async function capture(page: Page, name: string, fullPage = true) {
+    if (process.env.CAPTURE_SCREENS !== "1") return
+    await page.screenshot({ path: path.join(SCREENS_DIR, `${name}.png`), fullPage, animations: "disabled" })
+}
+
 
 const PORTAL_TOKEN = "job-done-portal-token-0123456789abcdef"
 const PHOTO = `data:image/png;base64,${readFileSync(path.join(process.cwd(), "public/hero-contractor.png")).toString("base64")}`
@@ -59,8 +65,8 @@ function makePortalSnapshot(overrides: JsonRecord = {}): JsonRecord {
     }
 }
 
-async function openPortal(page: Page, next: NextFixture, snapshot: JsonRecord, viewport = { width: 375, height: 812 }) {
-    await page.setViewportSize(viewport)
+async function openPortal(page: Page, next: NextFixture, snapshot: JsonRecord, status = "approved") {
+    await page.setViewportSize({ width: 375, height: 812 })
     next.onFetch((request) => {
         const url = new URL(request.url)
         if (request.method === "GET" && url.pathname.endsWith("/rest/v1/estimate_share_links")) {
@@ -71,9 +77,9 @@ async function openPortal(page: Page, next: NextFixture, snapshot: JsonRecord, v
                 estimate_id: "estimate-job-complete",
                 share_url: `https://snapquote.test/q/${PORTAL_TOKEN}`,
                 estimate_snapshot: snapshot,
-                status: "approved",
+                status,
                 viewed_at: "2026-10-21T08:00:00.000Z",
-                approved_at: "2026-10-21T08:00:00.000Z",
+                ...(status === "approved" ? { approved_at: "2026-10-21T08:00:00.000Z" } : {}),
                 profiles: { business_name: "Rivera Plumbing", phone: "+1 416 555 0142" },
             }]), { headers: { "content-type": "application/json" } })
         }
@@ -107,11 +113,16 @@ test("portal: unpaid completion shows balance, checklist, extra work, and the qu
     await expect(page.getByTestId("customer-quote-added-on-site-total")).toHaveText("$100.00")
     await expect(page.getByTestId("customer-quote-subtotal")).toHaveText("$1,840.00")
     await expect(page.getByTestId("customer-quote-total")).toHaveText("$2,079.20")
-    await expect(page.getByTestId("customer-quote-pay-link")).toHaveText("Pay balance")
+    await expect(page.getByTestId("customer-quote-next-step")).toHaveCount(0)
+    await expect(page.getByTestId("customer-quote-approve-button")).toHaveCount(0)
+    // Mobile: only the report's button; the sidebar one is hidden below lg.
+    await expect(page.getByRole("link", { name: "Pay balance" })).toHaveCount(1)
 
-    await page.screenshot({ path: path.join(SCREENS_DIR, "task10-unpaid-375.png"), fullPage: true, animations: "disabled" })
+    await capture(page, "task10-unpaid-375")
     await page.setViewportSize({ width: 1280, height: 800 })
-    await page.screenshot({ path: path.join(SCREENS_DIR, "task10-unpaid-1280.png"), fullPage: true, animations: "disabled" })
+    await expect(page.getByTestId("customer-quote-pay-link")).toBeVisible()
+    await expect(page.getByRole("link", { name: "Pay balance" })).toHaveCount(2)
+    await capture(page, "task10-unpaid-1280")
 })
 
 test("portal: a photo opens large, Esc closes it and focus returns to the thumbnail", async ({ page, next }) => {
@@ -122,7 +133,7 @@ test("portal: a photo opens large, Esc closes it and focus returns to the thumbn
     const viewer = page.getByRole("dialog", { name: "Remove old drain" })
     await expect(viewer).toBeVisible()
     await expect(viewer.getByRole("img", { name: "Remove old drain, photo 1" })).toBeVisible()
-    await page.screenshot({ path: path.join(SCREENS_DIR, "task10-photo-375.png"), animations: "disabled" })
+    await capture(page, "task10-photo-375", false)
 
     await page.keyboard.press("Escape")
     await expect(viewer).toBeHidden()
@@ -143,10 +154,12 @@ test("portal: paid completion says paid in full and offers no payment", async ({
     await expect(completion.getByTestId("customer-completion-received")).toHaveText("$2,079.20 paid")
     await expect(page.getByRole("link", { name: "Pay balance" })).toHaveCount(0)
     await expect(page.getByTestId("customer-quote-status")).toHaveText(/paid/i)
+    await expect(page.getByText(/Payment received/)).toHaveCount(1)
+    await expect(page.getByTestId("customer-quote-next-step")).toHaveCount(0)
 
-    await page.screenshot({ path: path.join(SCREENS_DIR, "task10-paid-375.png"), fullPage: true, animations: "disabled" })
+    await capture(page, "task10-paid-375")
     await page.setViewportSize({ width: 1280, height: 800 })
-    await page.screenshot({ path: path.join(SCREENS_DIR, "task10-paid-1280.png"), fullPage: true, animations: "disabled" })
+    await capture(page, "task10-paid-1280")
 })
 
 test("portal: no extra work, an unconfirmed line and a long summary", async ({ page, next }) => {
@@ -179,5 +192,16 @@ test("portal: no extra work, an unconfirmed line and a long summary", async ({ p
     await expect(page.getByTestId("customer-quote-line-item")).toHaveCount(3)
     await expect(page.getByTestId("customer-quote-added-on-site-total")).toHaveCount(0)
 
-    await page.screenshot({ path: path.join(SCREENS_DIR, "task10-no-extra-375.png"), fullPage: true, animations: "disabled" })
+    await capture(page, "task10-no-extra-375")
+})
+
+test("portal: a completion on a viewed quote shows payment only, no approve form", async ({ page, next }) => {
+    await openPortal(page, next, makePortalSnapshot(), "viewed")
+
+    await expect(page.getByTestId("customer-job-completion").getByRole("heading", { name: "Your job is done" })).toBeVisible()
+    await expect(page.getByTestId("customer-quote-actions").getByRole("heading", { name: "Payment" })).toBeVisible()
+    await expect(page.getByTestId("customer-quote-approve-button")).toHaveCount(0)
+    await expect(page.getByTestId("customer-quote-change-button")).toHaveCount(0)
+    await expect(page.getByTestId("customer-quote-message-input")).toHaveCount(0)
+    await expect(page.getByRole("link", { name: "Pay balance" })).toHaveCount(1)
 })

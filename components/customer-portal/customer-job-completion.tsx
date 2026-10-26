@@ -192,17 +192,20 @@ export function CustomerJobCompletion({
                             </li>
                         ))}
                     </ul>
-                    {otherPhotos.length > 0 ? (
-                        <div className="mt-3 border-t border-white/10 pt-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">More photos</p>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                                {otherPhotos.map((photoIndex, position) => {
-                                    const label = `Job photo ${position + 1}`
-                                    return <PhotoThumb key={photoIndex} src={completion.photos[photoIndex]} label={label} onOpen={open(photoIndex, label, "Job photos")} />
-                                })}
-                            </div>
-                        </div>
-                    ) : null}
+                </div>
+            ) : null}
+
+            {otherPhotos.length > 0 ? (
+                <div className="border-b border-white/10 p-4 sm:p-6" data-testid="customer-completion-more-photos">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        {rows.length > 0 ? "More photos" : "Photos"}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                        {otherPhotos.map((photoIndex, position) => {
+                            const label = `Job photo ${position + 1}`
+                            return <PhotoThumb key={photoIndex} src={completion.photos[photoIndex]} label={label} onOpen={open(photoIndex, label, "Job photos")} />
+                        })}
+                    </div>
                 </div>
             ) : null}
 

@@ -97,6 +97,7 @@ export default async function CustomerQuotePage({ params }: CustomerQuotePagePro
     // With a completion report, "Added on site" lines are listed in the report above; the quote
     // body shows them as one summary row so they are not listed twice and the totals still add up.
     const quoteLineGroups = completion ? allLineGroups.filter((group) => !group.addedOnSite) : allLineGroups
+    const addedOnSiteFiltered = quoteLineGroups.length !== allLineGroups.length
     const addedOnSiteTotal = sumLines(allLineGroups) - sumLines(quoteLineGroups)
     const subtotal = sumLines(allLineGroups)
     const taxAmount = estimate.taxAmount || 0
@@ -234,7 +235,7 @@ export default async function CustomerQuotePage({ params }: CustomerQuotePagePro
                             </div>
 
                             <div className="ml-auto mt-4 w-full max-w-sm space-y-2 rounded-lg border border-white/10 bg-slate-950/60 p-3">
-                                {addedOnSiteTotal > 0 ? (
+                                {addedOnSiteFiltered ? (
                                     <div className="flex justify-between text-sm text-amber-200/90">
                                         <span>Added on site (see above)</span>
                                         <span data-testid="customer-quote-added-on-site-total">{formatCurrency(addedOnSiteTotal, currency)}</span>
@@ -265,14 +266,18 @@ export default async function CustomerQuotePage({ params }: CustomerQuotePagePro
                         paymentLinkType={estimate.paymentLinkType}
                         paymentComplete={paymentComplete}
                         hasCompletionBalance={hasCompletionBalance}
+                        jobComplete={Boolean(completion)}
                     />
 
-                    <CustomerQuoteNextStep
-                        initialStatus={quote.status}
-                        paymentComplete={paymentComplete}
-                        paymentTerms={estimate.paymentTerms}
-                        closingNote={estimate.closingNote}
-                    />
+                    {/* The completion report already says what happens next. */}
+                    {completion ? null : (
+                        <CustomerQuoteNextStep
+                            initialStatus={quote.status}
+                            paymentComplete={paymentComplete}
+                            paymentTerms={estimate.paymentTerms}
+                            closingNote={estimate.closingNote}
+                        />
+                    )}
                 </aside>
             </div>
         </main>
