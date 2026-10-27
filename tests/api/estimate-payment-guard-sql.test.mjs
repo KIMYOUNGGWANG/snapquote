@@ -18,7 +18,7 @@ function hasInitdb() {
 }
 
 const MIGRATION = readFileSync(
-  new URL("../../supabase/migrations/20261026000000_guard_estimate_payment_state.sql", import.meta.url),
+  new URL("../../supabase/migrations/20261026000001_guard_estimate_payment_state.sql", import.meta.url),
   "utf8"
 )
 const PAYMENT_COLUMNS = ["status", "sent_at", "payment_completed_at", "payment_link", "payment_link_id", "payment_link_type", "payment_state_version"]
