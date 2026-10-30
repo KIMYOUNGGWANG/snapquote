@@ -50,6 +50,7 @@ prompt_v5_lite_analysis.md
 
 *.md
 !AGENTS.md
+!CLAUDE.md
 
 .env
 .env.local
