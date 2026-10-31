@@ -10,6 +10,9 @@ type WebKitAudioWindow = Window &
         webkitAudioContext?: typeof AudioContext
     }
 
+// Each transcription counts as one voice note against the plan quota, so cap its length (and Whisper cost).
+const MAX_RECORDING_SECONDS = 5 * 60
+
 interface AudioRecorderProps {
     onAudioCaptured: (audioBlob: Blob) => void
     onAudioRemoved: () => void
@@ -108,8 +111,11 @@ export function AudioRecorder({ onAudioCaptured, onAudioRemoved, className }: Au
             setIsRecording(true)
             setRecordingTime(0)
 
+            let elapsedSeconds = 0
             timerRef.current = setInterval(() => {
-                setRecordingTime((prev) => prev + 1)
+                elapsedSeconds += 1
+                setRecordingTime(elapsedSeconds)
+                if (elapsedSeconds >= MAX_RECORDING_SECONDS) stopRecording()
             }, 1000)
 
         } catch (error) {
@@ -120,14 +126,14 @@ export function AudioRecorder({ onAudioCaptured, onAudioRemoved, className }: Au
         }
     }
 
+    // Reads the recorder ref, not isRecording state, so the auto-stop timer can call it safely.
     const stopRecording = () => {
-        if (mediaRecorderRef.current && isRecording) {
-            mediaRecorderRef.current.stop()
-            setIsRecording(false)
-            if (timerRef.current) {
-                clearInterval(timerRef.current)
-                timerRef.current = null
-            }
+        if (mediaRecorderRef.current?.state !== "recording") return
+        mediaRecorderRef.current.stop()
+        setIsRecording(false)
+        if (timerRef.current) {
+            clearInterval(timerRef.current)
+            timerRef.current = null
         }
     }
 
@@ -213,7 +219,9 @@ export function AudioRecorder({ onAudioCaptured, onAudioRemoved, className }: Au
                         <div className="min-w-0">
                             <p className="text-sm font-semibold text-white">Voice note</p>
                             <p className="truncate text-xs text-slate-400">
-                                {isRecording ? `Recording ${formatTime(recordingTime)}` : "Capture spoken scope"}
+                                {isRecording
+                                    ? `${formatTime(recordingTime)} / ${formatTime(MAX_RECORDING_SECONDS)}`
+                                    : "Speak up to 5 min"}
                             </p>
                         </div>
                     </div>

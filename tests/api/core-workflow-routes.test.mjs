@@ -327,6 +327,7 @@ describe('POST /api/generate', () => {
       assert.equal(data.items[0].description, 'Pressure test and diagnostics')
       assert.equal(state.openai.chatCalls.length, 0)
       assert.equal(state.usageQuota.recordCalls.length, 1)
+      assert.equal(state.usageQuota.recordCalls[0].input.model, 'gemini-2.5-flash')
       assert.equal(state.usageQuota.recordCalls[0].input.promptTokens, 77)
       assert.equal(state.usageQuota.recordCalls[0].input.completionTokens, 21)
     } finally {

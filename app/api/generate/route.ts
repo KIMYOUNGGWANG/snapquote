@@ -247,6 +247,7 @@ export async function POST(req: Request) {
         const estimate = normalizeEstimatePayload(rawEstimate)
 
         await recordUsage(quota.context, "generate", {
+            model: provider === "gemini" ? GEMINI_GENERATE_MODEL : OPENAI_GENERATE_MODEL,
             promptTokens: modelResult.promptTokens,
             completionTokens: modelResult.completionTokens,
         })

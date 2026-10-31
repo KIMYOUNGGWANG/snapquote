@@ -19,7 +19,7 @@ export const MARKETING_PLAN_OPTIONS: Array<{
         bestFor: "Solo owner-operators who speak Spanish or Korean on site and need clean English quotes out fast",
         includes: [
             "Up to 80 field estimates per month",
-            "60 transcription minutes for multilingual on-site scope notes",
+            "60 voice notes per month for multilingual on-site scope (up to 5 min each)",
             "60 sent estimate emails per month",
             "Branded PDF header with your logo and payment link",
             "Spanish/Korean voice capture plus offline quote drafting",
@@ -35,7 +35,7 @@ export const MARKETING_PLAN_OPTIONS: Array<{
         bestFor: "Owner-operators who want cleaner English wording, faster approvals, and deposit requests",
         includes: [
             "Up to 250 estimates per month",
-            "180 transcription minutes for service-call volume",
+            "180 voice notes per month for service-call volume",
             "200 sent estimate emails per month",
             "Receipt scan, English quote cleanup, and payment-ready quotes",
         ],
