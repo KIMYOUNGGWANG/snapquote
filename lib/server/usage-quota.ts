@@ -6,6 +6,7 @@ import {
     FREE_PLAN_TRANSCRIBE_LIMIT,
 } from "@/lib/free-tier"
 import { resolveEffectivePlanTier } from "@/lib/server/effective-plan"
+import { estimateAiCostUsd } from "@/lib/ai/generate-provider"
 
 export type UsageMetric = "generate" | "transcribe" | "send_email"
 type PlanTier = "free" | "starter" | "pro" | "team"
@@ -63,6 +64,7 @@ interface EnforceUsageQuotaOptions {
 }
 
 export interface UsageRecordInput {
+    model?: string
     promptTokens?: number
     completionTokens?: number
     resendCostUsd?: number
@@ -91,8 +93,6 @@ const PLAN_LIMITS: Record<PlanTier, Record<UsageMetric, number>> = {
     },
 }
 
-const OPENAI_INPUT_COST_PER_TOKEN = 5 / 1_000_000
-const OPENAI_OUTPUT_COST_PER_TOKEN = 15 / 1_000_000
 const DEFAULT_RESEND_COST_USD = 0.001
 
 function toPlanTier(value: unknown): PlanTier {
@@ -354,8 +354,7 @@ export async function recordUsage(
 
     const promptTokens = Math.max(0, Math.floor(input.promptTokens || 0))
     const completionTokens = Math.max(0, Math.floor(input.completionTokens || 0))
-    const openaiCostIncrement =
-        promptTokens * OPENAI_INPUT_COST_PER_TOKEN + completionTokens * OPENAI_OUTPUT_COST_PER_TOKEN
+    const openaiCostIncrement = estimateAiCostUsd(input.model, promptTokens, completionTokens)
 
     const resendCostIncrement = metric === "send_email"
         ? Math.max(0, Number.isFinite(input.resendCostUsd) ? Number(input.resendCostUsd) : DEFAULT_RESEND_COST_USD)

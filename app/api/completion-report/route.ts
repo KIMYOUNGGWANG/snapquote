@@ -192,6 +192,7 @@ export async function POST(req: Request) {
             )
         }
 
+        const provider = resolveGenerateProvider()
         let modelResult: ModelResult
         let rawMatches: unknown
         try {
@@ -201,7 +202,7 @@ export async function POST(req: Request) {
                 images: photos,
             }
             modelResult =
-                resolveGenerateProvider() === "gemini"
+                provider === "gemini"
                     ? await matchWithGemini(input)
                     : await matchWithOpenAI(input)
             rawMatches = parsePotentialJsonContent(modelResult.content)
@@ -217,6 +218,7 @@ export async function POST(req: Request) {
         )
 
         await recordUsage(quota.context, "generate", {
+            model: provider === "gemini" ? GEMINI_MODEL : OPENAI_MODEL,
             promptTokens: modelResult.promptTokens,
             completionTokens: modelResult.completionTokens,
         })
