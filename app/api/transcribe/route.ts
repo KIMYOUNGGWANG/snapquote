@@ -77,6 +77,8 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Invalid file type" }, { status: 400 });
         }
 
+        // ponytail: the 5-min length cap is enforced only in the recorder UI; direct API calls can send up to 20MB.
+        // If abuse shows up, request verbose_json and bill by returned duration instead of per call.
         if (audioFile.size > 20 * 1024 * 1024) {
             return NextResponse.json({ error: "Audio file too large" }, { status: 413 });
         }

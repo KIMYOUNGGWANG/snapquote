@@ -52,8 +52,8 @@ const PRICING_SOURCE_CONTEXT: Record<PricingSource, {
         description: "Upgrade to keep processing jobsite voice notes when the crew is still moving between calls.",
         recommendedPlanTier: "starter",
         details: [
-            "Starter includes 60 transcription minutes for multilingual on-site notes.",
-            "Pro raises that to 180 minutes for busier service-call volume.",
+            "Starter includes 60 voice notes a month for multilingual on-site scope.",
+            "Pro raises that to 180 voice notes for busier service-call volume.",
         ],
     },
     send_email_quota: {
