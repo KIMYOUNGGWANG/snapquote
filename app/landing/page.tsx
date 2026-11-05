@@ -268,6 +268,9 @@ export default function LandingPage() {
                                 <p className="text-gray-400 text-sm leading-relaxed">
                                     SnapQuote rewrites rough field language into clear customer-facing English with scope, parts, labor, tax, and totals you can correct before the customer sees it.
                                 </p>
+                                <p className="mt-3 text-sm leading-relaxed text-gray-200" data-testid="landing-price-source">
+                                    Save your price list once and drafts use your exact numbers. Anything not on it is marked Price TBD, not guessed.
+                                </p>
                             </div>
                         </div>
 
