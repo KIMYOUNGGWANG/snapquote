@@ -33,12 +33,20 @@ export function buildGenerateSystemPrompt(
     workflow: GenerateWorkflow = "standard",
     photoContext = ""
 ): string {
-    const city = userProfile.city || "Toronto"
     const country = userProfile.country || "Canada"
-    const taxRate = userProfile.taxRate || 13
+    const isCanada = country === "Canada"
+    const city = userProfile.city || (isCanada ? "Toronto" : "")
+    const taxRate = userProfile.taxRate ?? 13
     const businessName = userProfile.businessName || "Our Company"
-    const currencyCode = country === "Canada" ? "CAD" : "USD"
+    const currencyCode = isCanada ? "CAD" : "USD"
     const priceList = userProfile.priceList || ""
+    const marketPricingGuidance = isCanada
+        ? `   - IF price missing: Estimate using **Canadian market pricing (CAD)**.
+   - Reference pricing: Home Depot Canada, Rona, Home Hardware, Canadian Tire.
+   - Labor rates: Based on Canadian provincial averages ($60-$120/hr depending on trade).`
+        : `   - IF price missing: Estimate using **US market pricing (USD)** for the contractor's location.
+   - Reference pricing: Home Depot, Lowe's, Ferguson, local supply houses.
+   - Labor rates: Based on typical US regional rates for the trade and location.`
 
     const priceListSection = priceList ? `
 ═══════════════════════════════════════
@@ -85,7 +93,7 @@ You are an expert North American Trade Estimator.
 Goal: Create a professional, DETAILED estimate from rough notes.
 
 ${priceListSection}CONTEXT:
-- Location: ${city}, ${country}
+- Location: ${city ? `${city}, ` : ""}${country}
 - Tax Rate: ${taxRate}%
 - Business: ${businessName}
 - ${projectContext}
@@ -124,7 +132,7 @@ CRITICAL INSTRUCTIONS
 
 3. 🌐 LANGUAGE PROCESSING (Spanish/Korean/English):
    - The user is a professional working in North America.
-   - **ASSUME ALL CURRENCY IS LOCAL (\${currencyCode}).**
+   - **ASSUME ALL CURRENCY IS LOCAL (${currencyCode}).**
    - ${getSourceLanguageGuidance(sourceLanguage)}
    - Translate Spanish or Korean trade terms into professional English.
    - Keep customer-facing output in English for all fields.
@@ -139,9 +147,7 @@ CRITICAL INSTRUCTIONS
 
 5. 🛡️ PRICING LOGIC:
    - IF price provided: Distribute across parts/labor/service logically.
-   - IF price missing: Estimate using **Canadian market pricing (CAD)**.
-   - Reference pricing: Home Depot Canada, Rona, Home Hardware, Canadian Tire.
-   - Labor rates: Based on Canadian provincial averages ($60-$120/hr depending on trade).
+${marketPricingGuidance}
    - IF price > $5,000: Add warning "High-value estimate - please verify".
 
 6. 💸 AUTO-UPSELL OPTIONS (Good-Better-Best):
@@ -195,7 +201,7 @@ Response must be raw JSON. Use the new professional format:
     }
   ],
   "summary_note": "Concise scope summary.",
-  "payment_terms": "\${country === 'Canada' ? 'Payment due upon completion. E-transfer or credit card accepted. HST applies.' : 'Payment due upon completion. Check, Zelle, or card accepted.'}",
+  "payment_terms": "${isCanada ? "Payment due upon completion. E-transfer or credit card accepted. HST applies." : "Payment due upon completion. Check, Zelle, or card accepted."}",
   "closing_note": "Thank you for choosing \${businessName}. We stand behind our work with a 90-day guarantee.",
   "warnings": [],
   "upsellOptions": [

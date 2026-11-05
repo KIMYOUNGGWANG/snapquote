@@ -3,7 +3,8 @@ import { customerQuoteSnapshotSchema } from "@/lib/validation/api-schemas"
 import { withAuthHeaders } from "@/lib/auth-headers"
 import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
 import { computeBalanceDue } from "@/lib/estimates/balance"
-import type { LocalEstimate } from "@/lib/estimates-storage"
+import { getProfile, type LocalEstimate } from "@/lib/estimates-storage"
+import { countryForStateProvince } from "@/lib/profile-validation"
 import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
 
 export type CustomerQuoteSnapshotInput = z.infer<typeof customerQuoteSnapshotSchema>
@@ -81,7 +82,7 @@ export function buildCustomerQuoteSnapshot(
         taxRate: estimate.taxRate || 0,
         taxAmount: estimate.taxAmount || 0,
         totalAmount: estimate.totalAmount || 0,
-        currency: "CAD",
+        currency: countryForStateProvince(getProfile()?.state_province) === "Canada" ? "CAD" : "USD",
         paymentLink: resolvedPaymentLink,
         paymentLinkType: resolvedPaymentLink ? (resolvedPaymentLinkType || "custom") : undefined,
         paymentStatus: isEstimatePaidLike(estimate) ? "paid" : undefined,

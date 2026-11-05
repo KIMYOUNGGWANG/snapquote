@@ -22,6 +22,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { saveEstimate, generateEstimateNumber, getProfile, saveProfile, getEstimates, updateEstimate } from "@/lib/estimates-storage"
 import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI, getClients, learnFromSentEstimate, type Client } from "@/lib/db"
 import type { BusinessInfo, EstimateItem, EstimateSection, LocalEstimate } from "@/lib/estimates-storage"
+import { countryForStateProvince } from "@/lib/profile-validation"
 import { normalizeCategory, normalizeEstimateItem, normalizeEstimatePayload, normalizeUnit, toSafeNumber, type EstimateDraft } from "@/lib/estimates/normalize"
 import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
 import { countEditedLines, getLearnableItems, wasEstimateAlreadySent } from "@/lib/price-memory"
@@ -1278,7 +1279,7 @@ function NewEstimatePageContent() {
         setAudioBlob(null)
         setShowDemoTutorial(false)
         setStep("input")
-        setTaxRate(businessProfile?.tax_rate || 13)
+        setTaxRate(businessProfile?.tax_rate ?? 13)
         replaceComposerUrl("/new-estimate")
     }, [businessProfile?.tax_rate, clearUnsentCaptureDraft, replaceComposerUrl, resetDraftMeta, resetPaymentLinkState])
 
@@ -1939,9 +1940,9 @@ function NewEstimatePageContent() {
                         ? { photoContext: photoContext.trim() }
                         : {}),
                     userProfile: businessProfile ? {
-                        city: businessProfile.address?.split(',')[0] || "Toronto",
-                        country: "Canada",
-                        taxRate: businessProfile.tax_rate || 13,
+                        city: businessProfile.address?.split(',')[0] || undefined,
+                        country: countryForStateProvince(businessProfile.state_province),
+                        taxRate: businessProfile.tax_rate ?? 13,
                         businessName: businessProfile.business_name || "Our Company",
                         priceList: priceListForAI
                     } : { priceList: priceListForAI }

@@ -4,8 +4,7 @@ import { describe, test } from 'node:test'
 import { buildGenerateSystemPrompt } from '../../lib/ai/generate-prompt.ts'
 
 describe('generate system prompt', () => {
-  test('preserves escaped output placeholder literals in standard prompts', () => {
-    // Given: a profile whose values would be obvious if placeholders were accidentally interpolated.
+  test('uses US currency, pricing, and payment terms for a USA profile', () => {
     const prompt = buildGenerateSystemPrompt(
       {
         country: 'USA',
@@ -15,22 +14,25 @@ describe('generate system prompt', () => {
       'es'
     )
 
-    // When: the prompt is assembled for a standard estimate.
-    // Then: legacy output-template placeholders remain literal inside the prompt text.
-    assert.match(prompt, /\*\*ASSUME ALL CURRENCY IS LOCAL \(\$\{currencyCode\}\)\.\*\*/)
-    assert.match(
-      prompt,
-      /"payment_terms": "\$\{country === 'Canada' \? 'Payment due upon completion\. E-transfer or credit card accepted\. HST applies\.' : 'Payment due upon completion\. Check, Zelle, or card accepted\.'\}"/
-    )
+    assert.match(prompt, /\*\*ASSUME ALL CURRENCY IS LOCAL \(USD\)\.\*\*/)
+    assert.match(prompt, /US market pricing \(USD\)/)
+    assert.match(prompt, /"payment_terms": "Payment due upon completion\. Check, Zelle, or card accepted\."/)
+    assert.match(prompt, /- Location: USA\n/)
+    assert.doesNotMatch(prompt, /Canadian market pricing|Toronto|\$\{currencyCode\}/)
+    // closing_note keeps its literal placeholder; only country-dependent fields changed.
     assert.match(
       prompt,
       /"closing_note": "Thank you for choosing \$\{businessName\}\. We stand behind our work with a 90-day guarantee\."/
     )
-    assert.doesNotMatch(prompt, /\*\*ASSUME ALL CURRENCY IS LOCAL \(USD\)\.\*\*/)
-    assert.doesNotMatch(prompt, /Thank you for choosing Pipe Co/)
   })
 
-  test('preserves escaped output placeholder literals in photo estimate prompts', () => {
+  test('keeps a 0% tax rate instead of falling back to 13%', () => {
+    const prompt = buildGenerateSystemPrompt({ country: 'USA', taxRate: 0 })
+
+    assert.match(prompt, /- Tax Rate: 0%/)
+  })
+
+  test('uses Canadian currency and pricing for a Canada photo estimate', () => {
     // Given: photo estimate mode with business context and photo context.
     const prompt = buildGenerateSystemPrompt(
       {
@@ -44,14 +46,15 @@ describe('generate system prompt', () => {
     )
 
     // When: the prompt is assembled for photo estimating.
-    // Then: photo instructions are present and output-template placeholders remain literal.
+    // Then: photo instructions are present and Canadian pricing is used.
     assert.match(prompt, /PHOTO ESTIMATE MODE/)
     assert.match(prompt, /Customer wants a finish-ready repair/)
-    assert.match(prompt, /\*\*ASSUME ALL CURRENCY IS LOCAL \(\$\{currencyCode\}\)\.\*\*/)
-    assert.match(prompt, /"payment_terms": "\$\{country === 'Canada' \?/)
+    assert.match(prompt, /\*\*ASSUME ALL CURRENCY IS LOCAL \(CAD\)\.\*\*/)
+    assert.match(prompt, /Canadian market pricing \(CAD\)/)
+    assert.match(prompt, /- Location: Toronto, Canada\n/)
+    assert.match(prompt, /"payment_terms": "Payment due upon completion\. E-transfer or credit card accepted\. HST applies\."/)
     assert.match(prompt, /Thank you for choosing \$\{businessName\}/)
-    assert.doesNotMatch(prompt, /\*\*ASSUME ALL CURRENCY IS LOCAL \(CAD\)\.\*\*/)
-    assert.doesNotMatch(prompt, /Thank you for choosing SnapQuote Field/)
+    assert.doesNotMatch(prompt, /US market pricing/)
   })
 
   test('tells the model to keep the price list item name as the line description', () => {
