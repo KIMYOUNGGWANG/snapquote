@@ -20,12 +20,12 @@ import NextLink from "next/link"
 import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { saveEstimate, generateEstimateNumber, getProfile, saveProfile, getEstimates, updateEstimate } from "@/lib/estimates-storage"
-import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI, getClients, learnFromSentEstimate, type Client } from "@/lib/db"
+import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceList, getClients, learnFromSentEstimate, type Client } from "@/lib/db"
 import type { BusinessInfo, EstimateItem, EstimateSection, LocalEstimate } from "@/lib/estimates-storage"
 import { countryForStateProvince } from "@/lib/profile-validation"
 import { normalizeCategory, normalizeEstimateItem, normalizeEstimatePayload, normalizeUnit, toSafeNumber, type EstimateDraft } from "@/lib/estimates/normalize"
 import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
-import { countEditedLines, getLearnableItems, wasEstimateAlreadySent } from "@/lib/price-memory"
+import { countEditedLines, enforcePriceListPricing, formatPriceListForAI, getLearnableItems, selectPriceListForAI, wasEstimateAlreadySent } from "@/lib/price-memory"
 import { dismissToasts, toast } from "@/components/toast"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
@@ -1924,7 +1924,8 @@ function NewEstimatePageContent() {
             const base64Images = await Promise.all(images.map(fileToDataUrl))
 
             // Load price list for AI
-            const priceListForAI = await getPriceListForAI()
+            const priceListItemsForAI = selectPriceListForAI(await getPriceList())
+            const priceListForAI = formatPriceListForAI(priceListItemsForAI)
             const headers = await withAuthHeaders({ "Content-Type": "application/json" })
 
             const response = await fetch("/api/generate", {
@@ -1982,7 +1983,11 @@ function NewEstimatePageContent() {
             setQuotaIssue(null)
             setGenerationIssue(null)
             setPdfDeliveryIssue(null)
-            const generatedEstimate = normalizeEstimatePayload(data)
+            const generatedEstimate = enforcePriceListPricing(
+                normalizeEstimatePayload(data),
+                priceListItemsForAI,
+                captureNarrative
+            )
             aiOriginalItemsRef.current = getAllItemsFromEstimate(generatedEstimate)
             setEstimate(generatedEstimate)
             setStep("result")

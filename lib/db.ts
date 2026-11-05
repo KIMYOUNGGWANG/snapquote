@@ -3,7 +3,7 @@ import type { PriceListItem, PriceCategory, PriceUnit } from '@/types';
 import { emitOfflineQueueChanged } from "@/lib/offline-events";
 import { normalizeEstimateForLocalSave, type LocalEstimateSaveInput } from "@/lib/estimate-local-save";
 import type { EstimateItem } from "@/lib/estimates-storage";
-import { formatPriceListForAI, learnPriceList } from "@/lib/price-memory";
+import { learnPriceList } from "@/lib/price-memory";
 
 interface SnapQuoteDB extends DBSchema {
     estimates: {
@@ -341,12 +341,6 @@ export async function learnFromSentEstimate(items: readonly EstimateItem[]): Pro
     const tx = db.transaction('priceList', 'readwrite');
     await Promise.all([...changed.map((item) => tx.store.put(item)), tx.done]);
     return changed.length;
-}
-
-// Get price list formatted for AI prompt
-export async function getPriceListForAI(): Promise<string> {
-    const items = await getPriceList();
-    return formatPriceListForAI(items);
 }
 
 // ============ RECEIPTS ============
