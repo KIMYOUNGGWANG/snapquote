@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
-import { validateAndNormalizeBusinessProfile } from "../../lib/profile-validation.ts"
+import { countryForStateProvince, validateAndNormalizeBusinessProfile } from "../../lib/profile-validation.ts"
 
 describe("profile validation", () => {
     it("rejects blank business names", () => {
@@ -59,5 +59,17 @@ describe("profile validation", () => {
 
         assert.equal(result.ok, false)
         assert.equal(result.error, "Tax rate must be between 0 and 100.")
+    })
+
+    it("maps the profile State / Province choice to a country", () => {
+        assert.equal(countryForStateProvince("ON"), "Canada")
+        assert.equal(countryForStateProvince("BC"), "Canada")
+        assert.equal(countryForStateProvince("AB"), "Canada")
+        assert.equal(countryForStateProvince("CA"), "USA")
+        assert.equal(countryForStateProvince("NY"), "USA")
+        assert.equal(countryForStateProvince("OTHER"), "USA")
+        // Matches the form default ("ON") when nothing was chosen.
+        assert.equal(countryForStateProvince(undefined), "Canada")
+        assert.equal(countryForStateProvince(""), "Canada")
     })
 })

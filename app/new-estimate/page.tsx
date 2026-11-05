@@ -20,11 +20,12 @@ import NextLink from "next/link"
 import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { saveEstimate, generateEstimateNumber, getProfile, saveProfile, getEstimates, updateEstimate } from "@/lib/estimates-storage"
-import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceListForAI, getClients, learnFromSentEstimate, type Client } from "@/lib/db"
+import { savePendingAudio, getUnprocessedAudio, deletePendingAudio, getPriceList, getClients, learnFromSentEstimate, type Client } from "@/lib/db"
 import type { BusinessInfo, EstimateItem, EstimateSection, LocalEstimate } from "@/lib/estimates-storage"
+import { countryForStateProvince } from "@/lib/profile-validation"
 import { normalizeCategory, normalizeEstimateItem, normalizeEstimatePayload, normalizeUnit, toSafeNumber, type EstimateDraft } from "@/lib/estimates/normalize"
 import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
-import { countEditedLines, getLearnableItems, wasEstimateAlreadySent } from "@/lib/price-memory"
+import { countEditedLines, enforcePriceListPricing, formatPriceListForAI, getLearnableItems, selectPriceListForAI, wasEstimateAlreadySent, withoutPriceTbdMarker } from "@/lib/price-memory"
 import { dismissToasts, toast } from "@/components/toast"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
@@ -503,7 +504,9 @@ function updateEstimateItemField(
         return { ...nextItem, total: nextItem.quantity * nextItem.unit_price }
     }
     if (field === "unit_price") {
-        const nextItem = { ...item, unit_price: numericValue }
+        // A priced line is no longer "Price TBD"; dropping the marker also lets it be learned into the price list.
+        const description = numericValue > 0 ? withoutPriceTbdMarker(item.description) : item.description
+        const nextItem = { ...item, description, unit_price: numericValue }
         return { ...nextItem, total: nextItem.quantity * nextItem.unit_price }
     }
     if (field === "total") return { ...item, total: numericValue }
@@ -1278,7 +1281,7 @@ function NewEstimatePageContent() {
         setAudioBlob(null)
         setShowDemoTutorial(false)
         setStep("input")
-        setTaxRate(businessProfile?.tax_rate || 13)
+        setTaxRate(businessProfile?.tax_rate ?? 13)
         replaceComposerUrl("/new-estimate")
     }, [businessProfile?.tax_rate, clearUnsentCaptureDraft, replaceComposerUrl, resetDraftMeta, resetPaymentLinkState])
 
@@ -1321,7 +1324,7 @@ function NewEstimatePageContent() {
         const profile = getProfile()
         if (profile) {
             setBusinessProfile(profile)
-            if (profile.tax_rate) setTaxRate(profile.tax_rate)
+            setTaxRate(profile.tax_rate ?? 13)
         }
 
         // Check for duplicate estimate from history page
@@ -1923,7 +1926,8 @@ function NewEstimatePageContent() {
             const base64Images = await Promise.all(images.map(fileToDataUrl))
 
             // Load price list for AI
-            const priceListForAI = await getPriceListForAI()
+            const priceListItemsForAI = selectPriceListForAI(await getPriceList())
+            const priceListForAI = formatPriceListForAI(priceListItemsForAI)
             const headers = await withAuthHeaders({ "Content-Type": "application/json" })
 
             const response = await fetch("/api/generate", {
@@ -1939,9 +1943,9 @@ function NewEstimatePageContent() {
                         ? { photoContext: photoContext.trim() }
                         : {}),
                     userProfile: businessProfile ? {
-                        city: businessProfile.address?.split(',')[0] || "Toronto",
-                        country: "Canada",
-                        taxRate: businessProfile.tax_rate || 13,
+                        city: businessProfile.address?.split(',')[0] || undefined,
+                        country: countryForStateProvince(businessProfile.state_province),
+                        taxRate: businessProfile.tax_rate ?? 13,
                         businessName: businessProfile.business_name || "Our Company",
                         priceList: priceListForAI
                     } : { priceList: priceListForAI }
@@ -1981,7 +1985,11 @@ function NewEstimatePageContent() {
             setQuotaIssue(null)
             setGenerationIssue(null)
             setPdfDeliveryIssue(null)
-            const generatedEstimate = normalizeEstimatePayload(data)
+            const generatedEstimate = enforcePriceListPricing(
+                normalizeEstimatePayload(data),
+                priceListItemsForAI,
+                captureNarrative
+            )
             aiOriginalItemsRef.current = getAllItemsFromEstimate(generatedEstimate)
             setEstimate(generatedEstimate)
             setStep("result")

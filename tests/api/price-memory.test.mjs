@@ -3,6 +3,7 @@ import { describe, test } from 'node:test'
 
 import {
   countEditedLines,
+  enforcePriceListPricing,
   formatPriceListForAI,
   getLearnableItems,
   learnPriceList,
@@ -10,6 +11,7 @@ import {
   PRICE_LIST_AI_LIMIT,
   selectPriceListForAI,
   wasEstimateAlreadySent,
+  withoutPriceTbdMarker,
 } from '../../lib/price-memory.ts'
 
 const NOW = '2026-10-13T00:00:00.000Z'
@@ -188,5 +190,91 @@ describe('final review fixes', () => {
     const selected = selectPriceListForAI([legacy, dated])
 
     assert.deepEqual(selected.map((entry) => entry.id), ['dated', 'legacy'])
+  })
+})
+
+describe('enforcePriceListPricing', () => {
+  const draft = (items, extra = {}) => ({ items, summary_note: '', ...extra })
+  const priceList = [priceItem()]
+
+  test('leaves the draft alone when there is no price list', () => {
+    const input = draft([item({ description: 'Drywall Patch', unit_price: 95, total: 95 })])
+
+    assert.equal(enforcePriceListPricing(input, [], 'patch wall'), input)
+  })
+
+  test('marks an AI-invented price as Price TBD', () => {
+    const result = enforcePriceListPricing(
+      draft([item({ description: 'Drywall Patch', unit_price: 95, total: 95 })]),
+      priceList,
+      'toilet swap, patch wall'
+    )
+
+    assert.equal(result.items[0].unit_price, 0)
+    assert.equal(result.items[0].total, 0)
+    assert.equal(result.items[0].description, 'Drywall Patch (Price TBD)')
+  })
+
+  test('restores the price list price when the AI changed it', () => {
+    const result = enforcePriceListPricing(
+      draft([item({ unit_price: 200, total: 400, quantity: 2 })]),
+      priceList,
+      'two toilets'
+    )
+
+    assert.equal(result.items[0].unit_price, 180)
+    assert.equal(result.items[0].total, 360)
+  })
+
+  test('keeps a price the contractor said in the notes', () => {
+    const result = enforcePriceListPricing(
+      draft([
+        item({ description: 'Kitchen Sink Replacement Labor', unit_price: 600, total: 600 }),
+        item({ id: 'item-2', unit_price: 220, total: 220 }),
+      ]),
+      priceList,
+      '주방 싱크 교체, 인건비 600불, toilet this time $220'
+    )
+
+    assert.equal(result.items[0].unit_price, 600)
+    assert.equal(result.items[1].unit_price, 220)
+  })
+
+  test('keeps a stated job price split across lines', () => {
+    const result = enforcePriceListPricing(
+      draft([
+        item({ description: 'Water Heater Replacement', unit_price: 900, total: 900 }),
+        item({ id: 'item-2', description: 'Expansion Tank', unit_price: 300, total: 300 }),
+      ]),
+      priceList,
+      'swap 50 gallon heater, expansion tank, grab $1,200 minimum'
+    )
+
+    assert.deepEqual(result.items.map((entry) => entry.unit_price), [900, 300])
+  })
+
+  test('keeps a list price used under a reworded name and applies the rule to sections and upsells', () => {
+    const result = enforcePriceListPricing(
+      draft([], {
+        sections: [{ id: 's1', name: 'Bath', items: [item({ description: 'Standard Toilet Install', unit_price: 180, total: 180 })] }],
+        upsellOptions: [{ tier: 'better', title: 'Soft close seat', description: '', addedItems: [item({ description: 'Soft Close Seat', unit_price: 45, total: 45 })] }],
+      }),
+      priceList,
+      'toilet'
+    )
+
+    assert.equal(result.sections[0].items[0].unit_price, 180)
+    assert.equal(result.upsellOptions[0].addedItems[0].unit_price, 0)
+    assert.match(result.upsellOptions[0].addedItems[0].description, /\(Price TBD\)$/)
+  })
+})
+
+describe('withoutPriceTbdMarker', () => {
+  test('drops the marker so a priced line can be learned under its clean name', () => {
+    const priced = item({ description: withoutPriceTbdMarker('Drywall Patch (Price TBD)'), unit_price: 95, total: 95 })
+
+    assert.equal(priced.description, 'Drywall Patch')
+    assert.equal(withoutPriceTbdMarker('Drywall Patch (price tbd) '), 'Drywall Patch')
+    assert.deepEqual(learnPriceList([], [priced], NOW).map((entry) => entry.name), ['Drywall Patch'])
   })
 })

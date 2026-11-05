@@ -39,3 +39,10 @@ export function validateAndNormalizeBusinessProfile(profile: BusinessInfo): Prof
         },
     }
 }
+
+const CANADIAN_PROVINCE_CODES = new Set(["ON", "BC", "AB"])
+
+// Same default as the profile form ("ON"); unlisted regions ("OTHER") are treated as USA.
+export function countryForStateProvince(stateProvince: string | undefined): "Canada" | "USA" {
+    return CANADIAN_PROVINCE_CODES.has(stateProvince?.trim() || "ON") ? "Canada" : "USA"
+}
