@@ -140,8 +140,8 @@ export function wasEstimateAlreadySent(estimate: { readonly sentAt?: string | nu
 
 const STATED_AMOUNT_TOLERANCE = 0.5
 
-function withoutPriceTbdMarker(description: string): string {
-    return description.replace(/\(price tbd\)/gi, "")
+export function withoutPriceTbdMarker(description: string): string {
+    return description.replace(/\s*\(price tbd\)/gi, "").trim()
 }
 
 // ponytail: reads digits only ("$1,200", "600불", "1.2k"); spelled-out amounts fall to Price TBD for the contractor to fill.

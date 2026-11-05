@@ -11,6 +11,7 @@ import {
   PRICE_LIST_AI_LIMIT,
   selectPriceListForAI,
   wasEstimateAlreadySent,
+  withoutPriceTbdMarker,
 } from '../../lib/price-memory.ts'
 
 const NOW = '2026-10-13T00:00:00.000Z'
@@ -265,5 +266,15 @@ describe('enforcePriceListPricing', () => {
     assert.equal(result.sections[0].items[0].unit_price, 180)
     assert.equal(result.upsellOptions[0].addedItems[0].unit_price, 0)
     assert.match(result.upsellOptions[0].addedItems[0].description, /\(Price TBD\)$/)
+  })
+})
+
+describe('withoutPriceTbdMarker', () => {
+  test('drops the marker so a priced line can be learned under its clean name', () => {
+    const priced = item({ description: withoutPriceTbdMarker('Drywall Patch (Price TBD)'), unit_price: 95, total: 95 })
+
+    assert.equal(priced.description, 'Drywall Patch')
+    assert.equal(withoutPriceTbdMarker('Drywall Patch (price tbd) '), 'Drywall Patch')
+    assert.deepEqual(learnPriceList([], [priced], NOW).map((entry) => entry.name), ['Drywall Patch'])
   })
 })

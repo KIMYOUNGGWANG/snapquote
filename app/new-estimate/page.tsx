@@ -25,7 +25,7 @@ import type { BusinessInfo, EstimateItem, EstimateSection, LocalEstimate } from 
 import { countryForStateProvince } from "@/lib/profile-validation"
 import { normalizeCategory, normalizeEstimateItem, normalizeEstimatePayload, normalizeUnit, toSafeNumber, type EstimateDraft } from "@/lib/estimates/normalize"
 import { getAllItemsFromEstimate, lineTotal } from "@/lib/estimates/math"
-import { countEditedLines, enforcePriceListPricing, formatPriceListForAI, getLearnableItems, selectPriceListForAI, wasEstimateAlreadySent } from "@/lib/price-memory"
+import { countEditedLines, enforcePriceListPricing, formatPriceListForAI, getLearnableItems, selectPriceListForAI, wasEstimateAlreadySent, withoutPriceTbdMarker } from "@/lib/price-memory"
 import { dismissToasts, toast } from "@/components/toast"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
@@ -504,7 +504,9 @@ function updateEstimateItemField(
         return { ...nextItem, total: nextItem.quantity * nextItem.unit_price }
     }
     if (field === "unit_price") {
-        const nextItem = { ...item, unit_price: numericValue }
+        // A priced line is no longer "Price TBD"; dropping the marker also lets it be learned into the price list.
+        const description = numericValue > 0 ? withoutPriceTbdMarker(item.description) : item.description
+        const nextItem = { ...item, description, unit_price: numericValue }
         return { ...nextItem, total: nextItem.quantity * nextItem.unit_price }
     }
     if (field === "total") return { ...item, total: numericValue }
@@ -1322,7 +1324,7 @@ function NewEstimatePageContent() {
         const profile = getProfile()
         if (profile) {
             setBusinessProfile(profile)
-            if (profile.tax_rate) setTaxRate(profile.tax_rate)
+            setTaxRate(profile.tax_rate ?? 13)
         }
 
         // Check for duplicate estimate from history page
