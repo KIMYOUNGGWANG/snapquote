@@ -594,6 +594,25 @@ describe('POST /api/transcribe', () => {
     assert.match(data.text, /4 feet/)
     assert.equal(state.usageQuota.recordCalls.length, 1)
     assert.equal(state.usageQuota.recordCalls[0].metric, 'transcribe')
+    assert.equal(state.usageQuota.recordCalls[0].input.units, 1)
+    assert.equal(state.openai.audioCalls[0].response_format, 'verbose_json')
+  })
+
+  test('records transcription usage in started minutes of audio', async () => {
+    const state = getTestState()
+    state.openai.audioTranscriptionsCreate = async () => ({ text: 'long walkthrough', duration: 125.4 })
+
+    const formData = new FormData()
+    formData.append('file', new File([new Uint8Array([1, 2, 3])], 'clip.wav', { type: 'audio/wav' }))
+
+    const res = await transcribeAudio(new Request('http://localhost/api/transcribe', {
+      method: 'POST',
+      body: formData,
+      headers: bearerHeader(),
+    }))
+
+    assert.equal(res.status, 200)
+    assert.equal(state.usageQuota.recordCalls[0].input.units, 3)
   })
 
   test('passes Spanish language hints through to Whisper', async () => {

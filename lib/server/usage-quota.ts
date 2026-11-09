@@ -66,6 +66,8 @@ export interface UsageRecordInput {
     promptTokens?: number
     completionTokens?: number
     resendCostUsd?: number
+    /** How much to add to the metric counter (e.g. transcription minutes). Defaults to 1. */
+    units?: number
 }
 
 const PLAN_LIMITS: Record<PlanTier, Record<UsageMetric, number>> = {
@@ -348,9 +350,10 @@ export async function recordUsage(
     if (!context) return
 
     const current = context.row
-    const nextGenerateCount = toNumber(current.generate_count) + (metric === "generate" ? 1 : 0)
-    const nextTranscribeCount = toNumber(current.transcribe_count) + (metric === "transcribe" ? 1 : 0)
-    const nextSendEmailCount = toNumber(current.send_email_count) + (metric === "send_email" ? 1 : 0)
+    const units = Number.isFinite(input.units) && Number(input.units) > 0 ? Math.ceil(Number(input.units)) : 1
+    const nextGenerateCount = toNumber(current.generate_count) + (metric === "generate" ? units : 0)
+    const nextTranscribeCount = toNumber(current.transcribe_count) + (metric === "transcribe" ? units : 0)
+    const nextSendEmailCount = toNumber(current.send_email_count) + (metric === "send_email" ? units : 0)
 
     const promptTokens = Math.max(0, Math.floor(input.promptTokens || 0))
     const completionTokens = Math.max(0, Math.floor(input.completionTokens || 0))
