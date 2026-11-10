@@ -92,6 +92,7 @@ export async function POST(req: Request) {
             model: "whisper-1",
             ...(languageHint !== "auto" ? { language: languageHint } : {}),
             prompt: buildTradeHint(languageHint),
+            response_format: "verbose_json",
         });
 
         let text = transcription.text;
@@ -131,7 +132,11 @@ export async function POST(req: Request) {
         // 6. Clean up extra whitespace
         text = text.replace(/\s+/g, " ").trim();
 
-        await recordUsage(quota.context, "transcribe")
+        // Plans sell transcription minutes, so bill each started minute of audio (min 1).
+        // ponytail: the pre-check only blocks once the cap is hit, so one long clip can overshoot it; pre-check audio length if that gets abused.
+        const audioSeconds = Number(transcription.duration)
+        const transcribeMinutes = Number.isFinite(audioSeconds) && audioSeconds > 0 ? Math.ceil(audioSeconds / 60) : 1
+        await recordUsage(quota.context, "transcribe", { units: transcribeMinutes })
 
         return NextResponse.json({ text });
     } catch (error) {
