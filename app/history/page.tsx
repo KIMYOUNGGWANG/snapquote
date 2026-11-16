@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSPr
 import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle, MessageSquare, RefreshCw, Link2, Clock3, CloudUpload, CircleDollarSign, Send, CheckCircle2, ReceiptText, Image as ImageIcon, Mic, LogIn, MoreHorizontal, ChevronDown, Search, X, ArrowRight, CreditCard, Sparkles } from "lucide-react"
+import { Loader2, Download, FileText, Copy, Trash2, Mail, AlertCircle, MessageSquare, RefreshCw, Link2, Clock3, CloudUpload, CircleDollarSign, Send, CheckCircle2, ReceiptText, Image as ImageIcon, Mic, LogIn, MoreHorizontal, ChevronDown, Search, X, ArrowRight, CreditCard, Sparkles, Box } from "lucide-react"
 import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { getEstimates, deleteEstimate, getProfile, updateEstimateStatus, updateEstimate, type LocalEstimate, type EstimateItem, type BusinessInfo } from "@/lib/estimates-storage"
@@ -18,6 +18,7 @@ const JobCompletionSheet = dynamic(() => import("@/components/job-completion/job
 import { Badge } from "@/components/ui/badge"
 import { trackAnalyticsEvent } from "@/lib/analytics"
 import { withAuthHeaders } from "@/lib/auth-headers"
+import { hasWalkthroughPhotos, requestWalkthroughPreview } from "@/lib/walkthrough-client"
 import { useAuthGuard } from "@/lib/use-auth-guard"
 import { AuthGate } from "@/components/auth-gate"
 import { sendEstimateSms } from "@/lib/send-sms"
@@ -317,6 +318,8 @@ function HistoryPageContent() {
     const [quickBooksConnecting, setQuickBooksConnecting] = useState(false)
     const [syncingQuickBooksEstimateId, setSyncingQuickBooksEstimateId] = useState<string | null>(null)
     const [creatingPortalLinkEstimateId, setCreatingPortalLinkEstimateId] = useState<string | null>(null)
+    const [requestingWalkthroughEstimateId, setRequestingWalkthroughEstimateId] = useState<string | null>(null)
+    const [walkthroughStatusById, setWalkthroughStatusById] = useState<Record<string, "requested" | "ready">>({})
     const [creatingPaymentLinkEstimateId, setCreatingPaymentLinkEstimateId] = useState<string | null>(null)
     const paymentStatusSyncInFlightRef = useRef(false)
     const handledDeepLinkActionRef = useRef<string | null>(null)
@@ -1285,6 +1288,24 @@ function HistoryPageContent() {
             setCreatingPortalLinkEstimateId(null)
         }
     }, [businessProfile, requestDeliveryScopeReview])
+
+    const handleRequestWalkthrough = useCallback(async (estimate: LocalEstimate) => {
+        setRequestingWalkthroughEstimateId(estimate.id)
+        try {
+            const result = await requestWalkthroughPreview(estimate)
+            setWalkthroughStatusById((current) => ({ ...current, [estimate.id]: result.status }))
+            toast(
+                result.status === "ready"
+                    ? "3D preview is ready. It shows on the customer approval link."
+                    : "3D preview requested. It will appear on the customer approval link when ready.",
+                "success"
+            )
+        } catch (error) {
+            toast(error instanceof Error ? error.message : "Failed to request the 3D preview.", "error")
+        } finally {
+            setRequestingWalkthroughEstimateId(null)
+        }
+    }, [])
 
     const handleOpenFollowUp = useCallback(async (estimate: LocalEstimate) => {
         if (isEstimatePaidLike(estimate)) {
@@ -2765,6 +2786,27 @@ function HistoryPageContent() {
                                                                 <Link2 className="mr-1 h-3 w-3" />
                                                             )}
                                                             {estimate.customerPortalUrl ? "Copy approval link" : "Customer link"}
+                                                        </Button>
+                                                    ) : null}
+                                                    {!deliveryScopeReviewNeeded && estimate.status !== "draft" && !estimateIsPaidLike && hasWalkthroughPhotos(estimate) ? (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className={historySecondaryButtonClass}
+                                                            onClick={() => void handleRequestWalkthrough(estimate)}
+                                                            disabled={requestingWalkthroughEstimateId === estimate.id || Boolean(walkthroughStatusById[estimate.id])}
+                                                            data-testid="history-walkthrough-request-action"
+                                                        >
+                                                            {requestingWalkthroughEstimateId === estimate.id ? (
+                                                                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                                            ) : (
+                                                                <Box className="mr-1 h-3 w-3" />
+                                                            )}
+                                                            {walkthroughStatusById[estimate.id] === "ready"
+                                                                ? "3D preview ready"
+                                                                : walkthroughStatusById[estimate.id] === "requested"
+                                                                    ? "3D preview requested"
+                                                                    : "3D preview"}
                                                         </Button>
                                                     ) : null}
                                                     {!deliveryScopeReviewNeeded && shouldShowFollowUpAction && (

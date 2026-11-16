@@ -1,12 +1,13 @@
 import Link from "next/link"
 import { Fragment } from "react"
-import { AlertCircle, FileText, MapPin, Phone } from "lucide-react"
+import { AlertCircle, Box, ExternalLink, FileText, MapPin, Phone } from "lucide-react"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 import { getCustomerPortalQuote, signCompletionPhotoUrls, type CustomerQuoteSnapshot } from "@/lib/server/customer-portal"
 import { CustomerQuoteActions } from "@/components/customer-portal/customer-quote-actions"
 import { CustomerQuoteStatusBadge } from "@/components/customer-portal/customer-quote-status-badge"
 import { CustomerQuoteNextStep } from "@/components/customer-portal/customer-quote-next-step"
 import { CustomerJobCompletion } from "@/components/customer-portal/customer-job-completion"
+import { loadWalkthrough } from "@/lib/server/walkthrough"
 import { formatPortalCurrency as formatCurrency, getCustomerPortalPaymentActionState } from "@/lib/customer-portal-payment"
 
 export const dynamic = "force-dynamic"
@@ -95,6 +96,8 @@ export default async function CustomerQuotePage({ params }: CustomerQuotePagePro
     const completion = estimate.completion
         ? { ...estimate.completion, photos: await signCompletionPhotoUrls(supabase, quote.userId, estimate.completion.photos) }
         : undefined
+    // Read live (not from the frozen snapshot) so a preview attached after sharing shows without re-sharing.
+    const walkthrough = await loadWalkthrough(supabase, quote.userId, quote.estimateId)
     const allLineGroups = getQuoteLineGroups(estimate)
     // With a completion report, "Added on site" lines are listed in the report above; the quote
     // body shows them as one summary row so they are not listed twice and the totals still add up.
@@ -131,6 +134,7 @@ export default async function CustomerQuotePage({ params }: CustomerQuotePagePro
                             payLabel={paymentAction.buttonLabel}
                         />
                     ) : null}
+                    {walkthrough.url ? <WalkthroughPreviewCard url={walkthrough.url} /> : null}
                     <section className="field-panel overflow-hidden" data-testid="customer-quote-document">
                         <div className="border-b border-white/10 p-4 sm:p-6">
                             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -283,5 +287,36 @@ export default async function CustomerQuotePage({ params }: CustomerQuotePagePro
                 </aside>
             </div>
         </main>
+    )
+}
+
+function WalkthroughPreviewCard({ url }: { url: string }) {
+    return (
+        <section
+            className="field-panel flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6"
+            data-testid="customer-quote-walkthrough"
+        >
+            <div className="flex min-w-0 gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-blue-300/20 bg-blue-500/10">
+                    <Box className="h-5 w-5 text-blue-200" aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                    <h2 className="text-lg font-semibold leading-tight">See your finished room in 3D</h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-400">
+                        Walk through the space with the finishes in this estimate. Illustrative only; final work follows the line items below.
+                    </p>
+                </div>
+            </div>
+            <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-semibold text-slate-950 transition hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300"
+                data-testid="customer-quote-walkthrough-link"
+            >
+                Open 3D preview
+                <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            </a>
+        </section>
     )
 }
