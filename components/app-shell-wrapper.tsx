@@ -12,7 +12,7 @@ export function AppShellWrapper({ children }: { children: React.ReactNode }) {
                             pathname?.startsWith("/terms")
     const isAuthPage = pathname?.startsWith("/login") ||
                        pathname?.startsWith("/auth/callback")
-    const isPublicCustomerPage = pathname?.startsWith("/q/")
+    const isPublicCustomerPage = pathname?.startsWith("/q/") || pathname?.startsWith("/r/")
 
     if (isMarketingPage || isAuthPage || isPublicCustomerPage) {
         return (

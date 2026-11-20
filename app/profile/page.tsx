@@ -21,6 +21,7 @@ import { useAuthGuard } from "@/lib/use-auth-guard"
 import { AuthGate } from "@/components/auth-gate"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ReferralStatusCard } from "@/components/referral-status-card"
+import { RequestLinkCard } from "@/components/customer-request/request-link-card"
 import { LanguageSelector } from "@/components/language-selector"
 import { getBillingSubscriptionStatus, type BillingSubscriptionStatusResponse } from "@/lib/pricing"
 import { hasPdfBrandingAccess, hasPdfTemplateAccess } from "@/lib/pdf-branding"
@@ -1078,6 +1079,8 @@ export default function ProfilePage() {
                             </Button>
                         </CardContent>
                     </Card>
+
+                    <RequestLinkCard />
 
                     <ReferralStatusCard />
 
