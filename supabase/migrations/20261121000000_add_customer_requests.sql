@@ -11,6 +11,11 @@ alter table public.profiles drop constraint if exists profiles_public_slug_forma
 alter table public.profiles add constraint profiles_public_slug_format
   check (public_slug is null or public_slug ~ '^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$');
 create unique index if not exists profiles_public_slug_key on public.profiles (public_slug);
+-- The contractor saves both from the browser (components/customer-request/request-link-card.tsx). Granted per column
+-- so the save keeps working once 20261121100000_restrict_profile_client_writes.sql limits profiles to an allowlist,
+-- in whichever order the two migrations are applied.
+grant insert (public_slug, request_hide_price_range), update (public_slug, request_hide_price_range)
+  on public.profiles to authenticated;
 
 -- 2) Customer requests. estimate_id is text without FK (like estimate_share_links): the draft estimate is created
 --    on the contractor's device first and may never sync, so a uuid FK to estimates would reject valid links.
