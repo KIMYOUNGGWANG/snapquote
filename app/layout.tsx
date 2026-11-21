@@ -11,11 +11,10 @@ import { ReferralAttributionManager } from "@/components/referral-attribution-ma
 import { Analytics } from "@vercel/analytics/next";
 import { cn } from "@/lib/utils";
 import { AppShellWrapper } from "@/components/app-shell-wrapper";
-
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://snapquote.ai"; // Fallback to production URL
+import { getSiteUrl } from "@/lib/site-url";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
+  metadataBase: new URL(getSiteUrl()),
   title: {
     default: "SnapQuote - Trade-Focused AI Estimator",
     template: "%s | SnapQuote",

@@ -4,18 +4,34 @@ import { afterEach, describe, test } from "node:test"
 import sitemap from "../../app/sitemap.ts"
 import robots from "../../app/robots.ts"
 
-const ORIGINAL_SITE_URL = process.env.NEXT_PUBLIC_SITE_URL
+const ORIGINAL_ENV = {
+  NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
+  NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+}
 
 afterEach(() => {
-  if (typeof ORIGINAL_SITE_URL === "undefined") {
-    delete process.env.NEXT_PUBLIC_SITE_URL
-    return
+  for (const [name, value] of Object.entries(ORIGINAL_ENV)) {
+    if (typeof value === "undefined") {
+      delete process.env[name]
+    } else {
+      process.env[name] = value
+    }
   }
-
-  process.env.NEXT_PUBLIC_SITE_URL = ORIGINAL_SITE_URL
 })
 
 describe("SEO metadata routes", () => {
+  test("site URL falls back to the app URL, then our own production domain", () => {
+    delete process.env.NEXT_PUBLIC_SITE_URL
+    process.env.NEXT_PUBLIC_APP_URL = "https://app.snapquote.test/"
+
+    assert.equal(robots().sitemap, "https://app.snapquote.test/sitemap.xml")
+
+    delete process.env.NEXT_PUBLIC_APP_URL
+
+    assert.equal(sitemap()[0].url, "https://snapquotes.app")
+    assert.equal(robots().sitemap, "https://snapquotes.app/sitemap.xml")
+  })
+
   test("sitemap includes current public marketing and legal routes only", () => {
     process.env.NEXT_PUBLIC_SITE_URL = "https://app.snapquote.test"
 
