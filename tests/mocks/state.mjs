@@ -74,9 +74,10 @@ function normalizeResult(result) {
   return { data: result, error: null }
 }
 
-function createQueryBuilder(state, table) {
+function createQueryBuilder(state, table, client) {
   const query = {
     table,
+    client,
     action: 'select',
     payload: undefined,
     selectColumns: undefined,
@@ -193,7 +194,8 @@ function createQueryBuilder(state, table) {
   return builder
 }
 
-export function createSupabaseClientMock(state) {
+// client labels which mock made a query (e.g. 'authed' vs 'service'), so tests can assert the role used.
+export function createSupabaseClientMock(state, client = 'default') {
   return {
     auth: {
       getUser: async () => ({
@@ -205,7 +207,7 @@ export function createSupabaseClientMock(state) {
     },
 
     from(table) {
-      return createQueryBuilder(state, table)
+      return createQueryBuilder(state, table, client)
     },
 
     rpc(name, args) {

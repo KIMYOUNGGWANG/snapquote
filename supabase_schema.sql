@@ -435,8 +435,11 @@ create policy "Users can view own referral events" on referral_events for select
 
 -- Usage policies
 create policy "Users can view own usage counters" on usage_counters_monthly for select using (auth.uid() = user_id);
-create policy "Users can insert own usage counters" on usage_counters_monthly for insert with check (auth.uid() = user_id);
-create policy "Users can update own usage counters" on usage_counters_monthly for update using (auth.uid() = user_id);
+-- Read-only for owners: quota counters are written by the server with the service role
+-- (see migration 20261121110000_usage_counters_server_only.sql).
+revoke all on usage_counters_monthly from anon;
+revoke all on usage_counters_monthly from authenticated;
+grant select on usage_counters_monthly to authenticated;
 
 -- Pricing policies
 create policy "Anyone can view active pricing experiments" on pricing_experiments

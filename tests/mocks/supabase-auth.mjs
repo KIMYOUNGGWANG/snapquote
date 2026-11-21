@@ -20,5 +20,5 @@ export function createAuthedSupabaseClient(accessToken) {
     return null
   }
 
-  return createSupabaseClientMock(state)
+  return createSupabaseClientMock(state, 'authed')
 }
