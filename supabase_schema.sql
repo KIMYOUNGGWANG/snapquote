@@ -10,7 +10,9 @@ create table profiles (
   address text,
   license_number text,
   tax_rate float default 13,
-  plan_tier text check (plan_tier in ('free', 'starter', 'pro', 'team')) default 'free'
+  plan_tier text check (plan_tier in ('free', 'starter', 'pro', 'team')) default 'free',
+  public_slug text unique check (public_slug is null or public_slug ~ '^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$'),
+  request_hide_price_range boolean not null default false
 );
 
 -- Clients
@@ -519,3 +521,30 @@ on conflict (id) do nothing;
 create policy "completion photos: owner insert" on storage.objects
   for insert to authenticated
   with check (bucket_id = 'completion-photos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- Customer photo-diagnosis requests (see migration 20261121000000_add_customer_requests.sql).
+-- Server routes write with the service role; the owner can only read.
+create table customer_requests (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references profiles(id) on delete cascade,
+  status text not null default 'new' check (status in ('new', 'drafted', 'dismissed')),
+  customer_name text not null check (char_length(customer_name) between 1 and 120),
+  customer_email text check (customer_email is null or char_length(customer_email) <= 254),
+  customer_phone text check (customer_phone is null or char_length(customer_phone) <= 40),
+  area_label text check (area_label is null or char_length(area_label) <= 120),
+  diagnosis jsonb not null check (jsonb_typeof(diagnosis) = 'object' and pg_column_size(diagnosis) <= 8192),
+  photo_paths text[] not null default '{}' check (cardinality(photo_paths) <= 3),
+  estimate_id text check (estimate_id is null or char_length(estimate_id) <= 120),
+  created_at timestamp with time zone not null default timezone('utc'::text, now()),
+  updated_at timestamp with time zone not null default timezone('utc'::text, now()),
+  constraint customer_requests_has_contact check (customer_email is not null or customer_phone is not null)
+);
+alter table customer_requests enable row level security;
+create policy "Owner reads own customer requests" on customer_requests for select using ((select auth.uid()) = user_id);
+revoke all on customer_requests from anon;
+revoke insert, update, delete, truncate on customer_requests from anon, authenticated;
+grant select on customer_requests to authenticated;
+create index customer_requests_user_created_idx on customer_requests (user_id, created_at desc);
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('request-photos', 'request-photos', false, 409600, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do nothing;

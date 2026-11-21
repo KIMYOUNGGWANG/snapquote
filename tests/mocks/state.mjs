@@ -208,6 +208,25 @@ export function createSupabaseClientMock(state) {
       return createQueryBuilder(state, table)
     },
 
+    storage: {
+      from(bucket) {
+        return {
+          upload: async (path, body, options) => {
+            state.storage.uploadCalls.push({ bucket, path, body, options })
+            return state.storage.upload({ bucket, path, body, options })
+          },
+          download: async (path) => {
+            state.storage.downloadCalls.push({ bucket, path })
+            return state.storage.download({ bucket, path })
+          },
+          remove: async (paths) => {
+            state.storage.removeCalls.push({ bucket, paths })
+            return { data: [], error: null }
+          },
+        }
+      },
+    },
+
     rpc(name, args) {
       state.supabase.rpcCalls.push({ name, args })
       const resolver = state.supabase.rpcResolver || (async () => ({ data: null, error: null }))
@@ -342,6 +361,14 @@ export function resetTestState() {
         type: 'noop',
         data: { object: {} },
       }),
+    },
+
+    storage: {
+      uploadCalls: [],
+      downloadCalls: [],
+      removeCalls: [],
+      upload: async ({ path }) => ({ data: { path }, error: null }),
+      download: async () => ({ data: new Blob([Buffer.from('photo')], { type: 'image/jpeg' }), error: null }),
     },
 
     resend: {
