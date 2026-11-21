@@ -10,7 +10,10 @@ create table profiles (
   address text,
   license_number text,
   tax_rate float default 13,
-  plan_tier text check (plan_tier in ('free', 'starter', 'pro', 'team')) default 'free'
+  plan_tier text check (plan_tier in ('free', 'starter', 'pro', 'team')) default 'free',
+  state_province text,
+  payment_link text,
+  estimate_template_url text
 );
 
 -- Clients
@@ -327,8 +330,13 @@ alter table job_queue enable row level security;
 
 -- Profiles policies
 create policy "Users can view own profile" on profiles for select using (auth.uid() = id);
-create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
+create policy "Users can update own profile" on profiles for update using (auth.uid() = id) with check (auth.uid() = id);
 create policy "Users can insert own profile" on profiles for insert with check (auth.uid() = id);
+-- Browsers write only business-profile columns; plan/billing/referral columns are service-role only
+-- (see migration 20261121100000_restrict_profile_client_writes.sql, the source of truth for this allowlist).
+revoke all on profiles from anon;
+revoke insert, update, delete, truncate on profiles from authenticated;
+grant insert (id, business_name, logo_url, phone, email, address, license_number, tax_rate, state_province, payment_link, estimate_template_url), update (id, business_name, logo_url, phone, email, address, license_number, tax_rate, state_province, payment_link, estimate_template_url) on profiles to authenticated;
 
 -- Clients policies
 create policy "Users can view own clients" on clients for select using (auth.uid() = user_id);
