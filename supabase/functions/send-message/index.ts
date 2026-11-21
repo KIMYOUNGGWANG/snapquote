@@ -210,7 +210,7 @@ Deno.serve(async (req: Request) => {
                     'Authorization': `Bearer ${RESEND_API_KEY}`,
                 },
                 body: JSON.stringify({
-                    from: 'SnapQuote <no-reply@snapquote.ai>',
+                    from: 'SnapQuote <onboarding@resend.dev>',
                     to: [client_email],
                     subject,
                     html,
@@ -282,7 +282,7 @@ Deno.serve(async (req: Request) => {
                     'Authorization': `Bearer ${RESEND_API_KEY}`,
                 },
                 body: JSON.stringify({
-                    from: 'SnapQuote <no-reply@snapquote.ai>',
+                    from: 'SnapQuote <onboarding@resend.dev>',
                     to: [client_email],
                     subject: `Thank you for choosing ${safeBusiness}!`,
                     html: `
