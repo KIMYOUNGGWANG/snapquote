@@ -8,6 +8,7 @@ import {
     escapeHtml,
     loadPublicContractor,
     photoDataUrlToUpload,
+    verifyDiagnosisToken,
 } from "@/lib/server/customer-requests"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 
@@ -17,7 +18,8 @@ const MAX_BODY_BYTES = 1_300_000
 const NOTIFY_WINDOW_MS = 15 * 60 * 1000
 
 function getAppUrl(): string {
-    return (process.env.NEXT_PUBLIC_APP_URL?.trim() || "https://snapquote.app").replace(/\/$/, "")
+    // snapquote.app is another company's site; ours is snapquotes.app.
+    return (process.env.NEXT_PUBLIC_APP_URL?.trim() || "https://snapquotes.app").replace(/\/$/, "")
 }
 
 /** Public: a homeowner sends a quote request with photos and the AI diagnosis to the contractor behind /r/{slug}. */
@@ -45,6 +47,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: message }, { status: 400 })
     }
     const input = parsed.data
+    if (!verifyDiagnosisToken(input.diagnosisToken, input)) {
+        return NextResponse.json({ error: "This photo check has expired. Reload the page and check your photos again." }, { status: 400 })
+    }
 
     // Per link too, so nobody can flood one contractor's inbox from many IPs.
     const slugLimit = await checkRateLimit({ key: `public-requests:slug:${input.slug}`, limit: 20, windowMs: HOUR_MS })

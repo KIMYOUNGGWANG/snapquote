@@ -55,6 +55,7 @@ test("request link: photo → diagnosis → contact → request sent", async ({ 
                     beforeVisit: ["Put a bucket under the trap"],
                     confidence: "medium",
                 },
+                diagnosisToken: "token-from-diagnose",
                 priceRangeHidden: false,
                 disclaimer: "Photo-based estimate. The final price is confirmed after an on-site check.",
             },
@@ -90,7 +91,7 @@ test("request link: photo → diagnosis → contact → request sent", async ({ 
     await page.getByTestId("request-send").click()
 
     await expect(page.getByTestId("request-sent")).toBeVisible()
-    expect(requestBody).toMatchObject({ slug: "rivera-plumbing", space: "bathroom", name: "Dana Lee", phone: "416 555 0100", areaLabel: "Leslieville" })
+    expect(requestBody).toMatchObject({ slug: "rivera-plumbing", space: "bathroom", name: "Dana Lee", phone: "416 555 0100", areaLabel: "Leslieville", diagnosisToken: "token-from-diagnose" })
     expect((requestBody.diagnosis as { cause: string }).cause).toContain("P-trap")
     expect(requestBody.photos).toHaveLength(1)
 })

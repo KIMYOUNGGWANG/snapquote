@@ -42,6 +42,7 @@ export function CustomerRequestFlow({ slug, businessName }: { slug: string; busi
     const [space, setSpace] = useState<Space | "">("")
     const [note, setNote] = useState("")
     const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null)
+    const [diagnosisToken, setDiagnosisToken] = useState("")
     const [disclaimer, setDisclaimer] = useState("")
     const [priceRangeHidden, setPriceRangeHidden] = useState(false)
     const [name, setName] = useState("")
@@ -77,6 +78,7 @@ export function CustomerRequestFlow({ slug, businessName }: { slug: string; busi
         try {
             const data = await postJson("/api/public/diagnose", { slug, space, note: note.trim() || undefined, photos })
             setDiagnosis(data.diagnosis as Diagnosis)
+            setDiagnosisToken(typeof data.diagnosisToken === "string" ? data.diagnosisToken : "")
             setDisclaimer(typeof data.disclaimer === "string" ? data.disclaimer : "")
             setPriceRangeHidden(data.priceRangeHidden === true)
             setStep("result")
@@ -101,6 +103,7 @@ export function CustomerRequestFlow({ slug, businessName }: { slug: string; busi
                 space,
                 note: note.trim() || undefined,
                 diagnosis,
+                diagnosisToken,
                 photos,
                 name: name.trim(),
                 email: email.trim(),

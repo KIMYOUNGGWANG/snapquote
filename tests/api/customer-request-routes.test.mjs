@@ -8,6 +8,7 @@ import { POST as submitRequest } from "../../app/api/public/requests/route.ts"
 import { GET as listRequests } from "../../app/api/customer-requests/route.ts"
 import { GET as getRequest, PATCH as updateRequest } from "../../app/api/customer-requests/[requestId]/route.ts"
 import { buildRequestEstimateNotes, normalizePublicSlugInput } from "../../lib/customer-requests.ts"
+import { signDiagnosis, verifyDiagnosisToken } from "../../lib/server/customer-requests.ts"
 
 const PHOTO = "data:image/jpeg;base64,/9j/AAAA"
 const CONTRACTOR = {
@@ -109,6 +110,8 @@ describe("POST /api/public/diagnose", () => {
     assert.deepEqual(data.diagnosis.priceRange, { min: 150, max: 300, currency: "USD" })
     assert.deepEqual(data.diagnosis.beforeVisit, ["Put a bucket under the trap"])
     assert.match(data.disclaimer, /photo/i)
+    assert.ok(verifyDiagnosisToken(data.diagnosisToken, { slug: "joes-plumbing", diagnosis: data.diagnosis, photos: [PHOTO] }))
+    assert.ok(!verifyDiagnosisToken(data.diagnosisToken, { slug: "joes-plumbing", diagnosis: { ...data.diagnosis, cause: "Anything" }, photos: [PHOTO] }))
 
     const ipLimit = state.rateLimit.calls.find((call) => call.key.startsWith("public-diagnose:ip:"))
     const slugLimit = state.rateLimit.calls.find((call) => call.key === "public-diagnose:slug:joes-plumbing")
@@ -131,6 +134,7 @@ describe("POST /api/public/diagnose", () => {
     assert.equal(res.status, 200)
     assert.equal(data.diagnosis.priceRange, undefined)
     assert.equal(data.priceRangeHidden, true)
+    assert.ok(verifyDiagnosisToken(data.diagnosisToken, { slug: "joes-plumbing", diagnosis: data.diagnosis, photos: [PHOTO] }))
   })
 
   test("returns 502 when the AI cannot read the photo", async () => {
@@ -155,9 +159,14 @@ describe("POST /api/public/requests", () => {
     phone: "",
     areaLabel: "Hyde Park",
   }
+  // Signed at call time: the signing key comes from the env set in beforeEach.
+  const signed = (overrides = {}) => {
+    const body = { ...validRequest, ...overrides }
+    return { ...body, diagnosisToken: signDiagnosis(body) }
+  }
 
   test("requires an email or a phone number", async () => {
-    const res = await submitRequest(jsonRequest("http://localhost/api/public/requests", { ...validRequest, email: "", phone: "" }))
+    const res = await submitRequest(jsonRequest("http://localhost/api/public/requests", signed({ email: "", phone: "" })))
     assert.equal(res.status, 400)
   })
 
@@ -165,17 +174,37 @@ describe("POST /api/public/requests", () => {
     const state = getTestState()
     mockContractor(state)
 
-    const res = await submitRequest(jsonRequest("http://localhost/api/public/requests", { ...validRequest, slug: "nobody-here" }))
+    const res = await submitRequest(jsonRequest("http://localhost/api/public/requests", signed({ slug: "nobody-here" })))
 
     assert.equal(res.status, 404)
     assert.equal(state.storage.uploadCalls.length, 0)
+  })
+
+  test("rejects a diagnosis the server did not produce for these photos", async () => {
+    const state = getTestState()
+    mockContractor(state)
+    const body = signed()
+    const forged = [
+      { ...body, diagnosis: { ...DIAGNOSIS, cause: "Call 555-0100 for a cheaper fix" } },
+      { ...body, diagnosis: { ...DIAGNOSIS, priceRange: { min: 10, max: 20, currency: "USD" } } },
+      { ...body, photos: [PHOTO] },
+      { ...body, diagnosisToken: "" },
+      { ...validRequest, diagnosisToken: signDiagnosis(validRequest, Date.now() - 3 * 60 * 60 * 1000) },
+    ]
+
+    for (const payload of forged) {
+      const res = await submitRequest(jsonRequest("http://localhost/api/public/requests", payload))
+      assert.equal(res.status, 400)
+    }
+    assert.equal(state.storage.uploadCalls.length, 0)
+    assert.ok(!state.supabase.queryCalls.some((query) => query.table === "customer_requests"))
   })
 
   test("stores photos privately, saves the request, and emails the contractor", async () => {
     const state = getTestState()
     mockContractor(state)
 
-    const res = await submitRequest(jsonRequest("http://localhost/api/public/requests", validRequest))
+    const res = await submitRequest(jsonRequest("http://localhost/api/public/requests", signed()))
     const data = await res.json()
 
     assert.equal(res.status, 200)
@@ -209,7 +238,7 @@ describe("POST /api/public/requests", () => {
     const state = getTestState()
     mockContractor(state, { ...CONTRACTOR, request_hide_price_range: true })
 
-    const res = await submitRequest(jsonRequest("http://localhost/api/public/requests", validRequest))
+    const res = await submitRequest(jsonRequest("http://localhost/api/public/requests", signed()))
     assert.equal(res.status, 200)
 
     const insert = state.supabase.queryCalls.find((query) => query.table === "customer_requests" && query.action === "insert")
@@ -223,7 +252,7 @@ describe("POST /api/public/requests", () => {
       return undefined
     })
 
-    const res = await submitRequest(jsonRequest("http://localhost/api/public/requests", validRequest))
+    const res = await submitRequest(jsonRequest("http://localhost/api/public/requests", signed()))
 
     assert.equal(res.status, 500)
     assert.equal(state.storage.removeCalls.length, 1)
@@ -240,7 +269,7 @@ describe("POST /api/public/requests", () => {
       resetAt: Date.now(),
     })
 
-    const res = await submitRequest(jsonRequest("http://localhost/api/public/requests", validRequest))
+    const res = await submitRequest(jsonRequest("http://localhost/api/public/requests", signed()))
 
     assert.equal(res.status, 200)
     assert.equal(state.resend.sendCalls.length, 0)

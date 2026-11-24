@@ -1750,7 +1750,8 @@ test("history shows a new customer request and turns it into a draft with photos
         photoCount: 1,
         createdAt: "2026-11-21T09:00:00.000Z",
     }
-    let patchBody: Record<string, unknown> | null = null
+    // Cast, not annotation: TS would narrow it to null and miss the assignment inside the route callback.
+    let patchBody = null as Record<string, unknown> | null
     await page.route("**/api/customer-requests", (route) => route.fulfill({ json: { requests: [request] } }))
     await page.route(`**/api/customer-requests/${request.id}`, async (route) => {
         if (route.request().method() === "PATCH") {

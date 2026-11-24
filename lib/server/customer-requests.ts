@@ -1,8 +1,10 @@
+import { createHash, createHmac, timingSafeEqual } from "node:crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import {
     REQUEST_PHOTO_DATA_URL,
     diagnosisSchema,
     type CustomerRequestSummary,
+    type Diagnosis,
 } from "@/lib/customer-requests"
 
 // Server side of customer photo-diagnosis requests. Rows in customer_requests and files in the private
@@ -44,6 +46,53 @@ export async function loadPublicContractor(supabase: SupabaseClient, slug: strin
         address: text(row.address),
         hidePriceRange: row.request_hide_price_range === true,
     }
+}
+
+// The customer's browser carries the diagnosis from /diagnose to /requests, and the contractor sees it labelled
+// as the AI read. The token proves the server produced this exact read for these exact photos and link.
+const DIAGNOSIS_TOKEN_TTL_MS = 2 * 60 * 60 * 1000
+
+type SignedDiagnosisInput = { slug: string; diagnosis: Diagnosis; photos: string[] }
+
+function diagnosisSigningKey(): Buffer | null {
+    // Derived from the service role key (always set when these routes can run), so no extra secret to manage
+    // and the raw key never signs anything itself.
+    const secret = process.env.SUPABASE_SERVICE_ROLE_KEY
+    return secret ? createHmac("sha256", secret).update("customer-request-diagnosis-v1").digest() : null
+}
+
+function diagnosisSignature(key: Buffer, input: SignedDiagnosisInput, expiresAt: number): Buffer {
+    const { diagnosis } = input
+    const range = diagnosis.priceRange
+    const payload = JSON.stringify([
+        input.slug,
+        diagnosis.cause,
+        diagnosis.urgency,
+        range ? [range.min, range.max, range.currency] : null,
+        diagnosis.beforeVisit,
+        diagnosis.confidence,
+        createHash("sha256").update(input.photos.join("\n")).digest("base64url"),
+        expiresAt,
+    ])
+    return createHmac("sha256", key).update(payload).digest()
+}
+
+/** Token for a diagnosis exactly as returned to the customer. Null when the server is not configured. */
+export function signDiagnosis(input: SignedDiagnosisInput, now = Date.now()): string | null {
+    const key = diagnosisSigningKey()
+    if (!key) return null
+    const expiresAt = now + DIAGNOSIS_TOKEN_TTL_MS
+    return `${expiresAt}.${diagnosisSignature(key, input, expiresAt).toString("base64url")}`
+}
+
+export function verifyDiagnosisToken(token: string, input: SignedDiagnosisInput, now = Date.now()): boolean {
+    const key = diagnosisSigningKey()
+    const [expiresText, signatureText] = token.split(".")
+    const expiresAt = Number(expiresText)
+    if (!key || !signatureText || !Number.isSafeInteger(expiresAt) || expiresAt < now) return false
+    const expected = diagnosisSignature(key, input, expiresAt)
+    const given = Buffer.from(signatureText, "base64url")
+    return given.length === expected.length && timingSafeEqual(given, expected)
 }
 
 export function photoDataUrlToUpload(dataUrl: string): { contentType: string; extension: string; bytes: Buffer } {

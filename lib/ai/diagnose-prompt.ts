@@ -48,7 +48,8 @@ function toAmount(value: unknown): number | null {
 /** Clamps the model's JSON into a Diagnosis. Returns null when there is no usable cause. */
 export function normalizeAiDiagnosis(raw: unknown): Diagnosis | null {
     const value = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>
-    const cause = typeof value.cause === "string" ? value.cause.trim().slice(0, 600) : ""
+    // trimEnd after slicing: the signed diagnosis must survive diagnosisSchema's trim unchanged on the way back.
+    const cause = typeof value.cause === "string" ? value.cause.trim().slice(0, 600).trimEnd() : ""
     if (!cause) return null
 
     const min = toAmount(value.priceMin)
@@ -61,7 +62,7 @@ export function normalizeAiDiagnosis(raw: unknown): Diagnosis | null {
     const beforeVisit = Array.isArray(value.beforeVisit)
         ? value.beforeVisit
             .filter((step): step is string => typeof step === "string" && step.trim().length > 0)
-            .map((step) => step.trim().slice(0, 200))
+            .map((step) => step.trim().slice(0, 200).trimEnd())
             .slice(0, 3)
         : []
 

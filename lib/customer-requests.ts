@@ -59,6 +59,8 @@ export const customerRequestSchema = z
         space: z.enum(REQUEST_SPACES),
         note: z.string().trim().max(500).optional(),
         diagnosis: diagnosisSchema,
+        // From /api/public/diagnose; ties the diagnosis to these photos so it cannot be made up.
+        diagnosisToken: z.string().max(200),
         photos: photosSchema,
         name: z.string().trim().min(1).max(120),
         email: z.union([z.literal(""), z.string().trim().max(254).pipe(z.email())]).optional(),

@@ -4,7 +4,7 @@ import { parsePotentialJsonContent } from "@/lib/ai/json"
 import { buildDiagnoseSystemPrompt, buildDiagnoseUserText, normalizeAiDiagnosis } from "@/lib/ai/diagnose-prompt"
 import { DIAGNOSIS_DISCLAIMER, diagnoseRequestSchema } from "@/lib/customer-requests"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
-import { loadPublicContractor } from "@/lib/server/customer-requests"
+import { loadPublicContractor, signDiagnosis } from "@/lib/server/customer-requests"
 import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 
 const HOUR_MS = 60 * 60 * 1000
@@ -82,9 +82,14 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "We could not read a repair problem in these photos. Try a closer, brighter photo." }, { status: 502 })
         }
 
+        const shown = contractor.hidePriceRange ? { ...diagnosis, priceRange: undefined } : diagnosis
+        const diagnosisToken = signDiagnosis({ slug, diagnosis: shown, photos })
+        if (!diagnosisToken) return NextResponse.json({ error: "Not configured" }, { status: 500 })
+
         return NextResponse.json({
             ok: true,
-            diagnosis: contractor.hidePriceRange ? { ...diagnosis, priceRange: undefined } : diagnosis,
+            diagnosis: shown,
+            diagnosisToken,
             priceRangeHidden: contractor.hidePriceRange,
             disclaimer: DIAGNOSIS_DISCLAIMER,
         })
