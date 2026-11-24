@@ -32,4 +32,17 @@ describe("Supabase schema contract", () => {
     assert.match(schema, /values \('completion-photos', 'completion-photos', false, 409600,/);
     assert.match(schema, /for insert to authenticated\s+with check \(bucket_id = 'completion-photos' and \(storage\.foldername\(name\)\)\[1\] = \(select auth\.uid\(\)\)::text\)/);
   });
+
+  test("fresh schema has server-only customer requests and the public request link", async () => {
+    const schema = await readFile(schemaUrl, "utf8");
+
+    assert.match(schema, /public_slug text unique check \(public_slug is null or public_slug ~ '\^\[a-z0-9\]\[a-z0-9-\]\{1,38\}\[a-z0-9\]\$'\)/);
+    assert.match(schema, /request_hide_price_range boolean not null default false/);
+    assert.match(schema, /create table customer_requests \(/);
+    assert.match(schema, /alter table customer_requests enable row level security;/);
+    assert.match(schema, /create policy "Owner reads own customer requests" on customer_requests for select using \(\(select auth\.uid\(\)\) = user_id\);/);
+    assert.match(schema, /revoke insert, update, delete, truncate on customer_requests from anon, authenticated;/);
+    assert.match(schema, /values \('request-photos', 'request-photos', false, 409600,/);
+    assert.doesNotMatch(schema, /on storage\.objects[^;]*request-photos/);
+  });
 });

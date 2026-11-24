@@ -53,6 +53,7 @@ import { isOpenCustomerChangeRequest, isSupersededCustomerChangeRequest } from "
 import { isEstimateReadyForFollowUp } from "@/lib/follow-up-service"
 import { isEstimatePaidLike } from "@/lib/estimate-payment-state"
 import { getCompletionAction } from "@/lib/job-completion"
+import { CustomerRequestsPanel } from "@/components/customer-request/customer-requests-panel"
 
 type TabType = 'drafts' | 'sent' | 'paid'
 type HistoryDeepLinkAction = "follow-up" | "sms"
@@ -1934,6 +1935,7 @@ function HistoryPageContent() {
                 className="order-1 space-y-5"
                 data-testid="history-estimate-lanes-section"
             >
+            <CustomerRequestsPanel />
             <Card className="field-card">
                 <CardContent className="space-y-3 p-3">
                     <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">

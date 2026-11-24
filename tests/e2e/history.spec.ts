@@ -1729,3 +1729,66 @@ test("history PDF download toast keeps long filenames readable above mobile navi
     expect(toastBox!.x + toastBox!.width).toBeLessThanOrEqual(viewportWidth - 12)
     expect(toastBox!.y + toastBox!.height).toBeLessThanOrEqual(navBox!.y - 8)
 })
+
+test("history shows a new customer request and turns it into a draft with photos", async ({ page, context }) => {
+    await seedAuthenticatedSupabaseSession(context)
+    await routeAuthenticatedHistoryShell(page)
+    const request = {
+        id: "11111111-1111-4111-8111-111111111111",
+        status: "new",
+        customerName: "Dana Lee",
+        customerPhone: "+14165550100",
+        areaLabel: "Leslieville",
+        diagnosis: {
+            cause: "Slow leak at the P-trap slip nut under the sink.",
+            urgency: "medium",
+            priceRange: { min: 150, max: 300, currency: "CAD" },
+            beforeVisit: ["Put a bucket under the trap"],
+            confidence: "medium",
+            space: "bathroom",
+        },
+        photoCount: 1,
+        createdAt: "2026-11-21T09:00:00.000Z",
+    }
+    // Cast, not annotation: TS would narrow it to null and miss the assignment inside the route callback.
+    let patchBody = null as Record<string, unknown> | null
+    await page.route("**/api/customer-requests", (route) => route.fulfill({ json: { requests: [request] } }))
+    await page.route(`**/api/customer-requests/${request.id}`, async (route) => {
+        if (route.request().method() === "PATCH") {
+            patchBody = route.request().postDataJSON()
+            await route.fulfill({ json: { ok: true } })
+            return
+        }
+        await route.fulfill({ json: { request: { ...request, photos: ["data:image/jpeg;base64,/9j/AAAA"] } } })
+    })
+    await openSeededDB(page, [])
+
+    await page.goto("/history")
+    const panel = page.getByTestId("customer-requests-panel")
+    await expect(panel).toBeVisible()
+    await expect(page.getByTestId("customer-requests-new-count")).toHaveText("1 new")
+    await expect(panel.getByTestId("customer-request-item")).toContainText("Dana Lee")
+    await expect(panel).toContainText("Slow leak at the P-trap")
+
+    await panel.getByTestId("customer-request-start").click()
+    await expect(page).toHaveURL(/\/new-estimate\?draftId=/)
+    await expect.poll(() => patchBody).toMatchObject({ status: "drafted" })
+
+    const draftId = new URL(page.url()).searchParams.get("draftId")
+    expect(patchBody?.estimateId).toBe(draftId)
+    const draft = await page.evaluate(async (id) => {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            const open = indexedDB.open("snapquote-db")
+            open.onerror = () => reject(open.error)
+            open.onsuccess = () => resolve(open.result)
+        })
+        return new Promise<Record<string, unknown> | undefined>((resolve, reject) => {
+            const get = db.transaction("estimates").objectStore("estimates").get(id || "")
+            get.onerror = () => reject(get.error)
+            get.onsuccess = () => resolve(get.result)
+        })
+    }, draftId)
+    expect(draft).toMatchObject({ status: "draft", clientName: "Dana Lee", clientPhone: "+14165550100", clientAddress: "Leslieville" })
+    expect((draft?.attachments as { photos: string[] }).photos).toEqual(["data:image/jpeg;base64,/9j/AAAA"])
+    expect(String(draft?.summary_note)).toContain("Slow leak at the P-trap")
+})
