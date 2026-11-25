@@ -6,6 +6,7 @@ import {
     FREE_PLAN_TRANSCRIBE_LIMIT,
 } from "@/lib/free-tier"
 import { resolveEffectivePlanTier } from "@/lib/server/effective-plan"
+import { createServiceSupabaseClient } from "@/lib/server/stripe-connect"
 
 export type UsageMetric = "generate" | "transcribe" | "send_email"
 type PlanTier = "free" | "starter" | "pro" | "team"
@@ -28,6 +29,7 @@ interface UsageCountersRow {
 }
 
 interface UsageContext {
+    /** Service-role client (bypasses RLS). Only for this module's own queries, always filtered by userId. */
     supabase: SupabaseClient
     userId: string
     planTier: PlanTier
@@ -261,15 +263,24 @@ async function resolveUsageContext(
     const userId = user.id
     const periodStart = getMonthPeriodStart()
 
-    try {
-        await ensureProfileRow(supabase, userId)
+    // The token only proves who the caller is. Counters are read and written with the service role, because
+    // browsers can no longer write usage_counters_monthly (otherwise anyone could reset their own free quota);
+    // every query below is pinned to this verified userId.
+    // Fail closed: a verified user must never fall back to "anonymous", which would skip their quota.
+    const serviceSupabase = createServiceSupabaseClient()
+    if (!serviceSupabase) {
+        return { context: null, status: 500, error: "Supabase service configuration is missing" }
+    }
 
-        const planTier = await loadPlanTier(supabase, userId)
-        const row = await getOrCreateUsageRow(supabase, userId, periodStart, planTier)
+    try {
+        await ensureProfileRow(serviceSupabase, userId)
+
+        const planTier = await loadPlanTier(serviceSupabase, userId)
+        const row = await getOrCreateUsageRow(serviceSupabase, userId, periodStart, planTier)
 
         return {
             context: {
-                supabase,
+                supabase: serviceSupabase,
                 userId,
                 planTier,
                 periodStart,
@@ -278,10 +289,8 @@ async function resolveUsageContext(
         }
     } catch (error) {
         console.error("Usage context resolution failed:", error)
-        if (options.requireAuth) {
-            return { context: null, status: 500, error: "Failed to resolve usage context" }
-        }
-        return { context: null, isAnonymous: true }
+        // Same rule as above: an unreadable counter must not turn a signed-in user into an unmetered one.
+        return { context: null, status: 500, error: "Failed to resolve usage context" }
     }
 }
 
@@ -380,6 +389,7 @@ export async function recordUsage(
         .from("usage_counters_monthly")
         .update(nextRowUpdate)
         .eq("id", current.id)
+        .eq("user_id", context.userId)
         .select("*")
         .single()
 
