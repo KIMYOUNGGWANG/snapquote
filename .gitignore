@@ -69,3 +69,6 @@ inkdesk/
 
 # Local quote benchmark outputs
 benchmark-results/
+
+# agent working files
+.superpowers/
