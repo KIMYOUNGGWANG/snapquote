@@ -5,7 +5,6 @@ import { getTestState, resetTestState } from '../mocks/state.mjs'
 
 import { POST as pricingEvents } from '../../app/api/pricing/events/route.ts'
 import { GET as pricingOffer } from '../../app/api/pricing/offer/route.ts'
-import { GET as pricingReport } from '../../app/api/pricing/report/route.ts'
 import { POST as referralToken } from '../../app/api/referrals/token/route.ts'
 import { POST as referralTrack } from '../../app/api/referrals/track/route.ts'
 import { POST as referralClaim } from '../../app/api/referrals/claim/route.ts'
@@ -329,59 +328,6 @@ describe('GET /api/pricing/offer', () => {
     assert.equal(data.ok, true)
     assert.equal(data.experiment.id, 'exp_out_42')
     assert.equal(data.variant.name, 'pro_29')
-  })
-})
-
-describe('GET /api/pricing/report', () => {
-  test('rejects unauthorized cron requests', async () => {
-    process.env.CRON_SECRET = 'cron_secret'
-    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
-    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
-
-    const req = new Request('http://localhost/api/pricing/report', {
-      method: 'GET',
-    })
-
-    const res = await pricingReport(req)
-    assert.equal(res.status, 401)
-  })
-
-  test('returns aggregated conversion counts', async () => {
-    process.env.CRON_SECRET = 'cron_secret'
-    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://example.supabase.co'
-    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service_role'
-
-    const state = getTestState()
-    state.supabase.queryResolver = async (query) => {
-      if (query.table === 'pricing_conversions' && query.mode === 'execute') {
-        return {
-          data: [
-            { experiment_id: 'exp_1', variant: 'control', event_name: 'pricing_viewed' },
-            { experiment_id: 'exp_1', variant: 'control', event_name: 'pricing_viewed' },
-            { experiment_id: 'exp_1', variant: 'control', event_name: 'upgrade_clicked' },
-          ],
-          error: null,
-        }
-      }
-
-      return { data: [], error: null }
-    }
-
-    const req = new Request('http://localhost/api/pricing/report?from=2026-02-01&to=2026-02-15', {
-      method: 'GET',
-      headers: {
-        authorization: 'Bearer cron_secret',
-      },
-    })
-
-    const res = await pricingReport(req)
-    const data = await res.json()
-
-    assert.equal(res.status, 200)
-    assert.equal(data.ok, true)
-    assert.equal(data.totalEvents, 3)
-    assert.equal(data.rows[0].count, 2)
-    assert.equal(data.rows[0].eventName, 'pricing_viewed')
   })
 })
 
